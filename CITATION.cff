@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both it and the paper below."
+title: "spiking-ven: a spiking sparse auditory encoder and vocal error network"
+abstract: >-
+  A spiking implementation of sparse auditory encoding and predictive cancellation
+  of self-generated song in the zebra finch, and the spiking counterpart to the
+  rate-based vocal error network of Duarte Ortiz et al. 2025.
+authors:
+  - family-names: Pearson
+    given-names: John
+type: software
+license: MIT
+version: 0.1.0
+repository-code: "https://github.com/pearsonlab/spiking-ven"
+references:
+  - type: article
+    title: "Correctness is its own reward: bootstrapping error signals in self-guided reinforcement learning"
+    authors:
+      - family-names: Gong
+        given-names: Ziyi
+      - family-names: Duarte
+        given-names: Fabiola
+      - family-names: Mooney
+        given-names: Richard
+      - family-names: Pearson
+        given-names: John
+    year: 2025
+    doi: "10.1101/2025.07.18.665446"

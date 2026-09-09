@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-core-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Lint
+        run: uv run --extra dev ruff check .
+      # The core must import with numpy + scipy only. No Brian2, no matplotlib.
+      - name: Core imports without optional extras
+        run: uv run --no-dev python -c "import spiking_ven; print(spiking_ven.__version__)"
+      - name: Unit tests (no downloaded data required)
+        run: uv run --extra dev pytest -m "not slow" -q
+
+  smoke-reproduction:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Prepare song corpus
+        run: uv run --all-extras sven-prep-data --data-dir data --out outputs/motifs.npz
+      - name: Smoke train encoder + VEN
+        run: make smoke

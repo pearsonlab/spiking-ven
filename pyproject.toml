@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spiking-ven"
+version = "0.1.0"
+description = "Spiking sparse auditory encoder and vocal error network for the zebra finch song system"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "John Pearson" }]
+keywords = ["neuroscience", "songbird", "sparse-coding", "spiking-neural-network", "zebra-finch"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+# Deliberately minimal: the model + training core needs numpy and scipy only.
+# The ERB/gammatone filterbank is vendored (see THIRD_PARTY_NOTICES.md) rather
+# than depended on, so there is no `gammatone` requirement.
+dependencies = [
+    "numpy>=2.2.6",
+    "scipy>=1.15",
+]
+
+[project.optional-dependencies]
+# Reading song WAVs during data preparation.
+data = ["soundfile>=0.13"]
+# Brian2 runtime glue: turns a trained numpy VEN into live NeuronGroups.
+brian2 = ["brian2>=2.8.0,<2.9"]
+# Figure generation.
+plots = ["matplotlib>=3.10"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/pearsonlab/spiking-ven"
+"Paper code" = "https://github.com/pearsonlab/vocal-error-network"
+
+[project.scripts]
+sven-prep-data = "spiking_ven.cli.prep_data:main"
+sven-train-encoder = "spiking_ven.cli.train_encoder:main"
+sven-train-ven = "spiking_ven.cli.train_ven:main"
+sven-evaluate = "spiking_ven.cli.evaluate:main"
+sven-figure = "spiking_ven.cli.figure:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spiking_ven"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: full reproduction runs (minutes); deselect with -m 'not slow'"]
+
+[tool.ruff]
+line-length = 100

@@ -1,18 +1,57 @@
 """Spiking sparse auditory encoder and vocal error network (VEN).
 
+Song audio is turned into a sparse spike code by a gammatone cochleagram feeding a
+sparse-coding encoder, and that spike code drives an excitatory/inhibitory network that
+learns to cancel the predictable auditory response to the bird's own song -- leaving an
+error signal on novel or perturbed sound.
+
+Pipeline
+--------
+``audio -> filterbank -> cochleagram -> OlshausenFieldEncoder -> spikes -> VocalErrorNetV2``
+
 The public surface is deliberately split so that the model and training core import with
 numpy and scipy alone:
 
-- pure numpy/scipy (always available): :mod:`~spiking_ven.filterbank`,
-  :mod:`~spiking_ven.cochleagram`, :mod:`~spiking_ven.olshausen_field`,
-  :mod:`~spiking_ven.smith_lewicki`, :mod:`~spiking_ven.common`,
-  :mod:`~spiking_ven.vocal_error_net`
-- Brian2 runtime glue (requires the ``brian2`` extra): :mod:`~spiking_ven.brian2_runtime`
+- pure numpy/scipy (always available): everything re-exported below
+- Brian2 runtime glue (requires the ``brian2`` extra): :mod:`spiking_ven.brian2_runtime`
 
-``brian2_runtime`` is intentionally NOT imported here, so ``import spiking_ven`` never pulls
-in Brian2. Import it explicitly when you need live NeuronGroups.
+``brian2_runtime`` is intentionally NOT imported here, so ``import spiking_ven`` never
+pulls in Brian2. Import it explicitly when you need live NeuronGroups.
 """
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+from .cochleagram import cochleagram, load_wav
+from .common import generate_hvc_spikes, spike_to_rate
+from .filterbank import centre_frequencies, gammatone_spectrogram
+from .olshausen_field import (
+    OlshausenFieldEncoder,
+    coch_encode,
+    coch_extract_patches,
+    of_encode,
+    of_to_spikes,
+)
+from .smith_lewicki import SmithLewickiDictionary, sl_gram, sl_gram_to_spikes
+from .vocal_error_net import VocalErrorNetV2
+
+__all__ = [
+    "__version__",
+    # stage 0: audio -> time-frequency
+    "centre_frequencies",
+    "gammatone_spectrogram",
+    "cochleagram",
+    "load_wav",
+    # stage 1: sparse encoders
+    "OlshausenFieldEncoder",
+    "coch_extract_patches",
+    "coch_encode",
+    "of_encode",
+    "of_to_spikes",
+    "SmithLewickiDictionary",
+    "sl_gram",
+    "sl_gram_to_spikes",
+    # stage 2: vocal error network
+    "VocalErrorNetV2",
+    "generate_hvc_spikes",
+    "spike_to_rate",
+]

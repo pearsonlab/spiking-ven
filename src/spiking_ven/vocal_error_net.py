@@ -53,7 +53,12 @@ def _sim_loop_v2(
     epsilon_hltd: float = 0.0,
     epsilon_col: float = 0.0,
     alpha_stdp: float = 0.0,
+    rng=None,
 ):
+    # Membrane noise must come from an explicit generator, not the global
+    # np.random, or runs are not reproducible even with a seed set.
+    if rng is None:
+        rng = np.random.default_rng()
     n_e = B.shape[0]
     n_i = JEI.shape[0]
     T   = h_aud.shape[1]
@@ -81,7 +86,7 @@ def _sim_loop_v2(
         audio_drive_e = B @ h_aud_t
         u_e = drive_e + audio_drive_e - JIE @ sI_prev
         if noise_e > 0.0:
-            u_e += np.random.normal(0.0, noise_e, n_e)
+            u_e += rng.normal(0.0, noise_e, n_e)
         V_e = decay_e * V_e + (1.0 - decay_e) * u_e
         sE  = (V_e > theta_e).astype(np.float64)
         V_e[sE > 0.5] = v_reset
@@ -90,7 +95,7 @@ def _sim_loop_v2(
         # --- I dynamics ---
         u_i = drive_i + JEI @ sE_prev + B_hvc @ h_hvc_t
         if noise_i > 0.0:
-            u_i += np.random.normal(0.0, noise_i, n_i)
+            u_i += rng.normal(0.0, noise_i, n_i)
         V_i = decay_i * V_i + (1.0 - decay_i) * u_i
         sI  = (V_i > theta_i).astype(np.float64)
         V_i[sI > 0.5] = v_reset
@@ -264,6 +269,10 @@ class VocalErrorNetV2:
     ) -> None:
         rng = default_rng(seed)
         self._rng          = rng
+        # Separate stream for simulation noise, so weight initialisation and the
+        # simulation cannot interleave and perturb each other.
+        self._sim_rng      = default_rng(None if seed is None else seed + 10_000)
+        self._sim_seed     = seed
         self.n_e           = n_e
         self.n_i           = n_i
         self.n_hvc         = n_hvc
@@ -437,10 +446,12 @@ class VocalErrorNetV2:
         )
 
     @classmethod
-    def load(cls, path: str) -> "VocalErrorNetV2":
+    def load(cls, path: str, seed: int | None = None) -> "VocalErrorNetV2":
         d = np.load(path)
         obj = cls.__new__(cls)
-        obj._rng = default_rng()
+        obj._rng = default_rng(seed)
+        obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
+        obj._sim_seed = seed
         for k in ("n_e", "n_i", "n_hvc", "n_aud"):
             setattr(obj, k, int(d[k]))
         scalar_keys = (
@@ -580,6 +591,7 @@ class VocalErrorNetV2:
             epsilon_hltd=epsilon_hltd,
             epsilon_col=epsilon_col,
             alpha_stdp=alpha_stdp,
+            rng=self._sim_rng,
         )
 
         if learn_weights:

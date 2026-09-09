@@ -4,6 +4,7 @@ Deliberately free of downloaded data and trained artifacts, so these run in CI o
 bare checkout. The reproduction assertions that need real song live in the slow suite.
 """
 
+import subprocess
 import sys
 
 import numpy as np
@@ -13,8 +14,15 @@ import spiking_ven as sv
 
 
 def test_core_import_does_not_pull_in_brian2():
-    """`import spiking_ven` must never drag in Brian2 (it is an optional extra)."""
-    assert "brian2" not in sys.modules
+    """`import spiking_ven` must never drag in Brian2 (it is an optional extra).
+
+    Checked in a subprocess on purpose: an in-process ``sys.modules`` assertion is
+    order-dependent, because any other test that imports Brian2 pollutes this one.
+    """
+    subprocess.run(
+        [sys.executable, "-c", "import sys, spiking_ven; assert 'brian2' not in sys.modules"],
+        check=True,
+    )
 
 
 def test_version_exposed():

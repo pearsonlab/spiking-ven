@@ -21,7 +21,7 @@ for a saved model without retraining.
 
 from __future__ import annotations
 
-__all__ = ["daf_metrics", "format_metrics", "BIOLOGICAL_TARGETS"]
+__all__ = ["daf_metrics", "format_metrics", "build_stimuli", "BIOLOGICAL_TARGETS", "DAF_WN_AMPLITUDE"]
 
 # Verbatim targets, kept next to the code that is judged against them.
 BIOLOGICAL_TARGETS = {
@@ -90,3 +90,132 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
         f"  reversed + HVC      : {m['k4_rate']:6.2f} Hz",
         f"  reversed/correct(K4): {m['k4']:6.2f}x     target > {t['k4_min']:.0f}x",
     ])
+
+# ---------------------------------------------------------------------------
+# Stimulus construction
+# ---------------------------------------------------------------------------
+# Defined once, here, and used by BOTH the trainer and the reproduction tests. If the
+# two ever built their stimuli separately they would drift, and the metrics would stop
+# describing the model that was trained.
+
+# HVC burst envelope: peak rate scales inversely with kernel width so integrated drive
+# per burst is constant.
+KERNEL_WIDTH = 10.0
+PEAK_RATE = 150.0 * 20.0 / KERNEL_WIDTH
+
+
+def build_stimuli(
+    encoder,
+    motifs_path,
+    *,
+    sr: int = 16000,
+    seed: int = 42,
+    t_post: int = 200,
+    t_burn: int = 500,
+    n_hvc: int = 60,
+    mean_rate_hz: float = 15.0,
+    n_ista: int = 50,
+    verbose: bool = True,
+) -> dict:
+    """Build every stimulus the trainer and the metrics need.
+
+    Returns a dict with the auditory spike arrays (``aud_correct``, ``aud_reversed``,
+    ``aud_daf``, plus the full ``correct_pool``), the HVC inputs (``hvc_on``,
+    ``hvc_off``, ``hvc_burn`` and its padded ``aud_burn``), and the bookkeeping the
+    caller needs (``T_song``, ``T_rend``, ``train_idx``, ``fwd_rev_corr``, ``n_kernels``).
+    """
+    import numpy as np
+
+    from .common import generate_hvc_spikes
+    from .olshausen_field import coch_encode, of_to_spikes
+
+    md = np.load(str(motifs_path))
+    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
+    n_motifs = audio_m.shape[0]
+    T_song = int(np.ceil(song_Ts.max()))
+    T_rend = T_song + t_post
+    n_kernels = encoder.n_bases
+
+    rms_all = np.array([float(np.sqrt(np.mean(audio_m[i, : lengths[i]] ** 2)))
+                        for i in range(n_motifs)])
+    train_idx = int(np.argmax(rms_all))          # highest-RMS rendition is the template
+    sig_train = audio_m[train_idx, : lengths[train_idx]].astype(np.float64)
+    rms_train = float(np.sqrt(np.mean(sig_train**2)))
+
+    def sig_to_aud(sig, seed_offset: int):
+        acts = coch_encode(sig.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
+                           upsample_to_ms=True, T_out_ms=T_rend)
+        spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
+                           seed=seed + seed_offset)
+        return spk.astype(np.float32)
+
+    if verbose:
+        print(f"T_song={T_song} ms  T_rend={T_rend} ms  train_motif={train_idx}  "
+              f"rms={rms_train:.4f}")
+        print(f"Building correct training pool ({n_motifs} motifs)...")
+
+    aud_correct = sig_to_aud(sig_train, 10)
+    correct_pool = [aud_correct]                 # index 0 is the template motif
+    for ci in range(n_motifs):
+        if ci == train_idx:
+            continue
+        correct_pool.append(sig_to_aud(audio_m[ci, : lengths[ci]].astype(np.float64),
+                                       100 + ci))
+
+    sig_rev = sig_train[::-1].astype(np.float64)
+    aud_reversed = sig_to_aud(sig_rev, 200)
+
+    # How separable forward and reversed song are in the encoder is the ceiling on K4.
+    acts_fwd = coch_encode(sig_train, encoder, sr=sr, n_ista=n_ista,
+                           upsample_to_ms=True, T_out_ms=T_rend)
+    acts_rev = coch_encode(sig_rev, encoder, sr=sr, n_ista=n_ista,
+                           upsample_to_ms=True, T_out_ms=T_rend)
+    fv, rv = acts_fwd.ravel(), acts_rev.ravel()
+    fwd_rev_corr = (float(np.corrcoef(fv, rv)[0, 1])
+                    if fv.std() > 0 and rv.std() > 0 else float("nan"))
+    del acts_fwd, acts_rev, fv, rv
+
+    # coch_encode RMS-normalises internally, so DAF amplitude is washed out; only the
+    # broadband spectrum distinguishes white noise from song here.
+    rng_daf = np.random.default_rng(seed + 1)
+    noise_daf = rng_daf.standard_normal(len(sig_train)) * rms_train * DAF_WN_AMPLITUDE
+    aud_daf = sig_to_aud(noise_daf, 20)
+
+    if verbose:
+        for label, arr in (("training motif", aud_correct), ("reversed motif", aud_reversed),
+                           (f"DAF WN ({DAF_WN_AMPLITUDE}x RMS)", aud_daf)):
+            print(f"  {label}: mean rate={arr.mean() * 1000:.1f} Hz  "
+                  f"active fraction={float((arr > 0).mean()) * 100:.1f}%")
+        print(f"  forward vs reversed activation correlation: {fwd_rev_corr:.4f}  "
+              f"(lower -> cleaner K4 ceiling)")
+        print("Building HVC inputs...")
+
+    T_total_burn = t_burn + T_rend
+    hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
+                                   T_song=T_song, T_burn=t_burn, T_post=t_post,
+                                   peak_rate=PEAK_RATE, kernel_width=KERNEL_WIDTH,
+                                   seed=seed)
+    aud_burn = np.zeros((n_kernels, T_total_burn), dtype=np.float32)
+    aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
+
+    hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
+                                 T_burn=0, T_post=t_post, peak_rate=PEAK_RATE,
+                                 kernel_width=KERNEL_WIDTH, seed=seed)
+    hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
+
+    return {
+        "aud_correct": aud_correct,
+        "aud_reversed": aud_reversed,
+        "aud_daf": aud_daf,
+        "correct_pool": correct_pool,
+        "hvc_on": hvc_on,
+        "hvc_off": hvc_off,
+        "hvc_burn": hvc_burn,
+        "aud_burn": aud_burn,
+        "T_song": T_song,
+        "T_rend": T_rend,
+        "train_idx": train_idx,
+        "fwd_rev_corr": fwd_rev_corr,
+        "n_kernels": n_kernels,
+        "n_motifs": n_motifs,
+    }

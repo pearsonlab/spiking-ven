@@ -21,19 +21,13 @@ import argparse
 
 import numpy as np
 
-from ..common import generate_hvc_spikes
-from ..evaluate import DAF_WN_AMPLITUDE, daf_metrics, format_metrics
-from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
+from ..evaluate import build_stimuli, daf_metrics, format_metrics
+from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
 
 # Renditions at which progress is logged.
 LOG_AT = {1, 5, 10, 20, 30, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600}
-
-# HVC burst envelope: peak rate scales inversely with kernel width so the integrated
-# drive per burst is constant.
-KERNEL_WIDTH = 10.0
-PEAK_RATE = 150.0 * 20.0 / KERNEL_WIDTH
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,80 +93,18 @@ def main(argv: list[str] | None = None) -> None:
     n_kernels = encoder.n_bases
     print(f"  n_bases={n_kernels}  coch_params={encoder.coch_params}")
 
-    md = np.load(motifs_path)
-    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
-    n_motifs = audio_m.shape[0]
-    T_song = int(np.ceil(song_Ts.max()))
-    T_rend = T_song + args.t_post
-
-    rms_all = np.array([float(np.sqrt(np.mean(audio_m[i, : lengths[i]] ** 2)))
-                        for i in range(n_motifs)])
-    train_idx = int(np.argmax(rms_all))          # highest-RMS rendition is the template
-    sig_train = audio_m[train_idx, : lengths[train_idx]].astype(np.float64)
-    rms_train = float(np.sqrt(np.mean(sig_train**2)))
-    print(f"T_song={T_song} ms  T_rend={T_rend} ms  train_motif={train_idx}  rms={rms_train:.4f}")
-
-    def sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
-        """Audio -> (n_kernels, T_rend) Poisson spikes at 1 ms resolution."""
-        acts = coch_encode(sig.astype(np.float64), encoder, sr=args.sr, n_ista=args.n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
-        spk = of_to_spikes(acts, mean_rate_hz=args.mean_rate_hz, frame_rate=1000,
-                           seed=args.seed + seed_offset)
-        return spk.astype(np.float32)
-
-    # --- stimuli ----------------------------------------------------------
-    print(f"Building correct training pool ({n_motifs} motifs)...")
-    aud_correct = sig_to_aud(sig_train, 10)
-    print(f"  training motif: mean rate={aud_correct.mean() * 1000:.1f} Hz  "
-          f"active fraction={float((aud_correct > 0).mean()) * 100:.1f}%")
-
-    correct_pool = [aud_correct]                 # index 0 is the template motif
-    for ci in range(n_motifs):
-        if ci == train_idx:
-            continue
-        correct_pool.append(
-            sig_to_aud(audio_m[ci, : lengths[ci]].astype(np.float64), 100 + ci))
-
-    sig_rev = sig_train[::-1].astype(np.float64)
-    aud_reversed = sig_to_aud(sig_rev, 200)
-    print(f"  reversed motif: mean rate={aud_reversed.mean() * 1000:.1f} Hz  "
-          f"active fraction={float((aud_reversed > 0).mean()) * 100:.1f}%")
-
-    # How separable forward and reversed song are in the encoder is the ceiling on K4.
-    acts_fwd = coch_encode(sig_train, encoder, sr=args.sr, n_ista=args.n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
-    acts_rev = coch_encode(sig_rev, encoder, sr=args.sr, n_ista=args.n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
-    fv, rv = acts_fwd.ravel(), acts_rev.ravel()
-    corr = (float(np.corrcoef(fv, rv)[0, 1])
-            if fv.std() > 0 and rv.std() > 0 else float("nan"))
-    print(f"  forward vs reversed activation correlation: {corr:.4f}  "
-          f"(lower -> cleaner K4 ceiling)")
-    del acts_fwd, acts_rev, fv, rv
-
-    # coch_encode RMS-normalises internally, so DAF amplitude is washed out; only the
-    # broadband spectrum distinguishes white noise from song here.
-    rng_daf = np.random.default_rng(args.seed + 1)
-    noise_daf = rng_daf.standard_normal(len(sig_train)) * rms_train * DAF_WN_AMPLITUDE
-    aud_daf = sig_to_aud(noise_daf, 20)
-    print(f"  DAF WN ({DAF_WN_AMPLITUDE}x RMS): mean rate={aud_daf.mean() * 1000:.1f} Hz  "
-          f"active fraction={float((aud_daf > 0).mean()) * 100:.1f}%")
-
-    # --- HVC input --------------------------------------------------------
-    print("Building HVC inputs...")
-    T_total_burn = args.t_burn + T_rend
-    hvc_burn = generate_hvc_spikes(n_hvc=args.n_hvc, T=T_total_burn, n_renditions=1,
-                                   T_song=T_song, T_burn=args.t_burn, T_post=args.t_post,
-                                   peak_rate=PEAK_RATE, kernel_width=KERNEL_WIDTH,
-                                   seed=args.seed)
-    aud_burn = np.zeros((n_kernels, T_total_burn), dtype=np.float32)
-    aud_burn[:, args.t_burn: args.t_burn + T_rend] = aud_correct
-
-    hvc_on = generate_hvc_spikes(n_hvc=args.n_hvc, T=T_rend, n_renditions=1,
-                                 T_song=T_song, T_burn=0, T_post=args.t_post,
-                                 peak_rate=PEAK_RATE, kernel_width=KERNEL_WIDTH,
-                                 seed=args.seed)
-    hvc_off = np.zeros((args.n_hvc, T_rend), dtype=np.float32)
+    # Stimuli are built by evaluate.build_stimuli, which the reproduction tests also
+    # call -- one definition, so training and the metrics cannot drift apart.
+    st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
+                       t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
+                       mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista)
+    T_song = st["T_song"]
+    aud_correct, aud_reversed, aud_daf = (st["aud_correct"], st["aud_reversed"],
+                                          st["aud_daf"])
+    correct_pool = st["correct_pool"]
+    hvc_on, hvc_off, hvc_burn, aud_burn = (st["hvc_on"], st["hvc_off"], st["hvc_burn"],
+                                           st["aud_burn"])
+    corr, train_idx, n_motifs = st["fwd_rev_corr"], st["train_idx"], st["n_motifs"]
 
     # --- network ----------------------------------------------------------
     ven = VocalErrorNetV2(

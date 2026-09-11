@@ -25,9 +25,11 @@ numpy and scipy alone. No PyTorch, numba, seaborn or scikit-learn.
 ## Reproduce the cancellation figure
 
 ```bash
-make figure     # data -> encoder -> VEN -> figure   (~10 min, CPU)
-make verify     # check artifact checksums against MANIFEST.sha256
-uv run pytest   # includes the regression assertions below
+make figure      # data -> encoder -> VEN -> figure   (~10 min, CPU)
+make verify      # check artifact checksums against MANIFEST.sha256
+make test        # fast unit tests (no artifacts needed)
+make test-repro  # the reproduction assertions below, against outputs/
+make rates       # the supplementary population-rate view
 ```
 
 `make figure` runs four stages, each cached and skipped if its output exists:
@@ -48,7 +50,7 @@ Five rows (waveform / spectrogram / auditory neurons / inhibitory interneurons /
 projection neurons) by four stimulus columns (training song / time-reversed motif /
 white noise / distorted auditory feedback).
 
-The result is in the excitatory row: **~6 Hz on the trained song versus ~18, ~21 and ~17 Hz**
+The result is in the excitatory row: **~7 Hz on the trained song versus ~18, ~21 and ~17 Hz**
 on the other three. The network has learned to cancel the response to the song it hears every
 rendition, while responses to novel or perturbed sound survive as an error signal.
 
@@ -59,10 +61,14 @@ Metric definitions follow Mandelblat-Cerf et al. 2014, Fig. 7/8.
 | Metric | Value | Biological target |
 |---|---|---|
 | encoder forward/reversed activation correlation | 0.0036 | near zero (direction selectivity is possible) |
-| K1 — correct song + HVC | 7.84 Hz | mean 7.7 Hz, SD 8.7 (Fig. 7C) |
-| K2 — white noise (DAF) + HVC | 22.25 Hz | pop. avg ~16 Hz; responders ~28 Hz |
-| K3 — K2/K1 | 2.84x | pop. avg ~2.1x; responders ~3.6x |
-| K4 — reversed motif / correct | 2.07x | > 1x |
+| K1 — correct song + HVC | 7.78 Hz | mean 7.7 Hz, SD 8.7 (Fig. 7C) |
+| K2 — white noise (DAF) + HVC | 22.19 Hz | pop. avg ~16 Hz; responders ~28 Hz |
+| K3 — K2/K1 | 2.85x | pop. avg ~2.1x; responders ~3.6x |
+| K4 — reversed motif / correct | 2.13x | > 1x |
+
+These come from the seeded 600-rendition reference run, and `make test-repro` asserts them
+against the shipped model. The network is fully seeded, so re-running the pipeline
+reproduces them rather than landing nearby.
 
 The model is a **responder-only** population (every excitatory unit receives identical
 auditory drive), so the responder-only targets are the relevant ones.

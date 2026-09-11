@@ -24,6 +24,7 @@ from scipy.signal import resample_poly
 from scipy.signal import spectrogram as sp_spectrogram
 from scipy.spatial.distance import cdist
 
+from ..corpus import highest_rms_index
 from ..paths import ensure_parent
 
 MOTIF_PATTERN = "abcded"
@@ -167,10 +168,12 @@ def main(argv: list[str] | None = None) -> None:
     import soundfile as sf
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wav_dir", default="data/song_wavs")
+    # Dashed spellings match every other CLI in the package; the underscore forms are
+    # kept as aliases so existing invocations keep working.
+    parser.add_argument("--wav-dir", "--wav_dir", dest="wav_dir", default="data/song_wavs")
     parser.add_argument("--out", default="outputs/motifs.npz")
     parser.add_argument("--sr", type=int, default=TARGET_SR, help="target sample rate")
-    parser.add_argument("--hop_ms", type=float, default=HOP_MS,
+    parser.add_argument("--hop-ms", "--hop_ms", dest="hop_ms", type=float, default=HOP_MS,
                         help="DTW feature frame hop (ms)")
     args = parser.parse_args(argv)
     # The original script did os.makedirs("outputs") at import time, which silently
@@ -198,7 +201,12 @@ def main(argv: list[str] | None = None) -> None:
         sr_wav  = int(mat["Fs"].ravel()[0])        # 44100
 
         audio_wav, sr_check = sf.read(wav_path)
-        assert sr_check == sr_wav, f"SR mismatch in {wav_path}"
+        if sr_check != sr_wav:
+            raise ValueError(
+                f"sample-rate mismatch in {wav_path}: the WAV is {sr_check} Hz but its "
+                f".not.mat annotation declares Fs={sr_wav} Hz, so the onsets would be "
+                "misplaced. (A bare assert here would vanish under python -O.)"
+            )
         if audio_wav.ndim > 1:
             audio_wav = audio_wav[:, 0]            # mono
         audio_wav = audio_wav.astype(np.float64)
@@ -248,8 +256,10 @@ def main(argv: list[str] | None = None) -> None:
     # Step 2: choose template (highest RMS)
     # ---------------------------------------------------------------------------
 
+    # Same rule as corpus.Corpus.template_index, from the same function: the template
+    # decides what trains, what is scored and what the figure draws.
     rms_all   = np.array([float(np.sqrt(np.mean(m["audio"] ** 2))) for m in raw_motifs])
-    train_idx = int(np.argmax(rms_all))
+    train_idx = highest_rms_index([m["audio"] for m in raw_motifs])
     tpl_audio = raw_motifs[train_idx]["audio"]
     tpl_n     = len(tpl_audio)
     tpl_ms    = tpl_n / args.sr * 1000

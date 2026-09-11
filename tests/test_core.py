@@ -53,11 +53,28 @@ def test_encoder_save_load_roundtrip(tmp_path):
     rng = np.random.default_rng(1)
     patches = rng.standard_normal((256, 40 * 4)).astype(np.float64)
     enc = sv.OlshausenFieldEncoder(n_bases=8, patch_len=patches.shape[1], seed=42)
-    enc.fit(patches, n_epochs=2)
+    # patches= by keyword: passed positionally it binds to audio_list instead, and the
+    # cochleagram-patch path this is meant to cover would not be exercised at all.
+    enc.fit(patches=patches, n_epochs=2)
     path = tmp_path / "enc.npz"
     enc.save(str(path))
     enc2 = sv.OlshausenFieldEncoder.load(str(path))
     np.testing.assert_array_equal(enc.A, enc2.A)
+
+
+def test_fit_rejects_a_patch_matrix_passed_positionally():
+    """fit(X) used to run the audio path on patch rows and appear to work."""
+    enc = sv.OlshausenFieldEncoder(n_bases=4, patch_len=32, seed=0)
+    patches = np.zeros((16, 32), dtype=np.float64)
+    with pytest.raises(ValueError, match="patches="):
+        enc.fit(patches, n_epochs=1)
+
+
+def test_hvc_spikes_reject_a_too_short_window():
+    """Bursts past the end of T were silently dropped, leaving the drive to stop."""
+    with pytest.raises(ValueError, match="too short"):
+        sv.generate_hvc_spikes(n_hvc=4, T=100, n_renditions=2, T_song=300,
+                               T_burn=50, T_post=50)
 
 
 def test_hvc_spikes_are_binary_and_seed_deterministic():
@@ -99,9 +116,35 @@ def test_every_subpackage_is_importable():
         "spiking_ven.cli.prep_data",
         "spiking_ven.cli.train_encoder",
         "spiking_ven.cli.train_ven",
+        "spiking_ven.cli.evaluate",
         "spiking_ven.cli.figure",
     ):
         importlib.import_module(name)
+
+
+def test_figures_subpackage_is_importable():
+    """Same guard for `figures/`, which needs the `plots` extra so it cannot go above."""
+    pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
+    import importlib
+
+    for name in (
+        "spiking_ven.figures",
+        "spiking_ven.figures.encoding_comparison",
+        "spiking_ven.figures.encoding_rates",
+    ):
+        importlib.import_module(name)
+
+
+def test_importing_the_figures_does_not_create_directories(tmp_path):
+    """Both figure modules ran os.makedirs("outputs") at import, in the process CWD."""
+    pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import os, spiking_ven.figures.encoding_comparison, "
+         "spiking_ven.figures.encoding_rates; print(os.path.exists('outputs'))"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    assert out.stdout.strip() == "False", "importing a figure module created outputs/"
 
 
 def test_console_script_entry_points_resolve():

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
+from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
 from ..corpus import load_corpus
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
@@ -41,8 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=200)
-    p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS)
-    p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS)
+    # No delay flags: the conduction delays are baked into the trained model and are
+    # applied by its own inference pass. This entry point used to accept
+    # --aud-delay-ms/--hvc-delay-ms and pass them to a function that ignored them.
     return p
 
 
@@ -68,25 +69,29 @@ def main(argv: list[str] | None = None) -> None:
     T_song = corpus.T_song
     print(f"T_song={T_song} ms  T_rend={T_song + args.t_post} ms  "
           f"train_motif={train_idx}  rms={float(np.sqrt(np.mean(sig_train**2))):.4f}")
+    print(f"  model delays: aud={ven.aud_delay_ms} ms  hvc={ven.hvc_delay_ms} ms")
 
-    # Tag the output after the model, so figures and models stay paired.
-    tag = re.sub(r".*(?:ven_model|of_ven_model)(.*?)\.npz$", r"\1", model_path) or ""
+    # Tag the output after the model, so figures and models stay paired. re.sub returns
+    # its input unchanged when nothing matches, which turned any other model filename
+    # into a tag containing the whole path -- and a figure path with a directory in the
+    # middle of the basename. Match explicitly and fall back to the stem.
+    _m = re.search(r"(?:of_)?ven_model(.*?)\.npz$", model_path)
+    tag = _m.group(1) if _m else f"_{Path(model_path).stem}"
 
     common = {
         "out_dir": out_dir,
         "T_post": args.t_post,
         "sr": args.sr,
         "seed": args.seed,
-        "n_kernels": enc.n_channels,
         "kernel_width": KERNEL_WIDTH_MS,
         "peak_rate": PEAK_RATE_HZ,
     }
     if args.view == "raster":
         from ..figures.encoding_comparison import make_figure
 
+        # n_kernels sizes the raster's auditory row; the rate view has no raster.
         make_figure(ven, enc, sig_train, T_song, tag,
-                    aud_delay_ms=args.aud_delay_ms,
-                    hvc_delay_ms=args.hvc_delay_ms, **common)
+                    n_kernels=enc.n_channels, **common)
     else:
         from ..figures.encoding_rates import make_rate_figure
 

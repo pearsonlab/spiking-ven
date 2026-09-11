@@ -31,6 +31,12 @@ KERNEL_WIDTH_MS = 10.0
 PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
 
 #: DAF white noise is mixed at this multiple of song RMS: ~95 dBSPL WN vs ~80 dBSPL song.
+#:
+#: This scales the *figure's* DAF column, where the noise is added into a window of the
+#: song and the relative level therefore matters. It does NOT affect the K2/K3 metrics:
+#: ``evaluate.build_stimuli`` sends its white noise through the same RMS-normalising
+#: encoder path as every other stimulus, so the amplitude divides straight back out.
+#: See the note in :mod:`spiking_ven.evaluate`.
 DAF_WN_AMPLITUDE = 5.6
 
 #: Window within the motif that the figure's DAF column perturbs (seconds).

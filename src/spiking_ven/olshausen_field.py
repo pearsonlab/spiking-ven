@@ -259,6 +259,15 @@ class OlshausenFieldEncoder:
         if patches is None:
             if audio_list is None:
                 raise ValueError("Provide audio_list or patches=")
+            if isinstance(audio_list, np.ndarray) and audio_list.ndim == 2:
+                # The first positional parameter is audio_list, so fit(X) with a patch
+                # matrix silently went down the audio path and treated each row as a
+                # waveform. It even "worked", which is what made it hard to notice.
+                raise ValueError(
+                    "fit() got a 2-D array as its first positional argument, which binds "
+                    "to audio_list (a list of 1-D waveforms). To train on a patch matrix "
+                    "from coch_extract_patches, pass it by keyword: fit(patches=X)."
+                )
             patches = self._extract_audio_patches(audio_list, rms_ref, train_stride_ms)
 
         N = len(patches)

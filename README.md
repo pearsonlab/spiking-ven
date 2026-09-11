@@ -41,6 +41,9 @@ make rates       # the supplementary population-rate view
 | 3. Train the VEN | `sven-train-ven` | `outputs/of_ven_model_k4max.npz` (600 renditions) |
 | 4. Figure | `sven-figure` | `outputs/encoding_comparison_k4max.pdf` |
 
+`sven-evaluate` recomputes the metrics below for an existing model without retraining
+(`--json` for machine-readable output) -- useful for checking a model you were handed.
+
 Raw song data is downloaded, never vendored: "Labeled Zebra Finch Songs" (Koch, Therese),
 adult zebra finch R469, [DOI 10.18738/T8/SAWMUN](https://doi.org/10.18738/T8/SAWMUN).
 The dataset is released under **CC0 1.0** (public domain dedication, no stated terms of
@@ -60,7 +63,7 @@ Five rows (waveform / spectrogram / auditory neurons / inhibitory interneurons /
 projection neurons) by four stimulus columns (training song / time-reversed motif /
 white noise / distorted auditory feedback).
 
-The result is in the excitatory row: **~7 Hz on the trained song versus ~18, ~21 and ~17 Hz**
+The result is in the excitatory row: **~7 Hz on the trained song versus ~18, ~21 and ~19 Hz**
 on the other three. The network has learned to cancel the response to the song it hears every
 rendition, while responses to novel or perturbed sound survive as an error signal.
 
@@ -82,6 +85,15 @@ reproduces them rather than landing nearby.
 
 The model is a **responder-only** population (every excitatory unit receives identical
 auditory drive), so the responder-only targets are the relevant ones.
+
+**What K2/K3 compare.** Every stimulus goes through the same encoder path, which
+normalises twice: to the encoder's reference RMS, and then to a target spike rate. The
+white-noise input therefore carries the *same* mean drive as the song input by
+construction, and the DAF amplitude cancels out. K2 and K3 measure the response to a
+spectrotemporal mismatch at equal input rate -- a stronger test than a loudness
+difference, since the extra response cannot come from extra drive, but not the amplitude
+manipulation the "DAF" name implies. The figure's DAF column is a genuine amplitude
+manipulation: there the noise is mixed into a window of the song.
 
 ## Citing
 

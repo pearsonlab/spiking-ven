@@ -20,6 +20,7 @@ import argparse
 import numpy as np
 
 from ..cochleagram import cochleagram
+from ..corpus import load_corpus
 from ..olshausen_field import OlshausenFieldEncoder, coch_extract_patches, of_to_spikes
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz
 
@@ -67,16 +68,14 @@ def main(argv: list[str] | None = None) -> None:
     }
 
     print("Loading motifs...")
-    md = np.load(motifs_path)
-    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
-    n_motifs = audio_m.shape[0]
-    T_song = int(np.ceil(song_Ts.max()))
-    print(f"  {n_motifs} motifs  T_song={T_song} ms")
+    # Via load_corpus, not a hand-rolled np.load: trimming to each rendition's valid
+    # length and rounding T_song are corpus.py's job, in one place.
+    corpus = load_corpus(motifs_path)
+    print(f"  {corpus.n_motifs} motifs  T_song={corpus.T_song} ms")
 
     print("\nComputing cochleagrams...")
     all_cochs = []
-    for mi in range(n_motifs):
-        sig = audio_m[mi, : lengths[mi]].astype(np.float64)
+    for sig in corpus.signals():
         sig = sig / max(float(np.sqrt(np.mean(sig**2))), 1e-12) * args.rms_ref
         all_cochs.append(cochleagram(sig, args.sr, n_channels=args.n_coch_ch,
                                      frame_rate=args.frame_rate,
@@ -122,14 +121,10 @@ def main(argv: list[str] | None = None) -> None:
     bias = encoder._bias
     print(f"  bias [{bias.min():.4f}, {bias.max():.4f}]  std={bias.std():.4f}")
 
-    # Sparsity/rate diagnostic on the first motif, at cochleagram resolution.
-    sig0 = audio_m[0, : lengths[0]].astype(np.float64)
-    sig0 = sig0 / max(float(np.sqrt(np.mean(sig0**2))), 1e-12) * args.rms_ref
+    # Sparsity/rate diagnostic on the first motif, at cochleagram resolution. Reuses the
+    # cochleagram computed above rather than recomputing an identical one.
     act0 = encoder.encode_patches(
-        coch_extract_patches(
-            cochleagram(sig0, args.sr, n_channels=args.n_coch_ch,
-                        frame_rate=args.frame_rate, lo_hz=args.lo_hz, hi_hz=args.hi_hz),
-            args.k_frames, stride=1, mean_subtract=True),
+        coch_extract_patches(all_cochs[0], args.k_frames, stride=1, mean_subtract=True),
         n_ista=args.n_ista_encode)
     spk = of_to_spikes(act0, mean_rate_hz=args.mean_rate_hz,
                        frame_rate=args.frame_rate, seed=args.seed + 200)

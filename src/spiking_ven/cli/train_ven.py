@@ -21,6 +21,7 @@ import argparse
 
 import numpy as np
 
+from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, SR
 from ..evaluate import build_stimuli, daf_metrics, format_metrics
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz, ven_model_npz
@@ -38,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, help="output model .npz")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--sr", type=int, default=16000)
+    p.add_argument("--sr", type=int, default=SR)
     # tuned operating point
     p.add_argument("--drive-e", type=float, default=0.06)
     p.add_argument("--drive-i", type=float, default=0.058)
@@ -55,7 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--b-hvc-scale", type=float, default=0.333)
     p.add_argument("--c-jie", type=float, default=0.1)
     p.add_argument("--r-i-th", type=float, default=6.0)
-    p.add_argument("--r-e-th", type=float, default=0.0)
     p.add_argument("--j-max-ie", type=float, default=1.0)
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
@@ -67,8 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--r-e-target", type=float, default=16.0)
     p.add_argument("--t-post", type=int, default=200)
     p.add_argument("--t-burn", type=int, default=500)
-    p.add_argument("--aud-delay-ms", type=int, default=23, help="cochlea->AIV-E (measured)")
-    p.add_argument("--hvc-delay-ms", type=int, default=5, help="HVC->AIV-I (estimated)")
+    p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS,
+                   help="cochlea->AIV-E (measured)")
+    p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
+                   help="HVC->AIV-I (estimated)")
     # encoding
     p.add_argument("--mean-rate-hz", type=float, default=15.0)
     p.add_argument("--n-ista", type=int, default=50)
@@ -111,9 +113,9 @@ def main(argv: list[str] | None = None) -> None:
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, c_JIE=args.c_jie, tau_s=args.tau_s,
-        r_e_th=args.r_e_th, r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
+        r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i, alpha_theta=args.alpha_theta,
-        r_e_target=args.r_e_target, r_e_song_target=0.0, alpha_bcm=0.0,
+        r_e_target=args.r_e_target, r_e_song_target=0.0,
         A_jei_plastic=0.0, use_mask=False,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
@@ -157,6 +159,13 @@ def main(argv: list[str] | None = None) -> None:
         jie_trace.append(float(ven.JIE.mean()))
         theta_trace.append(float(ven.theta_e.mean()))
 
+    # Interleaved "novel" passes. At the shipped operating point (--alpha-theta 0, and
+    # A_jei_plastic fixed at 0) adapt() has no homeostasis to run and updates nothing --
+    # but it still simulates, and so still advances the network's noise stream. The
+    # published K-numbers were produced with these passes in place, so they are kept
+    # rather than skipped as dead work; --novel-ratio 0 drops them and will land on
+    # slightly different numbers. Turning homeostasis on makes them load-bearing again.
+    #
     # Rendition 1 carries the burn-in.
     ven.fit(hvc_burn, aud_burn, n_renditions=1, T_song=T_song,
             T_burn=args.t_burn, T_post=args.t_post, verbose=False)

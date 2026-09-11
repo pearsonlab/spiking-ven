@@ -96,7 +96,7 @@ def test_cancellation_is_selective(metrics):
 
 
 def test_figure_excitatory_row_shows_cancellation():
-    """E-population rates per figure column: ~6 / 18 / 21 / 17 Hz."""
+    """E-population rates per figure column: ~8 / 17 / 22 / 17 Hz."""
     pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
     from spiking_ven.figures.encoding_comparison import compute_encoding_columns
 

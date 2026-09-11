@@ -19,7 +19,7 @@ numpy and scipy alone:
 pulls in Brian2. Import it explicitly when you need live NeuronGroups.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .cochleagram import cochleagram, load_wav
 from .common import generate_hvc_spikes, spike_to_rate

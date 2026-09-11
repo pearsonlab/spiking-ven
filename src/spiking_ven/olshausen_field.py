@@ -220,11 +220,10 @@ class OlshausenFieldEncoder:
     def n_channels(self) -> int:
         """Number of output channels, i.e. basis functions.
 
-        Shared name with :class:`~spiking_ven.smith_lewicki.SmithLewickiDictionary`
-        (which counts kernels) so callers can size arrays without caring which encoder
-        they were handed. Previously that was done with a hasattr check and a hardcoded
-        fallback of 64, which would have silently mis-sized arrays for any dictionary
-        that was not 64 wide.
+        A stable name for the encoder's output width, independent of the internal
+        ``n_bases`` attribute, so callers can size arrays without reaching into the
+        implementation. Callers previously used a hasattr check with a hardcoded
+        fallback of 64, which would have mis-sized arrays for any other width.
         """
         return int(self.n_bases)
 
@@ -461,6 +460,7 @@ def of_to_spikes(
     seed: int | None = None,
     per_neuron: bool = False,
     sign_split: bool = False,
+    calibrate_on: np.ndarray | None = None,
 ) -> np.ndarray:
     """Convert O&F activations to Poisson spike trains.
 
@@ -476,6 +476,13 @@ def of_to_spikes(
                    rows encode positive loadings and the last n_bases rows
                    encode negative loadings (each independently calibrated
                    when per_neuron=True)
+    calibrate_on : activations to derive the rate scale from, instead of
+                   ``activations`` itself. Use this when ``activations`` is a
+                   sparse timeline -- e.g. one song tiled into motif windows with
+                   silence between them. Calibrating on the whole timeline would
+                   divide by a mean diluted by the silence and inflate the rate
+                   during song; pass the song-window activations here so the
+                   target rate means what it says.
     Returns
     -------
     spikes : (n_bases, T) or (2*n_bases, T) float32 spike counts per bin.
@@ -483,18 +490,21 @@ def of_to_spikes(
     if rng is None:
         rng = np.random.default_rng(seed)
 
-    acts = activations.astype(np.float64)
-    if sign_split:
-        act = np.concatenate([np.maximum(acts, 0.0), np.maximum(-acts, 0.0)], axis=0)
-    else:
-        act = np.maximum(acts, 0.0)
+    def _rectify(a: np.ndarray) -> np.ndarray:
+        a = a.astype(np.float64)
+        if sign_split:
+            return np.concatenate([np.maximum(a, 0.0), np.maximum(-a, 0.0)], axis=0)
+        return np.maximum(a, 0.0)
+
+    act = _rectify(activations)
+    ref = act if calibrate_on is None else _rectify(calibrate_on)
 
     dt_s = 1.0 / frame_rate
     if per_neuron:
-        act_mean = act.mean(axis=1, keepdims=True)          # (n_neurons, 1)
-        rate_scale = mean_rate_hz / np.maximum(act_mean, 1e-12)
+        ref_mean = ref.mean(axis=1, keepdims=True)          # (n_neurons, 1)
+        rate_scale = mean_rate_hz / np.maximum(ref_mean, 1e-12)
     else:
-        rate_scale = mean_rate_hz / max(float(act.mean()), 1e-12)
+        rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
 
     lam = act * rate_scale * dt_s
     return rng.poisson(lam).astype(np.float32)

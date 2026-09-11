@@ -8,8 +8,8 @@ Produces ``R469_concat.npy`` (concatenated motif audio at the native sample rate
 ``R469_ann.npz`` (per-motif durations and syllable onsets/offsets). Note the spiking
 pipeline's ``motifs.npz`` does **not** come from these files -- :mod:`spiking_ven.data.motifs`
 works straight from the WAV + ``.not.mat`` pairs and does its own resampling and DTW
-alignment. These outputs exist for the Smith-Lewicki filterbank corpus and for parity
-with the paper's preprocessing.
+alignment. These outputs exist for parity with the paper's preprocessing; nothing in this
+package reads them, so building them is opt-in via ``--with-concat``.
 """
 
 from __future__ import annotations

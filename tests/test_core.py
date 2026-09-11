@@ -90,7 +90,6 @@ def test_every_subpackage_is_importable():
         "spiking_ven.manifest",
         "spiking_ven.olshausen_field",
         "spiking_ven.paths",
-        "spiking_ven.smith_lewicki",
         "spiking_ven.vocal_error_net",
         "spiking_ven.data",
         "spiking_ven.data.download",

@@ -19,7 +19,7 @@ numpy and scipy alone:
 pulls in Brian2. Import it explicitly when you need live NeuronGroups.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from .cochleagram import cochleagram, load_wav
 from .common import generate_hvc_spikes, spike_to_rate
@@ -30,7 +30,6 @@ from .olshausen_field import (
     coch_extract_patches,
     of_to_spikes,
 )
-from .smith_lewicki import SmithLewickiDictionary, sl_gram, sl_gram_to_spikes
 from .vocal_error_net import VocalErrorNetV2
 
 __all__ = [
@@ -40,14 +39,11 @@ __all__ = [
     "gammatone_spectrogram",
     "cochleagram",
     "load_wav",
-    # stage 1: sparse encoders
+    # stage 1: sparse encoder
     "OlshausenFieldEncoder",
     "coch_extract_patches",
     "coch_encode",
     "of_to_spikes",
-    "SmithLewickiDictionary",
-    "sl_gram",
-    "sl_gram_to_spikes",
     # stage 2: vocal error network
     "VocalErrorNetV2",
     "generate_hvc_spikes",

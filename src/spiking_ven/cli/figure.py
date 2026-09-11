@@ -11,10 +11,6 @@ rendition, while responses to novel or perturbed sound survive as an error signa
 ``--view rates`` renders the supplementary population-rate view instead (3 columns,
 Auditory over Error, both on fixed 0-90 Hz axes). It does not supersede the raster figure.
 
-The stage-1 encoder is the Olshausen-Field sparse coder. The Smith-Lewicki alternative was
-removed from this entry point because nothing in this package produces its dictionary
-cache -- that training code stayed in finchsim.
-
 Requires the ``plots`` extra (matplotlib).
 """
 

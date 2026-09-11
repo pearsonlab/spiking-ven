@@ -102,9 +102,7 @@ def compute_encoding_columns(
     """
     if not isinstance(encoder, OlshausenFieldEncoder):
         raise TypeError(
-            "this figure requires an OlshausenFieldEncoder. The Smith-Lewicki encoder "
-            "path was removed because nothing in this package produces its dictionary "
-            "cache -- that training code lives in finchsim."
+            f"this figure requires an OlshausenFieldEncoder, got {type(encoder).__name__}"
         )
     T_rend    = T_song + T_post
     rms_train = float(np.sqrt(np.mean(sig_train ** 2)))

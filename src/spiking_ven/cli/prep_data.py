@@ -3,7 +3,7 @@
 Three stages, each skipped if its output already exists:
 
 1. download the R469 WAV + ``.not.mat`` pairs (Koch 2024)
-2. optionally build ``R469_concat.npy`` / ``R469_ann.npz`` (Smith-Lewicki corpus)
+2. optionally build ``R469_concat.npy`` / ``R469_ann.npz`` (concatenated corpus)
 3. resample + DTW-align into ``outputs/motifs.npz``
 
 If the download is blocked (a TLS-inspecting proxy, or no network), place the WAV +
@@ -29,7 +29,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--skip-download", action="store_true",
                         help="assume <data-dir>/song_wavs is already populated")
     parser.add_argument("--with-concat", action="store_true",
-                        help="also build R469_concat.npy / R469_ann.npz")
+                        help="also build R469_concat.npy / R469_ann.npz "
+                             "(concatenated corpus; nothing in this package reads it)")
     parser.add_argument("--with-duke-features", action="store_true",
                         help="also fetch the optional Duke feature archive (rate-model only)")
     args = parser.parse_args(argv)
@@ -65,7 +66,7 @@ def main(argv: list[str] | None = None) -> None:
             "--ann-out", str(ddir / "R469_ann.npz"),
         ])
     else:
-        print("  skipped (pass --with-concat if you need the Lewicki training corpus)")
+        print("  skipped (pass --with-concat for the concatenated corpus)")
 
     # --- 3. aligned motifs -------------------------------------------------
     print("\nStep 3/3 - resample + DTW align")

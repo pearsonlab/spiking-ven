@@ -64,11 +64,13 @@ def test_peak_rate_is_derived_not_hardcoded():
         150.0 * 20.0 / constants.KERNEL_WIDTH_MS)
 
 
-def test_encoder_classes_share_a_size_property():
-    """Both encoders expose n_channels, so callers need no hasattr fallback."""
-    from spiking_ven import OlshausenFieldEncoder, SmithLewickiDictionary
+@pytest.mark.parametrize("n", [5, 7, 64])
+def test_encoder_exposes_its_width(n):
+    """n_channels is a stable name for the output width, whatever it is.
 
-    of = OlshausenFieldEncoder(n_bases=7, patch_len=40, seed=0)
-    assert of.n_channels == 7
-    sl = SmithLewickiDictionary(n_kernels=5, kernel_ms=10.0)
-    assert sl.n_channels == 5
+    Parametrised away from 64 on purpose: callers once used a hardcoded fallback of 64,
+    which would have mis-sized arrays for any other width.
+    """
+    from spiking_ven import OlshausenFieldEncoder
+
+    assert OlshausenFieldEncoder(n_bases=n, patch_len=40, seed=0).n_channels == n

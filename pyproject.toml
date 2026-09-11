@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spiking-ven"
-version = "0.1.1"
+version = "0.2.0"
 description = "Spiking sparse auditory encoder and vocal error network for the zebra finch song system"
 readme = "README.md"
 license = { file = "LICENSE" }

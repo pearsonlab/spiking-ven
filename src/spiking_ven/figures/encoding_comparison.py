@@ -49,8 +49,6 @@ from ..constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RA
 from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
 from ..common import generate_hvc_spikes
 
-os.makedirs("outputs", exist_ok=True)
-
 __all__ = ["make_figure", "compute_encoding_columns", "specgram"]
 
 # Column labels shared by every view of this comparison.
@@ -79,7 +77,6 @@ def compute_encoding_columns(
     T_post: int = 200,
     sr: int = 16000,
     seed: int = 42,
-    n_kernels: int = 64,
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
@@ -109,12 +106,21 @@ def compute_encoding_columns(
 
     # ── Build the four stimuli ────────────────────────────────────────────────
     sig_rev    = sig_train[::-1].copy().astype(np.float64)
+    # Separate streams: the white-noise column and the noise added to the DAF column are
+    # different stimuli and must be independent draws. Seeding both at seed+1 made them
+    # the same realisation, so columns 3 and 4 shared their noise.
     rng_novel  = np.random.default_rng(seed + 1)
     sig_novel  = rng_novel.standard_normal(len(sig_train)) * rms_train
-    _rng_daf   = np.random.default_rng(seed + 1)
+    _rng_daf   = np.random.default_rng(seed + 2)
     daf_noise  = _rng_daf.standard_normal(len(sig_train)) * rms_train * daf_wn_amplitude
     sig_daf    = sig_train.copy()
     _s0, _s1   = int(DAF_WINDOW_S[0] * sr), int(DAF_WINDOW_S[1] * sr)
+    if _s0 >= len(sig_train):
+        raise ValueError(
+            f"the DAF window {DAF_WINDOW_S} s starts past the end of a "
+            f"{len(sig_train) / sr:.3f} s motif, so the DAF column would be identical to "
+            "the training column. Adjust constants.DAF_WINDOW_S for this corpus."
+        )
     sig_daf[_s0:_s1] += daf_noise[_s0:_s1]
 
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
@@ -177,8 +183,6 @@ def make_figure(
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
-    aud_delay_ms: int = 23,
-    hvc_delay_ms: int = 5,
     sub_l: int = 64,
     sub_i: int = 64,
     sub_e: int = 64,
@@ -194,10 +198,16 @@ def make_figure(
     sig_train   : (N,) float64 training audio signal
     T_song      : int, song duration in ms
     out_tag     : str appended to output filenames, e.g. "_r0050"
+
+    The conduction delays are not arguments: they are properties of the trained model
+    (``ven.aud_delay_ms`` / ``ven.hvc_delay_ms``) and are applied inside its own
+    inference pass. This function used to accept ``aud_delay_ms``/``hvc_delay_ms`` and
+    ignore them, which let a caller believe it had changed something.
     """
+    os.makedirs(str(out_dir), exist_ok=True)
     data      = compute_encoding_columns(
         ven, encoder, sig_train, T_song,
-        T_post=T_post, sr=sr, seed=seed, n_kernels=n_kernels,
+        T_post=T_post, sr=sr, seed=seed,
         kernel_width=kernel_width, peak_rate=peak_rate,
         daf_wn_amplitude=daf_wn_amplitude, of_mean_rate_hz=of_mean_rate_hz,
         of_n_ista=of_n_ista,

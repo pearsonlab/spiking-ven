@@ -44,9 +44,6 @@ from scipy.ndimage import gaussian_filter1d
 from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from .encoding_comparison import compute_encoding_columns, specgram
 
-
-os.makedirs("outputs", exist_ok=True)
-
 __all__ = ["make_rate_figure"]
 
 # Columns kept for this view (index into compute_encoding_columns output):
@@ -77,7 +74,6 @@ def make_rate_figure(
     T_post: int = 200,
     sr: int = 16000,
     seed: int = 42,
-    n_kernels: int = 64,
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     sigma_ms: float = 6.0,
@@ -85,9 +81,10 @@ def make_rate_figure(
     of_n_ista: int = 50,
 ):
     """Population-rate comparison figure with the current VEN state."""
+    os.makedirs(str(out_dir), exist_ok=True)
     data      = compute_encoding_columns(
         ven, encoder, sig_train, T_song,
-        T_post=T_post, sr=sr, seed=seed, n_kernels=n_kernels,
+        T_post=T_post, sr=sr, seed=seed,
         kernel_width=kernel_width, peak_rate=peak_rate,
         of_mean_rate_hz=of_mean_rate_hz, of_n_ista=of_n_ista,
     )

@@ -14,6 +14,19 @@ The model is a **responder-only** population -- every excitatory unit receives i
 auditory drive, so there is no non-responder subpopulation to average in. The
 responder-only targets are therefore the relevant ones.
 
+What K2/K3 do and do not measure
+--------------------------------
+They are matched-input-rate comparisons. Every stimulus goes through the same encoder
+path, and that path normalises twice: ``coch_encode`` scales each signal to the
+encoder's reference RMS, and ``of_to_spikes`` then calibrates the spike train to
+``mean_rate_hz``. So the white-noise input carries the *same* mean drive as the song
+input by construction, and ``DAF_WN_AMPLITUDE`` cancels out -- K2 and K3 report the
+network's response to a spectrotemporal mismatch at equal input rate, not to a louder
+stimulus. That is the stronger test of cancellation (the effect cannot come from extra
+drive), but it is not the amplitude manipulation the "DAF" name suggests. The figure's
+DAF column is different: there the noise is added into a window of the song, so the
+amplitude does matter there.
+
 This lives here, as a function returning a dict, rather than as a block of prints at the
 bottom of a training script, so the same numbers can be asserted in tests and recomputed
 for a saved model without retraining.
@@ -172,8 +185,10 @@ def build_stimuli(
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))
     del acts_fwd, acts_rev, fv, rv
 
-    # coch_encode RMS-normalises internally, so DAF amplitude is washed out; only the
-    # broadband spectrum distinguishes white noise from song here.
+    # coch_encode RMS-normalises and of_to_spikes rate-calibrates, so DAF_WN_AMPLITUDE
+    # divides straight back out: only the broadband spectrum distinguishes this from song.
+    # Kept so the stimulus is constructed the way the figure's is; see the module
+    # docstring for what that means for K2/K3.
     rng_daf = np.random.default_rng(seed + 1)
     noise_daf = rng_daf.standard_normal(len(sig_train)) * rms_train * DAF_WN_AMPLITUDE
     aud_daf = sig_to_aud(noise_daf, 20)

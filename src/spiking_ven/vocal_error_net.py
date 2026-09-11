@@ -14,6 +14,15 @@ Plasticity
             theta_e[k] += alpha_theta * (sE[k] - r_e_target_per_bin)
             Gated to novel so homeostasis doesn't fight JIE learning.
 - use_mask: optional structural mask keeps JIE at initial sparsity (default off)
+
+Experimental, off by default, and not exercised by the shipped pipeline or the tests:
+``W_max_ie``/``epsilon_hltd``/``epsilon_col`` (heterosynaptic competition),
+``A_jei_plastic`` (E→I iSTDP), ``tau_w_ie`` (JIE decay), ``r_e_song_target``
+(bidirectional theta homeostasis during song) and ``use_mask``. They are implemented and
+reachable, but ``sven-train-ven`` hardcodes every one of them to zero/False, so treat any
+non-default value as untested. Two further knobs -- a scalar/BCM threshold on the E trace
+and a Huber weight regulariser -- were removed rather than kept: the first was computed,
+passed into the loop and never read, and the second was out of scope for this package.
 """
 
 import numpy as np
@@ -36,7 +45,7 @@ def _sim_loop_v2(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
     decay_e, decay_i, alpha_s,
     theta_e, theta_i, v_reset, noise_e, noise_i,
-    A_jie, J_max_ie, xi_th, xe_th,
+    A_jie, J_max_ie, xi_th,
     drive_e, drive_i,
     learn_weights,
     JIE_mask=None,
@@ -67,12 +76,10 @@ def _sim_loop_v2(
     V_i     = np.zeros(n_i)
     sE_prev = np.zeros(n_e)
     sI_prev = np.zeros(n_i)
-    x_e     = np.zeros(n_e)
     x_i     = np.zeros(n_i)
 
     sE_mat  = np.zeros((n_e, T), dtype=np.float32)
     sI_mat  = np.zeros((n_i, T), dtype=np.float32)
-    x_e_acc = np.zeros(n_e)   # accumulates audio-gated x_e trace for BCM update
     x_e_all = np.zeros(n_e)   # unfiltered E trace for JEI homeostasis (all spikes, no audio gate)
 
     _zero_aud = np.zeros(h_aud.shape[0])
@@ -108,16 +115,14 @@ def _sim_loop_v2(
             # Causal STDP: I-then-E order (I precedes E → potentiate JIE).
             # Update at the moment of each audio-gated E spike using the current
             # I trace — captures recent I firing before this E spike occurred.
-            # xe_th is unused here; xi_th debiases x_i above tonic I baseline.
+            # xi_th debiases x_i above the tonic I baseline.
             # alpha_stdp (if > 0) gives a separate, narrower coincidence window
             # for x_i only — allowing temporal specificity without affecting audio
             # smoothing (alpha_s) or homeostasis.
             _alpha_xi = alpha_stdp if alpha_stdp > 0.0 else alpha_s
             audio_gate_e = (audio_drive_e > 0.0).astype(np.float64)
             gate_sE = sE * audio_gate_e
-            x_e = alpha_s * x_e + gate_sE  # retained for BCM
             x_i = _alpha_xi * x_i + sI
-            x_e_acc += x_e
             JIE += A_jie * np.outer(gate_sE, x_i - xi_th)
             # Heterosynaptic competition — Fiete et al. 2010 summed-weight limit rule,
             # applied symmetrically at both pre- and post-synaptic neurons:
@@ -170,7 +175,7 @@ def _sim_loop_v2(
         sE_prev = sE
         sI_prev = sI
 
-    return sE_mat, sI_mat, JIE, JEI, theta_e, x_e_acc / T
+    return sE_mat, sI_mat, JIE, JEI, theta_e
 
 
 # ---------------------------------------------------------------------------
@@ -197,16 +202,8 @@ class VocalErrorNetV2:
     B_hvc_scale  : mean weight scale for HVC→I (tune so HVC burst drives I reliably)
     c_JEI        : E→I connection probability (fixed throughout)
     c_JIE        : I→E initial connection probability (plastic weights)
-    r_e_th       : E baseline rate threshold for STDP (Hz); x_e below this → no LTP on JIE.
-                   Set to the expected tonic E firing rate so plasticity only occurs for
-                   audio-evoked activity above baseline.  Ignored when alpha_bcm > 0 (BCM
-                   sliding threshold replaces this scalar).
     r_i_th       : I baseline rate threshold for STDP (Hz); x_i below this → LTD on JIE.
                    Set to mean I rate during song so rule is zero-mean for uncorrelated activity.
-    alpha_bcm    : BCM sliding-threshold learning rate.  When > 0, a per-neuron threshold
-                   theta_bcm tracks the running mean audio-gated x_e during fit() calls and
-                   replaces the scalar xe_th.  E neurons firing above their mean get JIE
-                   potentiation; below-mean neurons get de-potentiation.  alpha_bcm=0 disables.
     W_max_ie     : summed incoming JIE weight limit per E neuron for heterosynaptic competition
                    (Fiete et al. 2010).  When > 0 and an E neuron fires with audio gate AND
                    its row sum of JIE exceeds this limit, all its incoming I→E weights are
@@ -242,7 +239,6 @@ class VocalErrorNetV2:
         B_hvc_scale: float = 2.0,
         c_JEI: float = 0.5,
         c_JIE: float = 0.5,
-        r_e_th: float = 0.0,
         r_i_th: float = 0.0,
         drive_e: float = 0.155,
         drive_i: float = 0.058,
@@ -253,7 +249,6 @@ class VocalErrorNetV2:
         alpha_theta: float = 0.0,
         r_e_target: float = 4.0,
         r_e_song_target: float = 0.0,
-        alpha_bcm: float = 0.0,
         A_jei_plastic: float = 0.0,
         use_mask: bool = False,
         aud_delay_ms: int = 0,
@@ -263,8 +258,6 @@ class VocalErrorNetV2:
         epsilon_hltd: float = 0.0,
         epsilon_col: float = 0.0,
         tau_stdp: float = 0.0,
-        lambda_huber: float = 0.0,
-        huber_delta: float = 0.1,
         seed: int | None = None,
     ) -> None:
         rng = default_rng(seed)
@@ -288,7 +281,6 @@ class VocalErrorNetV2:
         self.B_hvc_scale   = B_hvc_scale
         self.c_JEI         = c_JEI
         self.c_JIE         = c_JIE
-        self.r_e_th        = r_e_th
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
         self.drive_i       = drive_i
@@ -299,7 +291,6 @@ class VocalErrorNetV2:
         self.alpha_theta      = alpha_theta
         self.r_e_target       = r_e_target
         self.r_e_song_target  = float(r_e_song_target)
-        self.alpha_bcm        = alpha_bcm
         self.A_jei_plastic    = A_jei_plastic
         self.use_mask         = use_mask
         self.aud_delay_ms  = int(aud_delay_ms)
@@ -309,8 +300,6 @@ class VocalErrorNetV2:
         self.epsilon_hltd  = float(epsilon_hltd)
         self.epsilon_col   = float(epsilon_col)
         self.tau_stdp      = float(tau_stdp)
-        self.lambda_huber  = float(lambda_huber)
-        self.huber_delta   = float(huber_delta)
         self.v_reset: float = 0.0
 
         # aud→E: sparse log-normal, fixed
@@ -344,9 +333,6 @@ class VocalErrorNetV2:
         _isi_e    = 1.0 / target_rate
         _theta_e0 = float(max(drive_e * (1.0 - _decay_e ** _isi_e), 1e-3))
         self.theta_e = np.full(n_e, _theta_e0, dtype=np.float64)
-
-        # BCM sliding threshold: per-neuron running mean of audio-gated x_e during fit()
-        self.theta_bcm = np.zeros(n_e, dtype=np.float64)
 
         # I threshold: use a fixed tau_s reference of 10 ms so theta_i stays at the
         # calibrated value regardless of the STDP trace tau_s.  theta_i >> drive_i
@@ -392,6 +378,12 @@ class VocalErrorNetV2:
 
         Homeostasis is via JEI iSTDP when A_jei_plastic > 0, else via per-neuron
         theta adaptation (learn_theta).  Both can be enabled simultaneously.
+
+        With both off -- which is the shipped operating point (alpha_theta=0,
+        A_jei_plastic=0) -- this updates nothing: it is a plain inference pass. It is
+        not free, though. It advances the simulation noise stream, so a training loop
+        that calls it is not interchangeable with one that does not. See the note in
+        ``spiking_ven.cli.train_ven``.
         """
         use_jei  = self.A_jei_plastic > 0.0
         use_theta = self.alpha_theta > 0.0
@@ -428,20 +420,18 @@ class VocalErrorNetV2:
             A_jie=self.A_jie, J_max_ie=self.J_max_ie,
             c_B=self.c_B, B_scale=self.B_scale,
             c_hvc=self.c_hvc, B_hvc_scale=self.B_hvc_scale,
-            c_JEI=self.c_JEI, c_JIE=self.c_JIE, r_e_th=self.r_e_th, r_i_th=self.r_i_th,
+            c_JEI=self.c_JEI, c_JIE=self.c_JIE, r_i_th=self.r_i_th,
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
             alpha_theta=self.alpha_theta, r_e_target=self.r_e_target,
             r_e_song_target=self.r_e_song_target,
-            alpha_bcm=self.alpha_bcm, theta_bcm=self.theta_bcm,
             A_jei_plastic=self.A_jei_plastic,
             use_mask=self.use_mask,
             aud_delay_ms=self.aud_delay_ms, hvc_delay_ms=self.hvc_delay_ms,
             tau_w_ie=self.tau_w_ie,
             W_max_ie=self.W_max_ie, epsilon_hltd=self.epsilon_hltd,
             epsilon_col=self.epsilon_col, tau_stdp=self.tau_stdp,
-            lambda_huber=self.lambda_huber, huber_delta=self.huber_delta,
             theta_e=self.theta_e, theta_i=self.theta_i,
         )
 
@@ -456,11 +446,14 @@ class VocalErrorNetV2:
             setattr(obj, k, int(d[k]))
         scalar_keys = (
             "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
-            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "c_JIE", "r_e_th", "r_i_th",
+            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "c_JIE", "r_i_th",
             "drive_e", "drive_i", "noise_e", "noise_i",
             "target_rate", "target_rate_i", "alpha_theta", "r_e_target", "r_e_song_target",
-            "alpha_bcm", "A_jei_plastic", "tau_w_ie", "W_max_ie", "epsilon_hltd", "epsilon_col", "tau_stdp", "lambda_huber", "huber_delta", "theta_i",
+            "A_jei_plastic", "tau_w_ie", "W_max_ie", "epsilon_hltd", "epsilon_col",
+            "tau_stdp", "theta_i",
         )
+        # Models saved before these knobs were removed carry extra keys; ignoring them
+        # rather than reading them is the point.
         for k in scalar_keys:
             setattr(obj, k, float(d[k]) if k in d else 0.0)
         obj.use_mask      = bool(d["use_mask"]) if "use_mask" in d else False
@@ -469,9 +462,6 @@ class VocalErrorNetV2:
         raw_theta = d["theta_e"] if "theta_e" in d else np.array(0.0)
         obj.theta_e = (raw_theta.copy() if raw_theta.ndim > 0
                        else np.full(obj.n_e, float(raw_theta), dtype=np.float64))
-        raw_bcm = d["theta_bcm"] if "theta_bcm" in d else np.array(0.0)
-        obj.theta_bcm = (raw_bcm.copy() if raw_bcm.ndim > 0
-                         else np.zeros(obj.n_e, dtype=np.float64))
         obj.B        = d["B"]
         obj.B_hvc    = d["B_hvc"]
         obj.JEI      = d["JEI"]
@@ -544,11 +534,6 @@ class VocalErrorNetV2:
         # debiasing stays correct regardless of tau_stdp.
         tau_stdp_eff = self.tau_stdp if self.tau_stdp > 0.0 else self.tau_s
         alpha_stdp   = float(np.exp(-dt / tau_stdp_eff))
-        # BCM mode: use per-neuron sliding threshold; otherwise scalar.
-        xe_th: float | np.ndarray = (
-            self.theta_bcm.copy() if self.alpha_bcm > 0.0
-            else float(self.r_e_th * self.tau_s * 1e-3)
-        )
         xi_th     = float(self.r_i_th * tau_stdp_eff * 1e-3)
         mask      = self.JIE_mask.astype(np.float64) if self.use_mask else None
         decay_jie = float(np.exp(-1.0 / self.tau_w_ie)) if self.tau_w_ie > 0.0 else 0.0
@@ -565,7 +550,7 @@ class VocalErrorNetV2:
         r0_xe_jei = r_e_target_eff * float(self.tau_s) * 1e-3
 
         theta_e = self.theta_e.copy()
-        sE_mat, sI_mat, JIE, JEI, theta_e, x_e_mean = _sim_loop_v2(
+        sE_mat, sI_mat, JIE, JEI, theta_e = _sim_loop_v2(
             h_aud, h_hvc,
             self.B.astype(np.float64),
             self.B_hvc.astype(np.float64),
@@ -574,7 +559,7 @@ class VocalErrorNetV2:
             decay_e, decay_i, alpha_s,
             theta_e, float(self.theta_i),
             float(self.v_reset), float(self.noise_e), float(self.noise_i),
-            float(self.A_jie), float(self.J_max_ie), xi_th, xe_th,
+            float(self.A_jie), float(self.J_max_ie), xi_th,
             float(self.drive_e), float(self.drive_i),
             learn_weights,
             JIE_mask=mask,
@@ -596,15 +581,6 @@ class VocalErrorNetV2:
 
         if learn_weights:
             self.JIE = JIE.astype(np.float32)
-            if self.lambda_huber > 0.0:
-                # Huber regularization: L2 for small weights, L1 for large.
-                # Applied once per _sim() call (i.e. per rendition).
-                reg = np.where(self.JIE <= self.huber_delta,
-                               self.lambda_huber * self.JIE / self.huber_delta,
-                               self.lambda_huber)
-                self.JIE = np.clip(self.JIE - reg, 0.0, self.J_max_ie).astype(np.float32)
-            if self.alpha_bcm > 0.0:
-                self.theta_bcm += self.alpha_bcm * (x_e_mean - self.theta_bcm)
         if learn_jei:
             self.JEI = JEI.astype(np.float32)
         if learn_theta:

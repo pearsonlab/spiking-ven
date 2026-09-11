@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from ..constants import SR
 from ..evaluate import build_stimuli, daf_metrics, format_metrics
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, ven_model_npz
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--n-hvc", type=int, default=60)
     p.add_argument("--t-post", type=int, default=200)
     p.add_argument("--t-burn", type=int, default=500)
@@ -55,7 +57,8 @@ def main(argv: list[str] | None = None) -> None:
 
     encoder = OlshausenFieldEncoder.load(enc_path)
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
-    st = build_stimuli(encoder, motifs_path, seed=args.seed, t_post=args.t_post,
+    st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
+                       t_post=args.t_post,
                        t_burn=args.t_burn, n_hvc=args.n_hvc,
                        mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista,
                        verbose=not args.json)

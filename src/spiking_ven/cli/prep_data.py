@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         from ..data.motifs import main as build_motifs
 
-        build_motifs(["--wav_dir", str(wav_dir), "--out", str(out)])
+        build_motifs(["--wav-dir", str(wav_dir), "--out", str(out)])
 
     print(f"\nDone. {out}")
 

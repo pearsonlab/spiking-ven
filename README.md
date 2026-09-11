@@ -44,6 +44,13 @@ make rates       # the supplementary population-rate view
 Raw song data is downloaded, never vendored: Koch 2024, adult zebra finch R469
 ([DOI 10.18738/T8/SAWMUN](https://doi.org/10.18738/T8/SAWMUN)).
 
+> **The download only works from a normal network.** Both dataset hosts sit behind
+> CloudFront, which returns `403 Forbidden` to datacenter IP ranges — so it fails on CI
+> runners and some cloud hosts regardless of the User-Agent the downloader sends. If you
+> are blocked, place the WAV + `.not.mat` pairs in `<data-dir>/song_wavs` yourself and
+> pass `--skip-download`; nothing downstream touches the network. For a TLS-inspecting
+> proxy, point `SVEN_CA_BUNDLE` at a PEM bundle that includes the public roots.
+
 ## What the figure shows
 
 Five rows (waveform / spectrogram / auditory neurons / inhibitory interneurons / excitatory

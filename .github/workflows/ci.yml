@@ -14,30 +14,25 @@ jobs:
       - name: Lint
         run: uv run --extra dev ruff check .
 
-      # The core must import on numpy + scipy alone: no Brian2, no matplotlib.
-      # Deliberately installed with NO extras, which is the thing being tested.
+      # The core must import on numpy + scipy alone: no Brian2, no matplotlib, no
+      # soundfile. Installed with NO extras, which is the thing being tested.
       - name: Core imports without optional extras
         run: uv run python -c "import spiking_ven; print(spiking_ven.__version__)"
 
+      # Includes the hermetic end-to-end smoke test (synthetic corpus -> encoder ->
+      # network) and the guards that every subpackage and console script resolves.
       - name: Unit tests, core only (Brian2 tests should skip here)
         run: uv run --extra dev pytest -m "not slow" -q -rs
 
       - name: Unit tests with the Brian2 extra (Brian2 tests should run)
         run: uv run --extra brian2 --extra dev pytest -m "not slow" -q
 
-  smoke-reproduction:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - name: Unit tests with all extras
+        run: uv run --all-extras pytest -m "not slow" -q
 
-      # Downloads the R469 corpus and builds motifs.npz. Both dataset hosts sit behind
-      # CloudFront and 403 the default agent, which is why the downloader sets a browser
-      # User-Agent itself rather than relying on a flag.
-      - name: Prepare song corpus
-        run: uv run --extra data sven-prep-data --data-dir data --out outputs/motifs.npz
-
-      # Tiny encoder + a few renditions: exercises the whole chain in ~a minute without
-      # running the full 10-minute reproduction.
-      - name: Smoke train encoder + VEN
-        run: make smoke
+  # NOTE: there is deliberately no job that downloads the real song corpus.
+  # The dataset host (TDL Dataverse) sits behind CloudFront, which answers GitHub
+  # Actions' datacenter IP ranges with 403 Forbidden regardless of User-Agent. The
+  # browser UA in spiking_ven.data.download is what makes the download work from a
+  # workstation; nothing makes it work from a hosted runner. The real-corpus
+  # reproduction is asserted by `make test-repro`, run where the data can be fetched.

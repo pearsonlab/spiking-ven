@@ -20,7 +20,6 @@ from math import gcd
 
 import numpy as np
 import scipy.io
-import soundfile as sf
 from scipy.signal import resample_poly
 from scipy.signal import spectrogram as sp_spectrogram
 from scipy.spatial.distance import cdist
@@ -162,6 +161,11 @@ def warp_time_ms(t_ms_query, warp, hop_ms):
 
 
 def main(argv: list[str] | None = None) -> None:
+    # soundfile lives in the `data` extra, so import it where it is used rather than at
+    # module import time. That keeps this module importable in a core (numpy+scipy)
+    # install and matches the convention in spiking_ven.cochleagram.load_wav.
+    import soundfile as sf
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wav_dir", default="data/song_wavs")
     parser.add_argument("--out", default="outputs/motifs.npz")

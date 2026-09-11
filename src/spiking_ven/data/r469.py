@@ -21,13 +21,17 @@ import re
 
 import numpy as np
 import scipy.io as sio
-import soundfile as sf
 
 # Full motif: introductory note plus five syllables.
 CODE = "iabcde"
 
 
 def main(argv: list[str] | None = None) -> None:
+    # soundfile lives in the `data` extra, so import it where it is used rather than at
+    # module import time. That keeps this module importable in a core (numpy+scipy)
+    # install and matches the convention in spiking_ven.cochleagram.load_wav.
+    import soundfile as sf
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wav-dir", default="data/song_wavs",
                         help="directory of WAV + .not.mat pairs")

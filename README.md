@@ -41,8 +41,11 @@ make rates       # the supplementary population-rate view
 | 3. Train the VEN | `sven-train-ven` | `outputs/of_ven_model_k4max.npz` (600 renditions) |
 | 4. Figure | `sven-figure` | `outputs/encoding_comparison_k4max.pdf` |
 
-Raw song data is downloaded, never vendored: Koch 2024, adult zebra finch R469
-([DOI 10.18738/T8/SAWMUN](https://doi.org/10.18738/T8/SAWMUN)).
+Raw song data is downloaded, never vendored: "Labeled Zebra Finch Songs" (Koch, Therese),
+adult zebra finch R469, [DOI 10.18738/T8/SAWMUN](https://doi.org/10.18738/T8/SAWMUN).
+The dataset is released under **CC0 1.0** (public domain dedication, no stated terms of
+use or access restrictions), which is why the derived `motifs.npz` can be attached to
+releases. Please still cite it.
 
 > **The download only works from a normal network.** Both dataset hosts sit behind
 > CloudFront, which returns `403 Forbidden` to datacenter IP ranges — so it fails on CI

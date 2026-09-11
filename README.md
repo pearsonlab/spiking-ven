@@ -6,7 +6,8 @@ system: song audio → sparse spike code → an excitatory/inhibitory network th
 
 This is the spiking counterpart to the rate-based Wilson-Cowan model in
 [`pearsonlab/vocal-error-network`](https://github.com/pearsonlab/vocal-error-network)
-(Duarte Ortiz et al. 2025, [bioRxiv 2025.07.18.665446](https://doi.org/10.1101/2025.07.18.665446)).
+(Gong et al. 2026, [eLife reviewed preprint](https://elifesciences.org/reviewed-preprints/111771),
+[doi:10.7554/eLife.111771.1](https://doi.org/10.7554/eLife.111771.1)).
 It is used standalone for the analyses here, and imported by the full song-circuit model
 (finchsim) to drive the AIV → VTA/VP error pathway.
 

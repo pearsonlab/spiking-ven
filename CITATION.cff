@@ -4,13 +4,14 @@ title: "spiking-ven: a spiking sparse auditory encoder and vocal error network"
 abstract: >-
   A spiking implementation of sparse auditory encoding and predictive cancellation
   of self-generated song in the zebra finch, and the spiking counterpart to the
-  rate-based vocal error network of Duarte Ortiz et al. 2025.
+  rate-based vocal error network of Gong et al. 2026.
 authors:
   - family-names: Pearson
     given-names: John
 type: software
 license: MIT
 version: 0.2.0
+date-released: "2026-09-11"
 repository-code: "https://github.com/pearsonlab/spiking-ven"
 references:
   - type: article
@@ -24,5 +25,7 @@ references:
         given-names: Richard
       - family-names: Pearson
         given-names: John
-    year: 2025
-    doi: "10.1101/2025.07.18.665446"
+    year: 2026
+    journal: eLife
+    doi: "10.7554/eLife.111771.1"
+    url: "https://elifesciences.org/reviewed-preprints/111771"

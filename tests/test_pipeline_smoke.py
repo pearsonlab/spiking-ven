@@ -13,7 +13,6 @@ So the coverage split is deliberate:
 """
 
 import numpy as np
-import pytest
 
 from spiking_ven.cli import train_encoder, train_ven
 

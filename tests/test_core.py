@@ -70,3 +70,50 @@ def test_hvc_spikes_are_binary_and_seed_deterministic():
     assert a.shape == (kw["n_hvc"], T)
     assert set(np.unique(a)).issubset({0, 1})
     assert a.sum() > 0, "HVC population should emit spikes"
+
+
+def test_every_subpackage_is_importable():
+    """Guard against a subpackage being missing from the distribution.
+
+    `src/spiking_ven/data/` was once absent from the repo entirely: the .gitignore had an
+    unanchored `data/` rule, intended for the raw song corpus, which also matched the
+    subpackage. Imports and unit tests still passed, so only a CI run that actually
+    invoked the data CLI caught it. This test would have caught it immediately.
+    """
+    import importlib
+
+    for name in (
+        "spiking_ven.cochleagram",
+        "spiking_ven.common",
+        "spiking_ven.evaluate",
+        "spiking_ven.filterbank",
+        "spiking_ven.manifest",
+        "spiking_ven.olshausen_field",
+        "spiking_ven.paths",
+        "spiking_ven.smith_lewicki",
+        "spiking_ven.vocal_error_net",
+        "spiking_ven.data",
+        "spiking_ven.data.download",
+        "spiking_ven.data.motifs",
+        "spiking_ven.data.r469",
+        "spiking_ven.cli",
+        "spiking_ven.cli.prep_data",
+        "spiking_ven.cli.train_encoder",
+        "spiking_ven.cli.train_ven",
+        "spiking_ven.cli.figure",
+    ):
+        importlib.import_module(name)
+
+
+def test_console_script_entry_points_resolve():
+    """Every entry point declared in pyproject must actually be importable."""
+    import importlib
+    from importlib.metadata import entry_points
+
+    eps = [e for e in entry_points(group="console_scripts")
+           if e.value.startswith("spiking_ven")]
+    assert eps, "no spiking_ven console scripts found"
+    for ep in eps:
+        module, _, func = ep.value.partition(":")
+        mod = importlib.import_module(module)
+        assert callable(getattr(mod, func)), f"{ep.name} -> {ep.value} is not callable"

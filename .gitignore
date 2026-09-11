@@ -1,8 +1,10 @@
 .venv/
 __pycache__/
 *.py[cod]
-outputs/
-data/
+# Anchored to the repo root on purpose: an unanchored `data/` also matches
+# src/spiking_ven/data/, which silently kept that subpackage out of the repo.
+/data/
+/outputs/
 .pytest_cache/
 .ruff_cache/
 dist/

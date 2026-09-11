@@ -28,7 +28,6 @@ from .olshausen_field import (
     OlshausenFieldEncoder,
     coch_encode,
     coch_extract_patches,
-    of_encode,
     of_to_spikes,
 )
 from .smith_lewicki import SmithLewickiDictionary, sl_gram, sl_gram_to_spikes
@@ -45,7 +44,6 @@ __all__ = [
     "OlshausenFieldEncoder",
     "coch_extract_patches",
     "coch_encode",
-    "of_encode",
     "of_to_spikes",
     "SmithLewickiDictionary",
     "sl_gram",

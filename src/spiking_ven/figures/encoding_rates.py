@@ -23,7 +23,7 @@ Rows (per column)
 2. Population firing rates (encoder, inhibitory, excitatory) on shared axes
 
 Requires:
-  outputs/of_encoder.npz  (or outputs/lewicki_motif_filters.npz for --encoder lewicki)
+  outputs/of_encoder.npz
   outputs/of_ven_model_k4max.npz  (default; or another via --model)
   outputs/motifs.npz
 
@@ -41,6 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
+from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from .encoding_comparison import compute_encoding_columns, specgram
 
 
@@ -77,8 +78,8 @@ def make_rate_figure(
     sr: int = 16000,
     seed: int = 42,
     n_kernels: int = 64,
-    kernel_width: float = 10.0,
-    peak_rate: float = 300.0,
+    kernel_width: float = KERNEL_WIDTH_MS,
+    peak_rate: float = PEAK_RATE_HZ,
     sigma_ms: float = 6.0,
     of_mean_rate_hz: float = 15.0,
     of_n_ista: int = 50,
@@ -90,12 +91,11 @@ def make_rate_figure(
         kernel_width=kernel_width, peak_rate=peak_rate,
         of_mean_rate_hz=of_mean_rate_hz, of_n_ista=of_n_ista,
     )
-    _use_of  = data["use_of"]
     all_cols = data["columns"]
     cols     = [all_cols[i] for i in KEEP_COLS]
     n_col    = len(cols)
 
-    _enc_label = "Auditory" if _use_of else "Lewicki"
+    _enc_label = "Auditory"
 
     n_wav = T_song * sr // 1000
 

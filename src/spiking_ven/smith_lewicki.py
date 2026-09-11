@@ -56,6 +56,17 @@ class SmithLewickiDictionary:
     # public API
     # ------------------------------------------------------------------
 
+
+    @property
+    def n_channels(self) -> int:
+        """Number of output channels, i.e. kernels.
+
+        Shared name with
+        :class:`~spiking_ven.olshausen_field.OlshausenFieldEncoder` (which counts
+        bases); see the note there.
+        """
+        return int(self.n_kernels)
+
     def save(self, path: str) -> None:
         """Save kernels and metadata to a .npz file."""
         np.savez(
@@ -249,11 +260,3 @@ def sl_gram_to_spikes(
     rate_hz = scale * np.exp(gain * (gram.astype(np.float64) - threshold))
     prob    = np.clip(rate_hz * 1e-3, 0.0, 1.0)
     return (rng.random(gram.shape) < prob).astype(np.float32)
-
-
-def _snr_db_1d(target: np.ndarray, recon: np.ndarray) -> float:
-    signal_power = float(np.mean(target ** 2))
-    noise_power = float(np.mean((target - recon) ** 2))
-    if noise_power < 1e-12:
-        return np.inf
-    return 10.0 * np.log10(signal_power / noise_power)

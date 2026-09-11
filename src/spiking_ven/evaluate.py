@@ -21,7 +21,15 @@ for a saved model without retraining.
 
 from __future__ import annotations
 
-__all__ = ["daf_metrics", "format_metrics", "build_stimuli", "BIOLOGICAL_TARGETS", "DAF_WN_AMPLITUDE"]
+from .constants import DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+
+__all__ = [
+    "daf_metrics",
+    "format_metrics",
+    "build_stimuli",
+    "BIOLOGICAL_TARGETS",
+    "DAF_WN_AMPLITUDE",
+]
 
 # Verbatim targets, kept next to the code that is judged against them.
 BIOLOGICAL_TARGETS = {
@@ -32,9 +40,6 @@ BIOLOGICAL_TARGETS = {
     "k3_responders": 3.6,
     "k4_min": 1.0,              # direction only
 }
-
-# DAF white noise is mixed at this multiple of song RMS: ~95 dBSPL WN vs ~80 dBSPL song.
-DAF_WN_AMPLITUDE = 5.6
 
 
 def _rate_hz(ven, hvc, aud) -> float:
@@ -98,10 +103,6 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
 # two ever built their stimuli separately they would drift, and the metrics would stop
 # describing the model that was trained.
 
-# HVC burst envelope: peak rate scales inversely with kernel width so integrated drive
-# per burst is constant.
-KERNEL_WIDTH = 10.0
-PEAK_RATE = 150.0 * 20.0 / KERNEL_WIDTH
 
 
 def build_stimuli(
@@ -127,19 +128,16 @@ def build_stimuli(
     import numpy as np
 
     from .common import generate_hvc_spikes
+    from .corpus import load_corpus
     from .olshausen_field import coch_encode, of_to_spikes
 
-    md = np.load(str(motifs_path))
-    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
-    n_motifs = audio_m.shape[0]
-    T_song = int(np.ceil(song_Ts.max()))
+    corpus = load_corpus(motifs_path)
+    n_motifs = corpus.n_motifs
+    T_song = corpus.T_song
     T_rend = T_song + t_post
-    n_kernels = encoder.n_bases
+    n_kernels = encoder.n_channels
 
-    rms_all = np.array([float(np.sqrt(np.mean(audio_m[i, : lengths[i]] ** 2)))
-                        for i in range(n_motifs)])
-    train_idx = int(np.argmax(rms_all))          # highest-RMS rendition is the template
-    sig_train = audio_m[train_idx, : lengths[train_idx]].astype(np.float64)
+    sig_train, train_idx = corpus.template()
     rms_train = float(np.sqrt(np.mean(sig_train**2)))
 
     def sig_to_aud(sig, seed_offset: int):
@@ -159,8 +157,7 @@ def build_stimuli(
     for ci in range(n_motifs):
         if ci == train_idx:
             continue
-        correct_pool.append(sig_to_aud(audio_m[ci, : lengths[ci]].astype(np.float64),
-                                       100 + ci))
+        correct_pool.append(sig_to_aud(corpus.signal(ci), 100 + ci))
 
     sig_rev = sig_train[::-1].astype(np.float64)
     aud_reversed = sig_to_aud(sig_rev, 200)
@@ -193,14 +190,14 @@ def build_stimuli(
     T_total_burn = t_burn + T_rend
     hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
                                    T_song=T_song, T_burn=t_burn, T_post=t_post,
-                                   peak_rate=PEAK_RATE, kernel_width=KERNEL_WIDTH,
+                                   peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
                                    seed=seed)
     aud_burn = np.zeros((n_kernels, T_total_burn), dtype=np.float32)
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
     hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
-                                 T_burn=0, T_post=t_post, peak_rate=PEAK_RATE,
-                                 kernel_width=KERNEL_WIDTH, seed=seed)
+                                 T_burn=0, T_post=t_post, peak_rate=PEAK_RATE_HZ,
+                                 kernel_width=KERNEL_WIDTH_MS, seed=seed)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
 
     return {

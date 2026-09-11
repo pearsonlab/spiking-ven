@@ -215,6 +215,19 @@ class OlshausenFieldEncoder:
     # Fit
     # ------------------------------------------------------------------
 
+
+    @property
+    def n_channels(self) -> int:
+        """Number of output channels, i.e. basis functions.
+
+        Shared name with :class:`~spiking_ven.smith_lewicki.SmithLewickiDictionary`
+        (which counts kernels) so callers can size arrays without caring which encoder
+        they were handed. Previously that was done with a hasattr check and a hardcoded
+        fallback of 64, which would have silently mis-sized arrays for any dictionary
+        that was not 64 wide.
+        """
+        return int(self.n_bases)
+
     def fit(
         self,
         audio_list: list | None = None,
@@ -485,17 +498,3 @@ def of_to_spikes(
 
     lam = act * rate_scale * dt_s
     return rng.poisson(lam).astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Back-compat alias for audio mode
-# ---------------------------------------------------------------------------
-
-def of_encode(
-    signal: np.ndarray,
-    encoder: OlshausenFieldEncoder,
-    frame_rate: int = 1000,
-    n_ista: int = 100,
-) -> np.ndarray:
-    """Audio-mode convenience wrapper.  Drop-in for sl_gram()."""
-    return encoder.encode(signal, frame_rate=frame_rate, n_ista=n_ista)

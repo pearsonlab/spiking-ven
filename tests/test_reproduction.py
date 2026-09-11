@@ -16,9 +16,9 @@ floating-point reductions, not for run-to-run noise.
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 
+from spiking_ven.corpus import load_corpus
 from spiking_ven.evaluate import BIOLOGICAL_TARGETS, build_stimuli, daf_metrics
 from spiking_ven.olshausen_field import OlshausenFieldEncoder
 from spiking_ven.vocal_error_net import VocalErrorNetV2
@@ -102,15 +102,11 @@ def test_figure_excitatory_row_shows_cancellation():
 
     encoder = OlshausenFieldEncoder.load(str(ENCODER))
     ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
-    md = np.load(MOTIFS)
-    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
-    rms = [float(np.sqrt(np.mean(audio_m[i, : lengths[i]] ** 2)))
-           for i in range(audio_m.shape[0])]
-    idx = int(np.argmax(rms))
-    sig_train = audio_m[idx, : lengths[idx]].astype(np.float64)
-    T_song = int(np.ceil(song_Ts.max()))
+    # Same template-selection rule as training, from one place.
+    corpus = load_corpus(MOTIFS)
+    sig_train, _ = corpus.template()
 
-    data = compute_encoding_columns(ven, encoder, sig_train, T_song, seed=SEED)
+    data = compute_encoding_columns(ven, encoder, sig_train, corpus.T_song, seed=SEED)
     rates = [float(c["sE"].mean() * 1000) for c in data["columns"]]
     trained, others = rates[0], rates[1:]
     print(f"E-row rates: {[round(r, 1) for r in rates]}")

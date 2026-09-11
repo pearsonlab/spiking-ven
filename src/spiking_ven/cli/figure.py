@@ -11,6 +11,10 @@ rendition, while responses to novel or perturbed sound survive as an error signa
 ``--view rates`` renders the supplementary population-rate view instead (3 columns,
 Auditory over Error, both on fixed 0-90 Hz axes). It does not supersede the raster figure.
 
+The stage-1 encoder is the Olshausen-Field sparse coder. The Smith-Lewicki alternative was
+removed from this entry point because nothing in this package produces its dictionary
+cache -- that training code stayed in finchsim.
+
 Requires the ``plots`` extra (matplotlib).
 """
 
@@ -22,33 +26,27 @@ from pathlib import Path
 
 import numpy as np
 
+from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
+from ..corpus import load_corpus
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
-from ..smith_lewicki import SmithLewickiDictionary
 from ..vocal_error_net import VocalErrorNetV2
-
-# HVC burst envelope, matched to training.
-KERNEL_WIDTH = 10.0
-PEAK_RATE = 150.0 * 20.0 / KERNEL_WIDTH
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=None, help="trained VEN .npz")
-    p.add_argument("--encoder", default="of", choices=["of", "lewicki"],
-                   help="stage-1 encoder (default: of)")
     p.add_argument("--of-encoder", default=None, help="OF encoder .npz")
-    p.add_argument("--lewicki-encoder", default=None, help="Lewicki kernels .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
     p.add_argument("--view", default="raster", choices=["raster", "rates"],
                    help="raster (the publication figure) or rates (supplementary)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--sr", type=int, default=16000)
+    p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=200)
-    p.add_argument("--aud-delay-ms", type=int, default=23)
-    p.add_argument("--hvc-delay-ms", type=int, default=5)
+    p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS)
+    p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS)
     return p
 
 
@@ -62,23 +60,16 @@ def main(argv: list[str] | None = None) -> None:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     print("Loading model and data ...")
-    print(f"  model: {model_path}  encoder: {args.encoder}")
-    if args.encoder == "of":
-        enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
-    else:
-        enc = SmithLewickiDictionary.load(
-            args.lewicki_encoder or str(output_dir() / "lewicki_motif_filters.npz"))
+    print(f"  model: {model_path}")
+    enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
     # Pin the seed so the rendered figure is reproducible, not just the training.
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
 
-    md = np.load(motifs_path)
-    audio_m, lengths, song_Ts = md["audio"], md["lengths"], md["song_Ts"]
-    n_motifs = audio_m.shape[0]
-    rms_all = np.array([float(np.sqrt(np.mean(audio_m[i, : lengths[i]] ** 2)))
-                        for i in range(n_motifs)])
-    train_idx = int(np.argmax(rms_all))          # highest-RMS rendition, as in training
-    sig_train = audio_m[train_idx, : lengths[train_idx]].astype(np.float64)
-    T_song = int(np.ceil(song_Ts.max()))
+    # Template selection lives in corpus.py, so the figure draws the same rendition
+    # the network trained on.
+    corpus = load_corpus(motifs_path)
+    sig_train, train_idx = corpus.template()
+    T_song = corpus.T_song
     print(f"T_song={T_song} ms  T_rend={T_song + args.t_post} ms  "
           f"train_motif={train_idx}  rms={float(np.sqrt(np.mean(sig_train**2))):.4f}")
 
@@ -90,9 +81,9 @@ def main(argv: list[str] | None = None) -> None:
         "T_post": args.t_post,
         "sr": args.sr,
         "seed": args.seed,
-        "n_kernels": enc.n_bases if hasattr(enc, "n_bases") else 64,
-        "kernel_width": KERNEL_WIDTH,
-        "peak_rate": PEAK_RATE,
+        "n_kernels": enc.n_channels,
+        "kernel_width": KERNEL_WIDTH_MS,
+        "peak_rate": PEAK_RATE_HZ,
     }
     if args.view == "raster":
         from ..figures.encoding_comparison import make_figure

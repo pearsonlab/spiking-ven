@@ -54,6 +54,14 @@ releases. Please still cite it.
 > pass `--skip-download`; nothing downstream touches the network. For a TLS-inspecting
 > proxy, point `SVEN_CA_BUNDLE` at a PEM bundle that includes the public roots.
 
+## A note on the Smith-Lewicki encoder
+
+`SmithLewickiDictionary`, `sl_gram` and `sl_gram_to_spikes` are provided and supported --
+finchsim's circuit path uses them -- but **there is no Smith-Lewicki pipeline here**: the
+code that trains its dictionary stayed in finchsim, so this package cannot produce the
+cache that path needs. The figure and the CLIs are Olshausen-Field only, and passing a
+Lewicki dictionary to the figure raises a clear `TypeError` rather than failing obscurely.
+
 ## What the figure shows
 
 Five rows (waveform / spectrogram / auditory neurons / inhibitory interneurons / excitatory

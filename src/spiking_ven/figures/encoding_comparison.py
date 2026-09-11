@@ -11,7 +11,7 @@ Rows (per column)
 -----------------
 1. Raw audio waveform
 2. Spectrogram
-3. Encoder spikes (64 kernels) — raster  [Lewicki or OF]
+3. Encoder spikes — raster
 4. I neurons — raster
 5. E neurons — raster
 
@@ -19,7 +19,7 @@ Public API
 ----------
 make_figure(ven, encoder, sig_train, T_song, out_tag, *, ...)
     Generate and save the figure with the current VEN state.
-    encoder: SmithLewickiDictionary (Lewicki) or OlshausenFieldEncoder (OF).
+    encoder: OlshausenFieldEncoder.
     Call this from experiment scripts to snapshot learning progress.
 
 compute_encoding_columns(ven, encoder, sig_train, T_song, *, ...)
@@ -28,7 +28,7 @@ compute_encoding_columns(ven, encoder, sig_train, T_song, *, ...)
     (plot_encoding_comparison_rates.py) so the network inference is defined once.
 
 Requires:
-  outputs/lewicki_motif_filters.npz  OR  outputs/of_encoder.npz
+  outputs/of_encoder.npz
   of_ven_model_k4max.npz  (default; or another via --model)
   outputs/motifs.npz
 
@@ -45,10 +45,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram as scipy_spectrogram
 
-from ..smith_lewicki import (
-    sl_gram,
-    sl_gram_to_spikes,
-)
+from ..constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
 from ..common import generate_hvc_spikes
 
@@ -83,12 +80,9 @@ def compute_encoding_columns(
     sr: int = 16000,
     seed: int = 42,
     n_kernels: int = 64,
-    kernel_width: float = 10.0,
-    peak_rate: float = 300.0,
-    poisson_gain: int = 4,
-    poisson_target_rate_hz: float = 20.0,
-    poisson_scale: float = 1000.0,
-    daf_wn_amplitude: float = 5.6,
+    kernel_width: float = KERNEL_WIDTH_MS,
+    peak_rate: float = PEAK_RATE_HZ,
+    daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
     of_mean_rate_hz: float = 15.0,
     of_n_ista: int = 50,
 ):
@@ -97,7 +91,6 @@ def compute_encoding_columns(
     Returns
     -------
     dict with keys:
-      use_of  : bool — True when ``encoder`` is an OlshausenFieldEncoder
       T_rend  : int  — full rendition length in ms (T_song + T_post)
       columns : list of 4 dicts, one per stimulus in the order
                 [training, time-reversed, white-noise, DAF]. Each dict has
@@ -107,9 +100,14 @@ def compute_encoding_columns(
     This is the single source of truth for the network inference behind both
     the raster figure (make_figure) and the population-rate figure.
     """
+    if not isinstance(encoder, OlshausenFieldEncoder):
+        raise TypeError(
+            "this figure requires an OlshausenFieldEncoder. The Smith-Lewicki encoder "
+            "path was removed because nothing in this package produces its dictionary "
+            "cache -- that training code lives in finchsim."
+        )
     T_rend    = T_song + T_post
     rms_train = float(np.sqrt(np.mean(sig_train ** 2)))
-    _use_of   = isinstance(encoder, OlshausenFieldEncoder)
 
     # ── Build the four stimuli ────────────────────────────────────────────────
     sig_rev    = sig_train[::-1].copy().astype(np.float64)
@@ -118,40 +116,18 @@ def compute_encoding_columns(
     _rng_daf   = np.random.default_rng(seed + 1)
     daf_noise  = _rng_daf.standard_normal(len(sig_train)) * rms_train * daf_wn_amplitude
     sig_daf    = sig_train.copy()
-    _s0, _s1   = int(0.400 * sr), int(0.600 * sr)
+    _s0, _s1   = int(DAF_WINDOW_S[0] * sr), int(DAF_WINDOW_S[1] * sr)
     sig_daf[_s0:_s1] += daf_noise[_s0:_s1]
 
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
-    if _use_of:
-        _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_bases
-        def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
-            acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
-                               n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend)
-            spk  = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz,
-                                 frame_rate=1000, sign_split=_sign_split,
-                                 seed=seed + seed_offset)
-            return spk.astype(np.float32)
-    else:
-        gram_train = sl_gram(sig_train, encoder.kernels, sr=sr, frame_rate=1000)
-        gram_rev   = sl_gram(sig_rev,   encoder.kernels, sr=sr, frame_rate=1000)
-        gram_novel = sl_gram(sig_novel, encoder.kernels, sr=sr, frame_rate=1000)
-        gram_daf   = sl_gram(sig_daf,   encoder.kernels, sr=sr, frame_rate=1000)
+    _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_channels
 
-        T_copy    = min(gram_train.shape[1], T_song)
-        gram_mean = float(gram_train[:, :T_copy].mean())
-        threshold = gram_mean + np.log(poisson_scale / poisson_target_rate_hz) / poisson_gain
-        _grams    = {10: gram_train, 13: gram_rev, 11: gram_novel, 12: gram_daf}
-
-        def _sig_to_aud_lewicki(gram: np.ndarray, seed_offset: int) -> np.ndarray:
-            T_c = min(gram.shape[1], T_song)
-            spk = sl_gram_to_spikes(gram, threshold=threshold, scale=poisson_scale,
-                                     gain=poisson_gain, seed=seed + seed_offset)
-            aud = np.zeros((n_kernels, T_rend), dtype=np.float32)
-            aud[:, :T_c] = spk[:, :T_c]
-            return aud
-
-        def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
-            return _sig_to_aud_lewicki(_grams[seed_offset], seed_offset)
+    def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
+        acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
+                           n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend)
+        spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
+                           sign_split=_sign_split, seed=seed + seed_offset)
+        return spk.astype(np.float32)
 
     aud_train = _sig_to_aud(sig_train, 10)
     aud_rev   = _sig_to_aud(sig_rev,   13)
@@ -167,7 +143,9 @@ def compute_encoding_columns(
 
     # ── VEN inference ─────────────────────────────────────────────────────────
     def _infer_once(hvc, aud):
-        np.random.seed(seed)
+        # No global np.random.seed here: the network owns a seeded generator of its
+        # own, so seeding the global RNG would imply a dependency that no longer
+        # exists. See VocalErrorNetV2's _sim_rng.
         return ven.transform_all(hvc, aud)
 
     sE_train, sI_train = _infer_once(hvc_one, aud_train)
@@ -183,7 +161,7 @@ def compute_encoding_columns(
         dict(label=lab, sig=s, aud=a, sE=e, sI=i)
         for lab, s, a, e, i in zip(COLUMN_LABELS, sigs, auds, sEs, sIs)
     ]
-    return dict(use_of=_use_of, T_rend=T_rend, columns=columns)
+    return dict(T_rend=T_rend, columns=columns)
 
 
 def make_figure(
@@ -198,12 +176,9 @@ def make_figure(
     sr: int = 16000,
     seed: int = 42,
     n_kernels: int = 64,
-    kernel_width: float = 10.0,
-    peak_rate: float = 300.0,
-    poisson_gain: int = 4,
-    poisson_target_rate_hz: float = 20.0,
-    poisson_scale: float = 1000.0,
-    daf_wn_amplitude: float = 5.6,
+    kernel_width: float = KERNEL_WIDTH_MS,
+    peak_rate: float = PEAK_RATE_HZ,
+    daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
     aud_delay_ms: int = 23,
     hvc_delay_ms: int = 5,
     sub_l: int = 64,
@@ -217,7 +192,7 @@ def make_figure(
     Parameters
     ----------
     ven         : VocalErrorNetV2 (trained or partially trained)
-    encoder     : SmithLewickiDictionary or OlshausenFieldEncoder
+    encoder     : OlshausenFieldEncoder
     sig_train   : (N,) float64 training audio signal
     T_song      : int, song duration in ms
     out_tag     : str appended to output filenames, e.g. "_r0050"
@@ -225,12 +200,10 @@ def make_figure(
     data      = compute_encoding_columns(
         ven, encoder, sig_train, T_song,
         T_post=T_post, sr=sr, seed=seed, n_kernels=n_kernels,
-        kernel_width=kernel_width, peak_rate=peak_rate, poisson_gain=poisson_gain,
-        poisson_target_rate_hz=poisson_target_rate_hz, poisson_scale=poisson_scale,
+        kernel_width=kernel_width, peak_rate=peak_rate,
         daf_wn_amplitude=daf_wn_amplitude, of_mean_rate_hz=of_mean_rate_hz,
         of_n_ista=of_n_ista,
     )
-    _use_of   = data["use_of"]
     COL_DATA  = data["columns"]
     sig_rev   = COL_DATA[1]["sig"]
     sig_novel = COL_DATA[2]["sig"]
@@ -247,7 +220,7 @@ def make_figure(
 
     # ── Figure layout ─────────────────────────────────────────────────────────
     COL_LABELS = COLUMN_LABELS
-    _enc_label = "Auditory\nneurons" if _use_of else "Lewicki sparse\ncode"
+    _enc_label = "Auditory\nneurons"
     ROW_LABELS = ["", "", _enc_label, "Inhibitory\ninterneurons", "Excitatory\nprojection\nneurons"]
     CLR = {"lew": "#2ca02c", "I": "#c0392b", "E": "#1f77b4"}
     BG  = {"wav": "#FFFFFF",  "spec": "#F8F8F8",

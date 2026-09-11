@@ -15,9 +15,7 @@ pulls in Brian2. Import it explicitly:
 
 Architecture
 ------------
-audio source
-    -> build_sl_filterbank()   FIR delay-line at Brian2 dt
-    -> build_sl_spike_group()  Poisson spikes (exponential rate)
+auditory spike train (from the numpy encoder, via a SpikeGeneratorGroup)
     -> build_ven_groups() / build_ven_synapses()   E/I LIF with STDP
 
 Downstream wiring of the E population into a circuit (E -> VTA_DA / VTA_GABA / VP) is
@@ -25,24 +23,18 @@ Downstream wiring of the E population into a circuit (E -> VTA_DA / VTA_GABA / V
 circuit that owns them (see finchsim's ``aiv_synapses.py``). This package stops at the
 error signal.
 
-Note: build_sl_filterbank / build_sl_spike_group use ``network_operation`` and so are not
-compatible with Brian2 standalone / CUDA mode. The VEN builders are pure NeuronGroup +
-Synapses and do compile to standalone.
+The VEN builders are pure NeuronGroup + Synapses and compile to Brian2 standalone. An
+earlier pair of ``network_operation``-based filterbank builders lived here; they had no
+callers and could not compile to standalone, so they were removed.
 """
 
 import numpy as np
 from numpy.random import default_rng
 
-from brian2 import (
-    NeuronGroup,
-    Synapses,
-    network_operation,
-)
+from brian2 import NeuronGroup, Synapses
 from brian2.units import ms, second
 
 __all__ = [
-    "build_sl_filterbank",
-    "build_sl_spike_group",
     "build_ven_groups",
     "build_ven_synapses",
 ]
@@ -71,113 +63,6 @@ dg_hvc/dt = -g_hvc / tau_s_ven : 1
 dg_exc/dt = -g_exc / tau_exc_ven : 1
 dx_i/dt   = -x_i / tau_s_ven : 1
 """
-
-
-# ---------------------------------------------------------------------------
-# Smith-Lewicki filterbank (runtime mode — uses network_operation)
-# ---------------------------------------------------------------------------
-
-def build_sl_filterbank(
-    kernels: np.ndarray,
-    audio_group: NeuronGroup,
-    audio_var: str = "x",
-    name_prefix: str = "sl",
-) -> tuple[NeuronGroup, list]:
-    """Causal FIR filterbank driven by audio_group.
-
-    Parameters
-    ----------
-    kernels     : (N_filt, K) float32 — learned Smith-Lewicki weights
-    audio_group : NeuronGroup with one neuron; state variable *audio_var*
-                  holds the current audio sample each timestep.
-    audio_var   : name of the audio sample state variable (default 'x')
-    name_prefix : prefix for Brian2 object names
-
-    Returns
-    -------
-    (filt_group, ops)
-      filt_group : NeuronGroup(N_filt), state variable 'y' holds filter output
-      ops        : list of network_operation callables; must be added to Network
-    """
-    kernels = np.asarray(kernels, dtype=np.float64)
-    N_filt, K = kernels.shape
-
-    # delay buffer: buf.x[0] = current sample, buf.x[k] = sample k steps ago
-    buf = NeuronGroup(K, "x : 1", name=f"{name_prefix}_buf")
-    buf.x = 0.0
-
-    # filter output group
-    filt_group = NeuronGroup(N_filt, "y : 1", name=f"{name_prefix}_filt")
-    filt_group.y = 0.0
-
-    # kernels array stored in closures (read-only after build)
-    _K = kernels  # (N_filt, K), causal: y[j] = sum_k K[j,k] * buf.x[k]
-
-    @network_operation(when="start", order=0)
-    def _shift_buf():
-        # back-to-front so each shift reads the pre-shift value (Gotcha 7)
-        buf.x[1:] = np.array(buf.x[:-1])
-
-    @network_operation(when="start", order=1)
-    def _load_sample():
-        buf.x[0] = getattr(audio_group, audio_var)[0]
-
-    @network_operation(when="groups", order=0)
-    def _compute_filt():
-        filt_group.y[:] = _K @ np.array(buf.x[:])
-
-    ops = [_shift_buf, _load_sample, _compute_filt]
-    return filt_group, ops
-
-
-# ---------------------------------------------------------------------------
-# Poisson spike generation (exponential rate model)
-# ---------------------------------------------------------------------------
-
-def build_sl_spike_group(
-    filterbank_group: NeuronGroup,
-    threshold: float = 3.5,
-    scale: float = 1000.0,
-    gain: float = 1.0,
-    name_prefix: str = "sl_spk",
-) -> NeuronGroup:
-    """Poisson spike group driven by filterbank output.
-
-    Rate model (matches sl_gram_to_spikes exactly):
-        rate (Hz) = scale * exp(gain * (y - threshold))
-
-    The Brian2 threshold condition rand() < rate * dt implements a
-    Bernoulli(p) trial each timestep, which approximates Poisson(λ) when
-    rate * dt << 1 — satisfied for all Lewicki filter rates well below ~5 kHz.
-
-    Parameters
-    ----------
-    filterbank_group : NeuronGroup with state variable 'y'
-    threshold, scale, gain : match sl_gram_to_spikes parameters
-    name_prefix : prefix for Brian2 object name
-
-    Returns
-    -------
-    NeuronGroup with Poisson spiking
-    """
-    N = len(filterbank_group)
-    eqs = """
-y     : 1 (linked)
-rate  = scale_spk * exp(gain_spk * (y - thresh_spk)) : Hz
-"""
-    spk = NeuronGroup(
-        N,
-        eqs,
-        threshold="rand() < rate * dt",
-        namespace={
-            "scale_spk": scale * (1.0 / ms),   # Hz when (y - thresh) = 0
-            "gain_spk":  gain,
-            "thresh_spk": threshold,
-        },
-        name=f"{name_prefix}_group",
-    )
-    spk.variables.add_reference("y", filterbank_group, "y")
-    return spk
 
 
 # ---------------------------------------------------------------------------

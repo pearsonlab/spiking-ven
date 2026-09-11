@@ -98,4 +98,12 @@ manipulation: there the noise is mixed into a window of the song.
 
 ## Citing
 
-See `CITATION.cff`. Please also cite the paper above.
+Cite the paper, not this software:
+
+> Gong Z, Duarte F, Mooney R, Pearson J (2026). Correctness is its own reward:
+> bootstrapping error signals in self-guided reinforcement learning. *eLife*
+> [doi:10.7554/eLife.111771.1](https://doi.org/10.7554/eLife.111771.1)
+
+`CITATION.cff` names that paper as the repository's `preferred-citation`, so
+GitHub's "Cite this repository" button and any CFF-aware tool will hand you the
+paper rather than a separate software citation.

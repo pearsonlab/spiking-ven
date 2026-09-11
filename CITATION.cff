@@ -1,31 +1,30 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite both it and the paper below."
+# There is no separate software citation for this package: cite the paper.
+# `preferred-citation` is the CFF mechanism for that -- GitHub's "Cite this
+# repository" widget and every CFF-aware tool render the entry below, not this
+# file's software metadata, which exists only because the schema requires a
+# top-level subject.
+message: "If you use this software, please cite the paper below."
 title: "spiking-ven: a spiking sparse auditory encoder and vocal error network"
-abstract: >-
-  A spiking implementation of sparse auditory encoding and predictive cancellation
-  of self-generated song in the zebra finch, and the spiking counterpart to the
-  rate-based vocal error network of Gong et al. 2026.
 authors:
   - family-names: Pearson
     given-names: John
 type: software
 license: MIT
-version: 0.3.0
-date-released: "2026-09-11"
 repository-code: "https://github.com/pearsonlab/spiking-ven"
-references:
-  - type: article
-    title: "Correctness is its own reward: bootstrapping error signals in self-guided reinforcement learning"
-    authors:
-      - family-names: Gong
-        given-names: Ziyi
-      - family-names: Duarte
-        given-names: Fabiola
-      - family-names: Mooney
-        given-names: Richard
-      - family-names: Pearson
-        given-names: John
-    year: 2026
-    journal: eLife
-    doi: "10.7554/eLife.111771.1"
-    url: "https://elifesciences.org/reviewed-preprints/111771"
+preferred-citation:
+  type: article
+  title: "Correctness is its own reward: bootstrapping error signals in self-guided reinforcement learning"
+  authors:
+    - family-names: Gong
+      given-names: Ziyi
+    - family-names: Duarte
+      given-names: Fabiola
+    - family-names: Mooney
+      given-names: Richard
+    - family-names: Pearson
+      given-names: John
+  year: 2026
+  journal: eLife
+  doi: "10.7554/eLife.111771.1"
+  url: "https://elifesciences.org/reviewed-preprints/111771"

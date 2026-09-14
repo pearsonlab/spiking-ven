@@ -258,7 +258,7 @@ def build_ven_synapses(
     JEI_weights: np.ndarray | None = None,
     learn: bool = True,
     A_jie: float = 5e-6,
-    c_JEI: float = 0.5,
+    c_JEI: float | None = None,
     c_JIE: float = 0.5,
     tau_s: float = 10.0,
     xi_th: float = 0.0,
@@ -281,11 +281,20 @@ def build_ven_synapses(
     JEI_weights   : (N_i, N_e) E→I weight matrix; if None, random lognormal init
                     at density ``c_JEI``
     c_JEI, c_JIE  : connection densities used ONLY for those random fallbacks, and
-                    ignored when the corresponding weight matrix is given. Defaults
-                    match VocalErrorNetV2. ``c_JEI`` used to be derived from the
-                    density of ``B_hvc`` -- the HVC→I matrix, an unrelated projection
-                    -- which produced a plausible-looking number by coincidence when
-                    HVC→I happened to be dense, and divided by zero when it was not.
+                    ignored when the corresponding weight matrix is given.
+
+                    ``c_JEI=None`` (the default) reproduces this function's historical
+                    behaviour: the density is taken from ``B_hvc``, i.e. the E→I
+                    probability is read off the HVC→I matrix. Those are different
+                    populations and an unrelated projection, so the coupling is not
+                    meaningful -- it is kept as the default only so existing fixtures
+                    keep producing the weights they always have. **Pass an explicit
+                    value in new code**; 0.5 is VocalErrorNetV2's own default.
+
+                    The historical form also divided by zero when ``B_hvc`` was empty,
+                    reported as a bare "float division by zero". That case now raises
+                    with an explanation, which matters because zeroing HVC→I is the
+                    obvious way to isolate the auditory contribution to the E group.
     learn         : if True, JIE synapse includes STDP on_post (training mode);
                     if False, JIE is a fixed synapse — use after loading trained weights
                     via VocalErrorNetV2.to_brian_weights()
@@ -365,6 +374,17 @@ def build_ven_synapses(
     if JEI_weights is not None:
         JEI_full = np.asarray(JEI_weights, dtype=np.float64)  # (N_i, N_e)
     else:
+        if c_JEI is None:
+            # Historical derivation, preserved bit-for-bit -- see the docstring.
+            c_JEI = float(np.count_nonzero(B_hvc)) / (N_i * N_hvc) if N_hvc > 0 else 0.5
+            if c_JEI <= 0.0:
+                raise ValueError(
+                    "c_JEI defaults to the density of B_hvc, which is zero here, so the "
+                    "E→I fallback cannot be built (this used to be a bare "
+                    "'float division by zero'). B_hvc is the HVC→I projection and has no "
+                    "bearing on E→I -- the coupling is historical. Pass c_JEI explicitly "
+                    "(0.5 is VocalErrorNetV2's default) or supply JEI_weights."
+                )
         _check_density("c_JEI", c_JEI)
         rng_jei  = default_rng(0)
         srKE     = float(np.sqrt(N_e * c_JEI))

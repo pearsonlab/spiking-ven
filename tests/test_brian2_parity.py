@@ -130,22 +130,61 @@ def test_noise_i_reaches_the_i_membrane():
     assert voltages[0.5] > 0.01, "a non-zero noise_i must move the I membrane"
 
 
-def test_zero_hvc_projection_does_not_break_the_jei_fallback():
-    """Zeroing HVC→I must not reach through to the E→I weights.
+def _jei_of(**kw):
+    """Build a network and return the (pre, post, weight) triples of its E→I synapse."""
+    groups = build_ven_groups(N_e=8, N_i=3)
+    aud = SpikeGeneratorGroup(4, [], [] * ms)
+    hvc = SpikeGeneratorGroup(2, [], [] * ms)
+    rng = np.random.default_rng(0)
+    B_hvc = (rng.random((3, 2)) < 0.5) * 0.4          # a partly-filled HVC→I matrix
+    syns = build_ven_synapses(groups, aud, hvc,
+                              B_weights=np.full((8, 4), 0.1),
+                              B_hvc_weights=B_hvc, **kw)
+    jei = syns[2]
+    return np.array(jei.i[:]), np.array(jei.j[:]), np.array(jei.w_syn[:]), B_hvc
 
-    The random JEI fallback used to take its connection density from the density of
-    B_hvc -- a different projection entirely -- so zeroing HVC→I to isolate the
-    auditory contribution divided by zero inside the lognormal scale.
+
+def test_default_c_jei_reproduces_the_historical_weights():
+    """The default must build the E→I matrix callers have always got.
+
+    c_JEI defaults to the density of B_hvc -- an unrelated projection, and not a
+    meaningful coupling -- but existing fixtures were tuned against those weights, so
+    the default reproduces them rather than switching to a principled value.
+    """
+    i_def, j_def, w_def, B_hvc = _jei_of()
+    brian2.start_scope()
+    derived = float(np.count_nonzero(B_hvc)) / B_hvc.size
+    i_exp, j_exp, w_exp, _ = _jei_of(c_JEI=derived)
+    np.testing.assert_array_equal(i_def, i_exp)
+    np.testing.assert_array_equal(j_def, j_exp)
+    np.testing.assert_array_equal(w_def, w_exp)
+
+
+def test_zero_hvc_projection_explains_itself():
+    """Zeroing HVC→I is a real experiment; it must fail with a reason, not a divide.
+
+    Isolating the auditory contribution to the E group means silencing HVC→I. The
+    historical derivation makes c_JEI zero there and divided by zero several lines
+    later, surfacing as a bare "float division by zero" that named nothing.
     """
     groups = build_ven_groups(N_e=8, N_i=3)
     aud = SpikeGeneratorGroup(4, [], [] * ms)
     hvc = SpikeGeneratorGroup(2, [], [] * ms)
-    syns = build_ven_synapses(
-        groups, aud, hvc,
-        B_weights=np.full((8, 4), 0.1),
-        B_hvc_weights=np.zeros((3, 2)),     # no HVC drive at all
-    )
-    assert len(syns) == 4
+    with pytest.raises(ValueError, match="c_JEI"):
+        build_ven_synapses(groups, aud, hvc,
+                           B_weights=np.full((8, 4), 0.1),
+                           B_hvc_weights=np.zeros((3, 2)))
+
+
+def test_zero_hvc_projection_works_when_c_jei_is_given():
+    """...and the experiment goes through once the caller says what E→I should be."""
+    groups = build_ven_groups(N_e=8, N_i=3)
+    aud = SpikeGeneratorGroup(4, [], [] * ms)
+    hvc = SpikeGeneratorGroup(2, [], [] * ms)
+    syns = build_ven_synapses(groups, aud, hvc,
+                              B_weights=np.full((8, 4), 0.1),
+                              B_hvc_weights=np.zeros((3, 2)),
+                              c_JEI=0.5)
     syn_b, syn_b_hvc, syn_jei, syn_jie = syns
     assert not bool(syn_b_hvc.active), "an empty HVC→I projection should be inactive"
     assert bool(syn_jei.active), "E→I must still be built: it does not depend on HVC→I"

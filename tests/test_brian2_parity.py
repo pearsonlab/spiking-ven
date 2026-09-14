@@ -130,6 +130,54 @@ def test_noise_i_reaches_the_i_membrane():
     assert voltages[0.5] > 0.01, "a non-zero noise_i must move the I membrane"
 
 
+def test_zero_hvc_projection_does_not_break_the_jei_fallback():
+    """Zeroing HVC→I must not reach through to the E→I weights.
+
+    The random JEI fallback used to take its connection density from the density of
+    B_hvc -- a different projection entirely -- so zeroing HVC→I to isolate the
+    auditory contribution divided by zero inside the lognormal scale.
+    """
+    groups = build_ven_groups(N_e=8, N_i=3)
+    aud = SpikeGeneratorGroup(4, [], [] * ms)
+    hvc = SpikeGeneratorGroup(2, [], [] * ms)
+    syns = build_ven_synapses(
+        groups, aud, hvc,
+        B_weights=np.full((8, 4), 0.1),
+        B_hvc_weights=np.zeros((3, 2)),     # no HVC drive at all
+    )
+    assert len(syns) == 4
+    syn_b, syn_b_hvc, syn_jei, syn_jie = syns
+    assert not bool(syn_b_hvc.active), "an empty HVC→I projection should be inactive"
+    assert bool(syn_jei.active), "E→I must still be built: it does not depend on HVC→I"
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+def test_unusable_connection_density_is_named(bad):
+    """A density that cannot build a matrix must say which parameter was wrong."""
+    groups = build_ven_groups(N_e=6, N_i=2)
+    aud = SpikeGeneratorGroup(3, [], [] * ms)
+    hvc = SpikeGeneratorGroup(2, [], [] * ms)
+    with pytest.raises(ValueError, match="c_JEI"):
+        build_ven_synapses(groups, aud, hvc,
+                           B_weights=np.full((6, 3), 0.1),
+                           B_hvc_weights=np.full((2, 2), 0.1),
+                           c_JEI=bad)
+
+
+def test_supplied_weights_ignore_the_density_arguments():
+    """c_JEI/c_JIE are fallback-only, so a nonsense value must not matter."""
+    groups = build_ven_groups(N_e=6, N_i=2)
+    aud = SpikeGeneratorGroup(3, [], [] * ms)
+    hvc = SpikeGeneratorGroup(2, [], [] * ms)
+    syns = build_ven_synapses(
+        groups, aud, hvc,
+        B_weights=np.full((6, 3), 0.1), B_hvc_weights=np.full((2, 2), 0.1),
+        JEI_weights=np.full((2, 6), 0.01), JIE_weights=np.full((6, 2), 0.01),
+        c_JEI=0.0, c_JIE=0.0,
+    )
+    assert len(syns) == 4
+
+
 def test_tau_s_mismatch_is_rejected():
     """tau_s only takes effect via build_ven_groups, so a mismatch must not pass quietly."""
     groups = build_ven_groups(N_e=4, N_i=2, tau_s=10.0)

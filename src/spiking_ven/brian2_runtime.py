@@ -213,6 +213,22 @@ def build_ven_groups(
 # VEN synapses
 # ---------------------------------------------------------------------------
 
+def _check_density(name: str, c: float) -> None:
+    """Reject a connection density that cannot produce a usable weight matrix.
+
+    Zero is the case that matters: the lognormal fallbacks scale their mean weight by
+    ``1 / sqrt(N * c)``, so a zero density is a division by zero several lines later,
+    reported as a bare ``float division by zero`` with nothing naming the parameter.
+    """
+    if not 0.0 < c <= 1.0:
+        raise ValueError(
+            f"{name}={c} is not a usable connection density: it must be in (0, 1]. "
+            f"This value is only used to build a random weight matrix when the "
+            f"corresponding one is not supplied; pass that matrix instead if you want "
+            f"an unconnected projection."
+        )
+
+
 def _wire(syn: Synapses, W: np.ndarray) -> None:
     """Connect ``syn`` from a dense ``(post, pre)`` weight matrix.
 
@@ -242,6 +258,8 @@ def build_ven_synapses(
     JEI_weights: np.ndarray | None = None,
     learn: bool = True,
     A_jie: float = 5e-6,
+    c_JEI: float = 0.5,
+    c_JIE: float = 0.5,
     tau_s: float = 10.0,
     xi_th: float = 0.0,
     J_max_ie: float = 1.0,
@@ -259,7 +277,15 @@ def build_ven_synapses(
     B_weights     : (N_e, n_aud) sparse weight matrix for aud→E
     B_hvc_weights : (N_i, n_hvc) sparse weight matrix for HVC→I
     JIE_weights   : (N_e, N_i) I→E weight matrix; if None, random lognormal init
+                    at density ``c_JIE``
     JEI_weights   : (N_i, N_e) E→I weight matrix; if None, random lognormal init
+                    at density ``c_JEI``
+    c_JEI, c_JIE  : connection densities used ONLY for those random fallbacks, and
+                    ignored when the corresponding weight matrix is given. Defaults
+                    match VocalErrorNetV2. ``c_JEI`` used to be derived from the
+                    density of ``B_hvc`` -- the HVC→I matrix, an unrelated projection
+                    -- which produced a plausible-looking number by coincidence when
+                    HVC→I happened to be dense, and divided by zero when it was not.
     learn         : if True, JIE synapse includes STDP on_post (training mode);
                     if False, JIE is a fixed synapse — use after loading trained weights
                     via VocalErrorNetV2.to_brian_weights()
@@ -339,7 +365,7 @@ def build_ven_synapses(
     if JEI_weights is not None:
         JEI_full = np.asarray(JEI_weights, dtype=np.float64)  # (N_i, N_e)
     else:
-        c_JEI    = float(np.count_nonzero(B_hvc)) / (N_i * N_hvc) if N_hvc > 0 else 0.5
+        _check_density("c_JEI", c_JEI)
         rng_jei  = default_rng(0)
         srKE     = float(np.sqrt(N_e * c_JEI))
         mean_jei = 1.7 / srKE / 10
@@ -363,7 +389,7 @@ def build_ven_synapses(
     if JIE_weights is not None:
         JIE_full = np.asarray(JIE_weights, dtype=np.float64)  # (N_e, N_i)
     else:
-        c_JIE    = 0.5
+        _check_density("c_JIE", c_JIE)
         rng_jie  = default_rng(1)
         srKI     = float(np.sqrt(N_i * c_JIE))
         mean_jie = 1.0 / srKI / 10

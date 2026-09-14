@@ -113,6 +113,7 @@ def coch_encode(
     n_ista: int = 100,
     upsample_to_ms: bool = False,
     T_out_ms: int | None = None,
+    rms_from: np.ndarray | None = None,
 ) -> np.ndarray:
     """Full pipeline: audio → cochleagram → ISTA → (n_bases, T) activations.
 
@@ -124,6 +125,19 @@ def coch_encode(
     n_ista        : ISTA iterations
     upsample_to_ms: if True, repeat each frame so output is at 1 ms resolution
     T_out_ms      : if set, trim/pad output to exactly this many ms columns
+    rms_from      : signal to take the input RMS from, instead of ``signal`` itself.
+
+                    By default every signal is scaled to the encoder's reference RMS,
+                    which discards its level: two stimuli that differ only in loudness
+                    encode identically. That is wrong wherever the level *is* the
+                    manipulation -- delayed auditory feedback is defined by noise
+                    presented well above the song (~95 vs ~80 dBSPL), and normalising
+                    each stimulus separately divides that difference straight back out.
+
+                    Pass the reference signal here -- typically the song -- to scale a
+                    stimulus by the *reference's* RMS instead of its own, preserving
+                    their true ratio. Same shape of fix as ``of_to_spikes(calibrate_on=)``
+                    for firing rates, and inert when unused.
 
     Returns
     -------
@@ -138,7 +152,8 @@ def coch_encode(
                          "or use coch_encode only with cochleagram-trained encoders.")
 
     sig = signal.astype(np.float64)
-    rms = float(np.sqrt(np.mean(sig ** 2)))
+    ref = sig if rms_from is None else np.asarray(rms_from, dtype=np.float64)
+    rms = float(np.sqrt(np.mean(ref ** 2)))
     sig = sig / max(rms, 1e-12) * cp["rms_ref"]
 
     coch = cochleagram(

@@ -126,11 +126,22 @@ def compute_encoding_columns(
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
     _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_channels
 
+    # One reference for the whole set (the song) at BOTH normalisation stages -- the
+    # waveform scaling and the spike-rate calibration. Per-signal at either stage
+    # discards the level: in the DAF column the added noise raises the composite RMS,
+    # so normalising against it quietens the very song the noise was added to. See
+    # the note in evaluate.build_stimuli.
+    acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr,
+                             n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
+                             rms_from=sig_train)
+
     def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
         acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
-                           n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend)
+                           n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
+                           rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
-                           sign_split=_sign_split, seed=seed + seed_offset)
+                           sign_split=_sign_split, seed=seed + seed_offset,
+                           calibrate_on=acts_train)
         return spk.astype(np.float32)
 
     aud_train = _sig_to_aud(sig_train, 10)

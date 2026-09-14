@@ -14,18 +14,17 @@ The model is a **responder-only** population -- every excitatory unit receives i
 auditory drive, so there is no non-responder subpopulation to average in. The
 responder-only targets are therefore the relevant ones.
 
-What K2/K3 do and do not measure
---------------------------------
-They are matched-input-rate comparisons. Every stimulus goes through the same encoder
-path, and that path normalises twice: ``coch_encode`` scales each signal to the
-encoder's reference RMS, and ``of_to_spikes`` then calibrates the spike train to
-``mean_rate_hz``. So the white-noise input carries the *same* mean drive as the song
-input by construction, and ``DAF_WN_AMPLITUDE`` cancels out -- K2 and K3 report the
-network's response to a spectrotemporal mismatch at equal input rate, not to a louder
-stimulus. That is the stronger test of cancellation (the effect cannot come from extra
-drive), but it is not the amplitude manipulation the "DAF" name suggests. The figure's
-DAF column is different: there the noise is added into a window of the song, so the
-amplitude does matter there.
+What K2/K3 measure
+------------------
+The response to white noise presented at ``DAF_WN_AMPLITUDE`` times the song's RMS,
+against the response to the song -- level difference included.
+
+This was not always so. ``coch_encode`` used to scale every signal to the encoder's
+reference RMS *individually*, which divided ``DAF_WN_AMPLITUDE`` straight back out and
+left K2/K3 reporting a pure spectrotemporal mismatch at matched drive. The stimulus set
+is now normalised against one reference (the song) instead, so relative level survives
+into the cochleagram. ``of_to_spikes`` still rate-calibrates, but on the song window via
+``calibrate_on``, so it no longer flattens the levels either.
 
 This lives here, as a function returning a dict, rather than as a block of prints at the
 bottom of a training script, so the same numbers can be asserted in tests and recomputed
@@ -153,11 +152,22 @@ def build_stimuli(
     sig_train, train_idx = corpus.template()
     rms_train = float(np.sqrt(np.mean(sig_train**2)))
 
-    def sig_to_aud(sig, seed_offset: int):
-        acts = coch_encode(sig.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
+    # The encoder path normalises TWICE, and both have to share one reference or the
+    # level difference does not reach the network:
+    #   coch_encode   scales the waveform  -> rms_from=sig_train
+    #   of_to_spikes  scales the spike rate -> calibrate_on=acts_train
+    # Fixing only the first restores level in the activations and then flattens it again
+    # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
+    # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
+    acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
+                             upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
+
+    def sig_to_aud(sig, seed_offset: int, acts=None):
+        if acts is None:
+            acts = coch_encode(sig.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
+                               upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
-                           seed=seed + seed_offset)
+                           seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)
 
     if verbose:
@@ -165,7 +175,7 @@ def build_stimuli(
               f"rms={rms_train:.4f}")
         print(f"Building correct training pool ({n_motifs} motifs)...")
 
-    aud_correct = sig_to_aud(sig_train, 10)
+    aud_correct = sig_to_aud(sig_train, 10, acts=acts_train)
     correct_pool = [aud_correct]                 # index 0 is the template motif
     for ci in range(n_motifs):
         if ci == train_idx:
@@ -176,14 +186,14 @@ def build_stimuli(
     aud_reversed = sig_to_aud(sig_rev, 200)
 
     # How separable forward and reversed song are in the encoder is the ceiling on K4.
-    acts_fwd = coch_encode(sig_train, encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
+    # acts_train is the forward encoding already, so only the reversed one is new.
+    acts_fwd = acts_train
     acts_rev = coch_encode(sig_rev, encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend)
+                           upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
     fv, rv = acts_fwd.ravel(), acts_rev.ravel()
     fwd_rev_corr = (float(np.corrcoef(fv, rv)[0, 1])
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))
-    del acts_fwd, acts_rev, fv, rv
+    del acts_rev, fv, rv
 
     # coch_encode RMS-normalises and of_to_spikes rate-calibrates, so DAF_WN_AMPLITUDE
     # divides straight back out: only the broadband spectrum distinguishes this from song.

@@ -20,7 +20,13 @@ import argparse
 import json
 
 from ..constants import SR
-from ..evaluate import build_stimuli, daf_metrics, format_metrics
+from ..evaluate import (
+    build_stimuli,
+    daf_metrics,
+    daf_response,
+    format_metrics,
+    format_responders,
+)
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
@@ -41,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n-ista", type=int, default=50)
     p.add_argument("--r-e-target", type=float, default=16.0,
                    help="only used to annotate the no-HVC sanity line")
+    p.add_argument("--n-trials", type=int, default=20,
+                   help="renditions with independent noise draws for the DAF response")
     p.add_argument("--json", action="store_true", help="emit the metrics as JSON")
     return p
 
@@ -67,12 +75,21 @@ def main(argv: list[str] | None = None) -> None:
                     aud_correct=st["aud_correct"], aud_daf=st["aud_daf"],
                     aud_reversed=st["aud_reversed"])
 
+    # The DAF number that means something: a windowed, per-neuron responder measurement
+    # rather than an excitatory rate averaged over a whole rendition, which cannot see a
+    # 50 ms burst.
+    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=st["hvc_on"],
+                     acts_train=st["acts_train"], sr=st["sr"], T_out_ms=st["T_rend"],
+                     n_trials=args.n_trials, seed=args.seed)
+
     if args.json:
-        print(json.dumps({**m, "fwd_rev_corr": st["fwd_rev_corr"],
+        print(json.dumps({**m, "daf_response": r, "fwd_rev_corr": st["fwd_rev_corr"],
                           "train_idx": st["train_idx"], "model": model_path}, indent=2))
     else:
         print()
         print(format_metrics(m, r_e_target=args.r_e_target))
+        print()
+        print(format_responders(r))
         print(f"\n  encoder forward/reversed correlation: {st['fwd_rev_corr']:.4f}")
 
 

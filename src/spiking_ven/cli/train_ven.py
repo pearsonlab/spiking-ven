@@ -22,7 +22,13 @@ import argparse
 import numpy as np
 
 from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, SR
-from ..evaluate import build_stimuli, daf_metrics, format_metrics
+from ..evaluate import (
+    build_stimuli,
+    daf_metrics,
+    daf_response,
+    format_metrics,
+    format_responders,
+)
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
@@ -192,6 +198,11 @@ def main(argv: list[str] | None = None) -> None:
                     aud_daf=aud_daf, aud_reversed=aud_reversed)
     print()
     print(format_metrics(m, r_e_target=args.r_e_target))
+    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=hvc_on,
+                     acts_train=st["acts_train"], sr=args.sr, T_out_ms=st["T_rend"],
+                     n_trials=20, seed=args.seed)
+    print()
+    print(format_responders(r))
 
     np.savez(traces_path,
              rc=np.array(rc_trace), rn=np.array(rn_trace),

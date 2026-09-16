@@ -67,9 +67,10 @@ def test_encoder_separates_forward_from_reversed(metrics):
 
 def test_k1_matches_reference_and_biology(metrics):
     assert metrics["k1"] == pytest.approx(REFERENCE["k1"], abs=0.3)
-    # Also inside the biological distribution: mean 7.7 Hz, SD 8.7 (Fig. 7C).
-    mean, sd = BIOLOGICAL_TARGETS["k1_hz"]
-    assert abs(metrics["k1"] - mean) < sd
+    # And inside the range the paper reports for singing: "AIV single-units discharged
+    # at low rates during singing (1-10 Hz, Figure 7C)".
+    lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
+    assert lo <= metrics["k1"] <= hi
 
 
 def test_k2_matches_reference(metrics):
@@ -82,7 +83,8 @@ def test_k3_matches_reference(metrics):
 
 def test_k4_matches_reference_and_exceeds_one(metrics):
     assert metrics["k4"] == pytest.approx(REFERENCE["k4"], abs=0.2)
-    assert metrics["k4"] > BIOLOGICAL_TARGETS["k4_min"], "K4 must exceed 1x"
+    assert metrics["k4"] > BIOLOGICAL_TARGETS["reversed_min_ratio"], \
+        "reversed song must exceed the trained song"
 
 
 def test_cancellation_is_selective(metrics):

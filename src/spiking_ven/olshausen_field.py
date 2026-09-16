@@ -64,7 +64,8 @@ def coch_extract_patches(
     K_frames: int,
     stride: int = 1,
     mean_subtract: bool = True,
-) -> np.ndarray:
+    return_mean: bool = False,
+):
     """Extract causal spectrotemporal patches from a cochleagram.
 
     Each patch covers the trailing K_frames frames ending at the current
@@ -76,11 +77,15 @@ def coch_extract_patches(
     coch          : (n_channels, T_frames) cochleagram
     K_frames      : context window width in frames
     stride        : output stride in frames (1 = every frame)
-    mean_subtract : subtract per-patch mean (removes DC / overall level)
+    mean_subtract : subtract per-patch mean (removes the window's DC)
+    return_mean   : also return the per-patch mean that was subtracted. It is the
+                    level signal the DC removal discards -- one scalar per output
+                    frame, causal, at the cochleagram frame rate.
 
     Returns
     -------
     patches : (T_out, n_channels * K_frames) float32
+    means   : (T_out, 1) float32, only when return_mean=True
     """
     n_ch, T = coch.shape
     W = n_ch * K_frames
@@ -100,9 +105,12 @@ def coch_extract_patches(
     all_patches = padded[:, col_idx]                   # (n_ch, T_out, K_frames)
     patches = all_patches.transpose(1, 0, 2).reshape(T_out, W)  # (T_out, W)
 
+    mu = patches.mean(axis=1, keepdims=True)
     if mean_subtract:
-        patches -= patches.mean(axis=1, keepdims=True)
+        patches -= mu
 
+    if return_mean:
+        return patches.astype(np.float32), mu.astype(np.float32)
     return patches.astype(np.float32)
 
 
@@ -114,6 +122,8 @@ def coch_encode(
     upsample_to_ms: bool = False,
     T_out_ms: int | None = None,
     rms_from: np.ndarray | None = None,
+    divisive_gain: bool = False,
+    dn_sigma: float = 1e-6,
 ) -> np.ndarray:
     """Full pipeline: audio → cochleagram → ISTA → (n_bases, T) activations.
 
@@ -138,6 +148,23 @@ def coch_encode(
                     stimulus by the *reference's* RMS instead of its own, preserving
                     their true ratio. Same shape of fix as ``of_to_spikes(calibrate_on=)``
                     for firing rates, and inert when unused.
+    divisive_gain : replace the raw ISTA coefficients with
+
+                        S_out = S * mu / (dn_sigma + ||S A||)
+
+                    two corrections applied after the sparse regression:
+
+                    * dividing by the reconstruction norm ``||S A||`` makes the output
+                      magnitude independent of how much of the input the dictionary
+                      managed to explain. Raw coefficients report goodness of match,
+                      which attenuates anything unlike the training song -- the wrong
+                      sign for a circuit that detects departures from it.
+                    * multiplying by the per-patch mean ``mu`` restores the level that
+                      the DC subtraction removes, so drive tracks sound level again.
+
+                    The pattern (which atoms, in what proportion) is untouched; only
+                    the magnitude changes. Off by default.
+    dn_sigma      : semi-saturation constant for that division, guarding silence.
 
     Returns
     -------
@@ -164,8 +191,15 @@ def coch_encode(
         hi_hz=cp["hi_hz"],
     )  # (n_ch, T_frames)
 
-    patches = coch_extract_patches(coch, cp["K_frames"], stride=1, mean_subtract=True)
+    patches, mu = coch_extract_patches(coch, cp["K_frames"], stride=1,
+                                       mean_subtract=True, return_mean=True)
     acts = encoder.encode_patches(patches, n_ista=n_ista)  # (n_bases, T_frames)
+
+    if divisive_gain:
+        S = acts.T.astype(np.float64)                        # (T_frames, n_bases)
+        recon_norm = np.linalg.norm(S @ encoder.A, axis=1, keepdims=True)
+        scale = mu.astype(np.float64) / (dn_sigma + recon_norm)
+        acts = (S * scale).T.astype(np.float32)
 
     if upsample_to_ms:
         frame_ms = 1000 // cp["frame_rate"]   # ms per frame (e.g. 10)

@@ -133,12 +133,14 @@ def compute_encoding_columns(
     # the note in evaluate.build_stimuli.
     acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr,
                              n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
-                             rms_from=sig_train)
+                             rms_from=sig_train,
+                           divisive_gain=True)
 
     def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
         acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
                            n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
-                           rms_from=sig_train)
+                           rms_from=sig_train,
+                           divisive_gain=True)
         spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
                            sign_split=_sign_split, seed=seed + seed_offset,
                            calibrate_on=acts_train)

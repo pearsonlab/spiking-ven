@@ -160,12 +160,14 @@ def build_stimuli(
     # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
     # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
     acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
-                             upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
+                             upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
+                           divisive_gain=True)
 
     def sig_to_aud(sig, seed_offset: int, acts=None):
         if acts is None:
             acts = coch_encode(sig.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
-                               upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
+                               upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
+                           divisive_gain=True)
         spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
                            seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)
@@ -189,7 +191,8 @@ def build_stimuli(
     # acts_train is the forward encoding already, so only the reversed one is new.
     acts_fwd = acts_train
     acts_rev = coch_encode(sig_rev, encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train)
+                           upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
+                           divisive_gain=True)
     fv, rv = acts_fwd.ravel(), acts_rev.ravel()
     fwd_rev_corr = (float(np.corrcoef(fv, rv)[0, 1])
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))

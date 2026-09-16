@@ -45,7 +45,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram as scipy_spectrogram
 
-from ..constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from ..constants import DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from ..evaluate import daf_waveform
 from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
 from ..common import generate_hvc_spikes
 
@@ -111,17 +112,8 @@ def compute_encoding_columns(
     # the same realisation, so columns 3 and 4 shared their noise.
     rng_novel  = np.random.default_rng(seed + 1)
     sig_novel  = rng_novel.standard_normal(len(sig_train)) * rms_train
-    _rng_daf   = np.random.default_rng(seed + 2)
-    daf_noise  = _rng_daf.standard_normal(len(sig_train)) * rms_train * daf_wn_amplitude
-    sig_daf    = sig_train.copy()
-    _s0, _s1   = int(DAF_WINDOW_S[0] * sr), int(DAF_WINDOW_S[1] * sr)
-    if _s0 >= len(sig_train):
-        raise ValueError(
-            f"the DAF window {DAF_WINDOW_S} s starts past the end of a "
-            f"{len(sig_train) / sr:.3f} s motif, so the DAF column would be identical to "
-            "the training column. Adjust constants.DAF_WINDOW_S for this corpus."
-        )
-    sig_daf[_s0:_s1] += daf_noise[_s0:_s1]
+    # Same function the metrics score, so the column and the number agree by construction.
+    sig_daf    = daf_waveform(sig_train, sr, seed=seed + 2, amplitude=daf_wn_amplitude)
 
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
     _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_channels

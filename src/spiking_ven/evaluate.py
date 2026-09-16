@@ -33,9 +33,10 @@ for a saved model without retraining.
 
 from __future__ import annotations
 
-from .constants import DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from .constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 
 __all__ = [
+    "daf_waveform",
     "daf_metrics",
     "format_metrics",
     "build_stimuli",
@@ -52,6 +53,36 @@ BIOLOGICAL_TARGETS = {
     "k3_responders": 3.6,
     "k4_min": 1.0,              # direction only
 }
+
+
+def daf_waveform(sig_train, sr: int, *, seed: int = 42,
+                 amplitude: float = DAF_WN_AMPLITUDE,
+                 window_s: tuple[float, float] = DAF_WINDOW_S):
+    """The DAF stimulus: the song, with white noise mixed into one window.
+
+    Defined once, here, and used by both the metrics and the figure. They used to
+    build different stimuli under the same name -- the metrics scored *pure* white
+    noise for the whole rendition, with no song in it at all, while the figure drew
+    song plus a noise burst. Only the latter is the DAF paradigm the biological
+    numbers come from: the bird sings, and noise is played back during singing.
+
+    Returns the waveform; the caller encodes it.
+    """
+    import numpy as np
+
+    sig = np.asarray(sig_train, dtype=np.float64)
+    rms = float(np.sqrt(np.mean(sig ** 2)))
+    noise = np.random.default_rng(seed).standard_normal(len(sig)) * rms * amplitude
+    s0, s1 = int(window_s[0] * sr), int(window_s[1] * sr)
+    if s0 >= len(sig):
+        raise ValueError(
+            f"the DAF window {window_s} s starts past the end of a "
+            f"{len(sig) / sr:.3f} s motif, so the DAF stimulus would be identical to "
+            "the song. Adjust constants.DAF_WINDOW_S for this corpus."
+        )
+    out = sig.copy()
+    out[s0:s1] += noise[s0:s1]
+    return out
 
 
 def _rate_hz(ven, hvc, aud) -> float:
@@ -198,13 +229,10 @@ def build_stimuli(
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))
     del acts_rev, fv, rv
 
-    # coch_encode RMS-normalises and of_to_spikes rate-calibrates, so DAF_WN_AMPLITUDE
-    # divides straight back out: only the broadband spectrum distinguishes this from song.
-    # Kept so the stimulus is constructed the way the figure's is; see the module
-    # docstring for what that means for K2/K3.
-    rng_daf = np.random.default_rng(seed + 1)
-    noise_daf = rng_daf.standard_normal(len(sig_train)) * rms_train * DAF_WN_AMPLITUDE
-    aud_daf = sig_to_aud(noise_daf, 20)
+    # Song with noise mixed into one window -- the same construction the figure draws,
+    # from the same function. seed + 2 matches the figure's stream, so the two describe
+    # the identical stimulus rather than two draws of a similar one.
+    aud_daf = sig_to_aud(daf_waveform(sig_train, sr, seed=seed + 2), 20)
 
     if verbose:
         for label, arr in (("training motif", aud_correct), ("reversed motif", aud_reversed),

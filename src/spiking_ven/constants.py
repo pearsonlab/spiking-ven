@@ -39,8 +39,13 @@ PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
 #: See the note in :mod:`spiking_ven.evaluate`.
 DAF_WN_AMPLITUDE = 5.6
 
-#: Window within the motif that the figure's DAF column perturbs (seconds).
-DAF_WINDOW_S = (0.400, 0.600)
+#: Window within the motif that the DAF stimulus perturbs (seconds).
+#:
+#: 50 ms, matching the noise bursts in Mandelblat-Cerf et al. 2014 -- the experiment the
+#: responder statistics come from. It was 200 ms, which is long enough that the modelled
+#: response keeps building through the burst instead of being the transient the paper
+#: measures (peak 118 ms in at 200 ms, against 88 ms at 50 ms).
+DAF_WINDOW_S = (0.400, 0.450)
 
 #: Cochlea -> AIV-E conduction delay (ms). Measured; Mandelblat-Cerf et al. 2014.
 AUD_DELAY_MS = 23

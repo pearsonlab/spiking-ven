@@ -85,7 +85,15 @@ def infer(X, A, lam, n_iter=60, step=None):
     return S
 
 
-def learn(cochs, K=64, L=16, lam=0.05, n_epochs=40, n_iter=40, lr=0.1, seed=42, log=print):
+def learn(cochs, K=64, L=16, lam=0.05, n_epochs=40, n_iter=40, lr=0.1, seed=42, log=print,
+          causal_lookahead=None):
+    """Learn a dictionary. ``causal_lookahead`` trains under :func:`infer_causal`.
+
+    Training under the solver that will be used at inference matters here: the causal
+    solver only ever selects an atom on the strength of its leading frames, so it should
+    favour atoms that are diagnostic at onset -- the property the patch encoder's atoms
+    conspicuously lack.
+    """
     C = cochs[0].shape[0]
     rng = np.random.default_rng(seed)
     A = rng.standard_normal((K, C, L))
@@ -94,7 +102,8 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=40, n_iter=40, lr=0.1, seed=42, 
         rec, spars = 0.0, 0.0
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
-            S = infer(X, A, lam, n_iter)
+            S = (infer(X, A, lam, n_iter) if causal_lookahead is None
+                 else infer_causal(X, A, lam, lookahead=causal_lookahead))
             R = X - reconstruct(S, A, T)
             A += lr * corr_with_code(R, S, L, T) / max(T, 1)
             A /= np.maximum(np.linalg.norm(A.reshape(K, -1), axis=1), 1e-9)[:, None, None]
@@ -104,3 +113,56 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=40, n_iter=40, lr=0.1, seed=42, 
             log(f"  epoch {ep+1:3d}/{n_epochs}  recon={rec/len(cochs):.6f}  "
                 f"active={spars/len(cochs)*100:.2f}%")
     return A
+
+
+def infer_causal(X, A, lam, lookahead=0, n_iter=20):
+    """Streaming inference: coefficients committed using only data up to now.
+
+    :func:`infer` solves for every coefficient jointly against the whole residual, so a
+    coefficient at t is fitted using data from t's future -- measured, truncating a
+    signal after a click changes the coefficients *before* it, and the code peaks 2 ms
+    *before* the stimulus. That is fatal for a model whose response latency is the thing
+    being compared to biology.
+
+    Here time marches forward. At step t the coefficients already committed at t' < t
+    predict part of the present via their A[:, :, t-t'] slices; the new coefficient
+    explains what is left, and in turn commits predictions for t..t+L-1.
+
+    ``lookahead`` (frames) is an explicit, declared processing delay: the coefficient for
+    time t-lookahead is decided once data through t is available, so the decision sees
+    ``lookahead+1`` frames of the atom instead of just its leading column. lookahead=0 is
+    purely greedy and decides on a single spectral frame, which is fast but myopic.
+    Whatever value is used is a latency the model must own, not hide.
+    """
+    C, T = X.shape
+    K, _, L = A.shape
+    d = int(lookahead)
+    S = np.zeros((K, T))
+    pred = np.zeros((C, T + L))          # running reconstruction from committed atoms
+
+    # The evidence block depends only on the window width, which is constant except at
+    # the tail, so build each one once. The step must be 1/L with L the largest
+    # eigenvalue of B B^T: using the largest row norm overshoots whenever atoms are
+    # correlated -- which they are -- and the inner ISTA diverges (at lookahead=8 it
+    # produced coefficients of order 1e12).
+    _blocks = {}
+    for w_ in range(1, min(d + 1, T) + 1):
+        B_ = A[:, :, :w_].reshape(K, -1)
+        _blocks[w_] = (B_, 1.0 / max(float(np.linalg.eigvalsh(B_ @ B_.T).max()), 1e-9))
+
+    for t in range(T):
+        t_commit = t - d                 # the coefficient we are deciding now
+        if t_commit < 0:
+            continue
+        w = min(d + 1, T - t_commit)     # frames of evidence available for it
+        B, step = _blocks[w]
+        r = (X[:, t_commit:t_commit + w] - pred[:, t_commit:t_commit + w]).reshape(-1)
+        s = np.zeros(K)
+        for _ in range(n_iter):          # ISTA on a small K-unknown LASSO
+            s = s + step * (B @ (r - B.T @ s))
+            s = np.sign(s) * np.maximum(np.abs(s) - lam * step, 0.0)
+        nz = np.flatnonzero(s)
+        if nz.size:
+            S[nz, t_commit] = s[nz]
+            pred[:, t_commit:t_commit + L] += np.einsum("k,kct->ct", s[nz], A[nz])
+    return S

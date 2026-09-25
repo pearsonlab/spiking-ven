@@ -51,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--drive-i", type=float, default=0.058)
     p.add_argument("--b-scale", type=float, default=16.0)
     p.add_argument("--tau-s", type=float, default=20.0)
+    p.add_argument("--tau-e", type=float, default=30.0,
+                   help="E membrane time constant (ms). theta_e is derived from it, so "
+                        "the tonic rate stays at target_rate as this changes.")
     p.add_argument("--alpha-theta", type=float, default=0.0)
     p.add_argument("--n-rend", type=int, default=600)
     # network
@@ -120,6 +123,7 @@ def main(argv: list[str] | None = None) -> None:
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, c_JIE=args.c_jie, tau_s=args.tau_s,
+        tau_e=args.tau_e,
         r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i, alpha_theta=args.alpha_theta,
         r_e_target=args.r_e_target, r_e_song_target=0.0,

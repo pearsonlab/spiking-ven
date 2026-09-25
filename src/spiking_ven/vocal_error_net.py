@@ -193,7 +193,16 @@ class VocalErrorNetV2:
     ----------
     n_e, n_i, n_hvc, n_aud : population sizes
     tau_e, tau_i : membrane time constants (ms)
-    tau_s        : I pre-synaptic trace time constant for STDP (ms)
+    tau_s        : input synaptic time constant (ms). Sets the decay of the conductance
+                   each auditory and HVC spike produces -- `spike_to_rate` on aud_spikes
+                   and hvc_spikes -- so it is the EPSC time course of the aud->E and
+                   HVC->I synapses, not a free smoothing parameter.
+
+                   It is NOT the STDP trace constant. It used to double as one, which
+                   tied the coincidence window to the synaptic one; set ``tau_stdp`` to
+                   pin the STDP window independently. One coupling survives that split:
+                   the LTP audio gate is ``B @ h_aud > 0``, so shortening tau_s still
+                   narrows the window in which LTP can occur.
     A_jie        : causal Hebbian STDP amplitude for JIE (I→E)
     J_max_ie     : hard upper bound on JIE weights
     c_B          : auditory→E connection probability
@@ -478,7 +487,8 @@ class VocalErrorNetV2:
         dict with keys:
             B, B_hvc, JIE, JEI  — float64 numpy arrays
             theta_e             — (n_e,) float64 array of per-neuron E thresholds
-            xi_th               — dimensionless I-trace threshold (= r_i_th * tau_s * 1e-3)
+            xi_th               — dimensionless I-trace threshold (r_i_th * the STDP
+                                  trace constant * 1e-3)
             tau_s, tau_e, tau_i, drive_e, drive_i, A_jie, J_max_ie — scalar floats
             theta_i, v_reset    — scalar floats
             n_e, n_i, n_aud, n_hvc — ints
@@ -490,7 +500,11 @@ class VocalErrorNetV2:
             "JEI":      self.JEI.astype(np.float64),
             "theta_e":  self.theta_e.astype(np.float64),
             "theta_i":  float(self.theta_i),
-            "xi_th":    float(self.r_i_th * self.tau_s * 1e-3),
+            # The trace this debiases decays at tau_stdp when that is set, so xi_th
+            # must be calibrated to the same constant the simulation uses -- it was
+            # computed from tau_s here, which silently mis-scaled the Brian2 threshold
+            # whenever the two differed.
+            "xi_th":    float(self.r_i_th * (self.tau_stdp or self.tau_s) * 1e-3),
             "tau_s":    float(self.tau_s),
             "tau_e":    float(self.tau_e),
             "tau_i":    float(self.tau_i),

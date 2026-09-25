@@ -66,8 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
                    help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp_eff)")
-    p.add_argument("--tau-stdp", type=float, default=0.0,
-                   help="STDP kernel width (0 = use tau_s)")
+    p.add_argument("--tau-stdp", type=float, default=20.0,
+                   help="STDP coincidence window (ms), independent of the synaptic "
+                        "tau_s; 0 falls back to tau_s")
     # protocol
     p.add_argument("--novel-ratio", type=int, default=1)
     p.add_argument("--r-e-target", type=float, default=16.0)

@@ -47,7 +47,17 @@ DAF_WN_AMPLITUDE = 5.6
 #: measures (peak 118 ms in at 200 ms, against 88 ms at 50 ms).
 DAF_WINDOW_S = (0.400, 0.450)
 
-#: Cochlea -> AIV-E conduction delay (ms). Measured; Mandelblat-Cerf et al. 2014.
+#: Cochlea -> AIV-E conduction delay (ms).
+#:
+#: NOT a measured conduction delay. Mandelblat-Cerf et al. 2014 report 23 +/- 12 ms as the
+#: AIV *response latency* -- noise onset to the first 2 ms bin followed by five
+#: significant bins -- which is the end-to-end observable this model should PREDICT, not
+#: consume. Using it as the conduction delay double-counts: the network then integrates
+#: for a further ~43 ms, putting the modelled latency at ~66 ms, and makes the 23 ms
+#: comparison circular.
+#:
+#: Left at 23 pending the sweep that picks a defensible synaptic value; the residual
+#: integration time is the real target.
 AUD_DELAY_MS = 23
 
 #: HVC -> AIV-I conduction delay (ms). Estimated -- no direct measurement exists.

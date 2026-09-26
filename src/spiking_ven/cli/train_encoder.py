@@ -1,9 +1,22 @@
-"""``sven-train-encoder`` -- train the Olshausen-Field sparse auditory encoder.
+"""``sven-train-encoder`` -- train the sparse auditory encoder.
 
-Stage 1 of the pipeline. Cochleagrams of every motif are cut into causal
-spectrotemporal patches (``n_channels x k_frames``, mean-subtracted) and a sparse
-dictionary is learned over them by ISTA with lifetime-sparsity bias adaptation. The
-learned atoms are STRFs.
+Stage 1 of the pipeline. Two encoders are available via ``--encoder``:
+
+``patch`` (default)
+    Olshausen-Field. Cochleagrams of every motif are cut into causal spectrotemporal
+    patches (``n_channels x k_frames``, mean-subtracted) and a sparse dictionary is
+    learned over them by ISTA with lifetime-sparsity bias adaptation. The learned atoms
+    are STRFs.
+
+``causal``
+    A minimum-phase filter bank (:mod:`spiking_ven.causal_filters`). Same cochleagram
+    front end and the same sparse competition, but inference at time t reads only frames
+    before t and the kernels are projected onto minimum phase after every update. The
+    patch encoder's atoms drift to an energy centroid of ~L/2 -- near-linear phase --
+    which costs ~30 ms of encoder latency; minimum phase places the energy as early as
+    the magnitude response allows, without constraining what a filter is tuned to. This
+    is what brings the VEN's DAF response latency from 66 ms to 23 ms, against the bird's
+    23 +/- 12 ms.
 
 Mean subtraction matters: it removes the common energy envelope so activations encode
 spectrotemporal *contrast*. Without it every basis responds to the shared broadband
@@ -21,6 +34,8 @@ import numpy as np
 
 from ..cochleagram import cochleagram
 from ..corpus import load_corpus
+from ..causal_filters import CausalFilterEncoder, causal_meansub
+from ..causal_filters import learn as causal_learn
 from ..olshausen_field import OlshausenFieldEncoder, coch_extract_patches, of_to_spikes
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz
 
@@ -31,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output encoder .npz")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--encoder", choices=("patch", "causal"), default="patch",
+                   help="patch: Olshausen-Field STRF atoms; causal: minimum-phase filter bank")
     # cochleagram front-end
     p.add_argument("--sr", type=int, default=16000)
     p.add_argument("--n-coch-ch", type=int, default=40, help="cochleagram frequency channels")
@@ -50,6 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-usage", type=float, default=0.10)
     p.add_argument("--lr-bias", type=float, default=0.005)
     p.add_argument("--mean-rate-hz", type=float, default=15.0)
+    # --encoder causal only. Defaults are the converged operating point: 80 epochs with
+    # 3% target usage keeps all 64 filters alive (see causal_filters.learn on why weak
+    # equalisation makes dropout one-way).
+    p.add_argument("--causal-epochs", type=int, default=80)
+    p.add_argument("--causal-lambda", type=float, default=0.1)
+    p.add_argument("--causal-target-usage", type=float, default=0.03)
+    p.add_argument("--causal-lr", type=float, default=0.1)
+    p.add_argument("--causal-n-ista", type=int, default=20)
+    p.add_argument("--causal-mp-strength", type=float, default=0.25,
+                   help="pull toward minimum phase per update; 1.0 is the strict "
+                        "projection, which collapses the kernels to impulses")
     return p
 
 
@@ -80,6 +108,33 @@ def main(argv: list[str] | None = None) -> None:
         all_cochs.append(cochleagram(sig, args.sr, n_channels=args.n_coch_ch,
                                      frame_rate=args.frame_rate,
                                      lo_hz=args.lo_hz, hi_hz=args.hi_hz))
+
+    if args.encoder == "causal":
+        print(f"\nTraining causal minimum-phase filter bank "
+              f"({args.n_bases} filters x {args.n_coch_ch} ch x {args.k_frames} frames)...")
+        cochs = [causal_meansub(cg.astype(np.float64), args.k_frames) for cg in all_cochs]
+        V, bias = causal_learn(cochs, K=args.n_bases, L=args.k_frames,
+                               lam=args.causal_lambda, n_epochs=args.causal_epochs,
+                               n_iter=args.causal_n_ista, lr=args.causal_lr,
+                               seed=args.seed, target_usage=args.causal_target_usage,
+                               mp_strength=args.causal_mp_strength)
+        enc = CausalFilterEncoder(V, bias, args.causal_lambda, coch_params)
+        enc.save(out_path)
+        print(f"Saved {out_path}")
+        E = (V ** 2).sum(axis=1)
+        E = E / E.sum(axis=1, keepdims=True)
+        cen = (E * np.arange(args.k_frames)).sum(axis=1)
+        print(f"  bias [{bias.min():.4f}, {bias.max():.4f}]  std={bias.std():.4f}")
+        print(f"  kernel energy centroid {cen.mean():.1f}/{args.k_frames} "
+              f"(sd {cen.std():.1f}); newest 4 frames hold "
+              f"{E[:, -4:].sum(axis=1).mean():.3f} of the energy")
+        act0 = enc.encode_signal(corpus.signal(0), sr=args.sr,
+                                 n_ista=args.n_ista_encode)
+        spk = of_to_spikes(act0, mean_rate_hz=args.mean_rate_hz,
+                           frame_rate=args.frame_rate, seed=args.seed + 200)
+        print(f"  active fraction (motif 0): {(act0 != 0).mean() * 100:.1f}%"
+              f"  mean rate: {spk.mean() * args.frame_rate:.1f} Hz")
+        return
 
     print("Extracting training patches (stride=1 frame)...")
     patches = np.concatenate(

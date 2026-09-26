@@ -39,6 +39,7 @@ from .constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RAT
 
 __all__ = [
     "daf_waveform",
+    "encode_acts",
     "encode_stimulus",
     "daf_response",
     "format_responders",
@@ -108,6 +109,25 @@ def daf_waveform(sig_train, sr: int, *, seed: int = 42,
     return out
 
 
+def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from, divisive_gain=True):
+    """Waveform -> (n_channels, T) activations, dispatching on the encoder type.
+
+    Every activation in this module goes through here. The dispatch used to live only in
+    encode_stimulus, so build_stimuli's other three call sites bypassed it and a
+    non-patch encoder failed on the first one.
+    """
+    from .olshausen_field import coch_encode
+
+    sig = np.asarray(sig, dtype=np.float64)
+    if hasattr(encoder, "encode_signal"):        # causal filter bank
+        return encoder.encode_signal(sig, sr=sr, n_ista=n_ista, upsample_to_ms=True,
+                                     T_out_ms=T_out_ms, rms_from=rms_from,
+                                     divisive_gain=divisive_gain)
+    return coch_encode(sig, encoder, sr=sr, n_ista=n_ista, upsample_to_ms=True,
+                       T_out_ms=T_out_ms, rms_from=rms_from,
+                       divisive_gain=divisive_gain)
+
+
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
                     mean_rate_hz: float = 15.0, n_ista: int = 50, seed: int = 0):
     """Waveform to auditory spike train, on the shared reference.
@@ -117,16 +137,10 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     from the song: the waveform scaling from ``rms_from``, the spike rate from
     ``acts_train``.
     """
-    from .olshausen_field import coch_encode, of_to_spikes
+    from .olshausen_field import of_to_spikes
 
-    if hasattr(encoder, "encode_signal"):        # causal filter bank
-        acts = encoder.encode_signal(np.asarray(sig, dtype=np.float64), sr=sr, n_ista=n_ista,
-                                     upsample_to_ms=True, T_out_ms=T_out_ms,
-                                     rms_from=rms_from, divisive_gain=True)
-    else:
-        acts = coch_encode(np.asarray(sig, dtype=np.float64), encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_out_ms, rms_from=rms_from,
-                           divisive_gain=True)
+    acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista, T_out_ms=T_out_ms,
+                       rms_from=rms_from)
     return of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
                         calibrate_on=acts_train).astype(np.float32)
 
@@ -299,7 +313,7 @@ def build_stimuli(
 
     from .common import generate_hvc_spikes
     from .corpus import load_corpus
-    from .olshausen_field import coch_encode, of_to_spikes
+    from .olshausen_field import of_to_spikes
 
     corpus = load_corpus(motifs_path)
     n_motifs = corpus.n_motifs
@@ -317,15 +331,13 @@ def build_stimuli(
     # Fixing only the first restores level in the activations and then flattens it again
     # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
     # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
-    acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
-                             upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
-                           divisive_gain=True)
+    acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=n_ista,
+                             T_out_ms=T_rend, rms_from=sig_train)
 
     def sig_to_aud(sig, seed_offset: int, acts=None):
         if acts is None:
-            acts = coch_encode(sig.astype(np.float64), encoder, sr=sr, n_ista=n_ista,
-                               upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
-                           divisive_gain=True)
+            acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
+                               T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
                            seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)
@@ -348,9 +360,8 @@ def build_stimuli(
     # How separable forward and reversed song are in the encoder is the ceiling on K4.
     # acts_train is the forward encoding already, so only the reversed one is new.
     acts_fwd = acts_train
-    acts_rev = coch_encode(sig_rev, encoder, sr=sr, n_ista=n_ista,
-                           upsample_to_ms=True, T_out_ms=T_rend, rms_from=sig_train,
-                           divisive_gain=True)
+    acts_rev = encode_acts(sig_rev, encoder, sr=sr, n_ista=n_ista,
+                           T_out_ms=T_rend, rms_from=sig_train)
     fv, rv = acts_fwd.ravel(), acts_rev.ravel()
     fwd_rev_corr = (float(np.corrcoef(fv, rv)[0, 1])
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))

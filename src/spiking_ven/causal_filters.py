@@ -82,12 +82,17 @@ def predict(S, V):
 
 
 def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
-          target_usage=0.10, lr_bias=0.005, ema_decay=0.99):
+          target_usage=0.10, lr_bias=0.005, ema_decay=0.99, min_phase_project=False):
     """Alternate causal inference with a gradient step on the kernels.
 
     The gradient uses the residual over the whole extended window -- past reconstruction
     and present prediction together -- so the analysis columns stay matched to what they
     are correlated against while the prediction column is driven by prediction error.
+
+    ``min_phase_project`` projects every kernel onto its minimum-phase counterpart after
+    each update (see :func:`min_phase`). This constrains when a filter responds without
+    constraining what it is tuned to, which is the principled alternative to shortening
+    the window: unconstrained kernels drift to near-linear phase and carry ~L/2 of delay.
 
     Usage equalisation is not optional here. Without it this collapsed: 7 filters carried
     90% of the activation energy and 35 of 64 never fired at all, so they never received
@@ -113,6 +118,8 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
             R_now = (X - predict(S, V)).T                     # (T, C)
             R = np.concatenate([R_past, R_now[:, :, None]], axis=2)   # (T, C, L+1)
             V += lr * np.einsum("kt,tcl->kcl", S, R) / max(T, 1)
+            if min_phase_project:
+                V = min_phase(V)
             V /= np.maximum(np.linalg.norm(V.reshape(K, -1), axis=1), 1e-9)[:, None, None]
             usage = (S != 0).mean(axis=1)
             usage_ema = ema_decay * usage_ema + (1.0 - ema_decay) * usage
@@ -124,3 +131,40 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
                 f"active={act/len(cochs)*100:.2f}%  used={(usage_ema > 1e-4).sum()}/{K}  "
                 f"bias=[{bias.min():+.3f},{bias.max():+.3f}]")
     return V, bias
+
+
+def min_phase(V, n_fft=None, eps=1e-9):
+    """Project every channel's temporal kernel onto its minimum-phase counterpart.
+
+    Among all causal filters sharing a magnitude response, the minimum-phase one has its
+    energy as early as possible -- minimum group delay, maximal partial energy sums. An
+    unconstrained kernel drifts toward near-linear phase instead, whose delay is ~L/2;
+    measured centroid was 7.5 of 16 frames, which is exactly that, and it is where ~30 ms
+    of encoder latency comes from.
+
+    This constrains *when* a filter responds without constraining *what* it is tuned to:
+    the magnitude response is left untouched, so no spectral selectivity is given up.
+    That is the difference between imposing a principle and truncating the window.
+
+    Standard real-cepstrum construction: fold the anticausal part of the log-spectrum.
+
+    ``V`` is (K, C, L+1). Only the analysis columns [:, :, :L] are projected; the
+    prediction column is a read-out, not a filter. Note column 0 is the OLDEST frame, so
+    kernels are reversed into lag order before projection and back afterwards.
+    """
+    K, C, Lp = V.shape
+    L = Lp - 1
+    N = int(n_fft or max(8 * L, 64))
+    g = V[:, :, :L][:, :, ::-1]                       # lag order: g[..., 0] = most recent
+    G = np.fft.rfft(g, N, axis=2)
+    logmag = np.log(np.abs(G) + eps)
+    full = np.concatenate([logmag, logmag[:, :, -2:0:-1]], axis=2)
+    ceps = np.fft.ifft(full, N, axis=2).real
+    fold = np.zeros_like(ceps)
+    fold[:, :, 0] = ceps[:, :, 0]
+    fold[:, :, 1:N // 2] = 2.0 * ceps[:, :, 1:N // 2]
+    fold[:, :, N // 2] = ceps[:, :, N // 2]
+    g_mp = np.fft.irfft(np.exp(np.fft.rfft(fold, N, axis=2)), N, axis=2)[:, :, :L]
+    out = V.copy()
+    out[:, :, :L] = g_mp[:, :, ::-1]                  # back to oldest-first
+    return out

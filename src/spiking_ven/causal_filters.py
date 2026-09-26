@@ -82,7 +82,7 @@ def predict(S, V):
 
 
 def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
-          target_usage=0.10, lr_bias=0.005, ema_decay=0.99, min_phase_project=False):
+          target_usage=0.10, lr_bias=0.05, ema_decay=0.9, min_phase_project=False):
     """Alternate causal inference with a gradient step on the kernels.
 
     The gradient uses the residual over the whole extended window -- past reconstruction
@@ -94,7 +94,15 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
     constraining what it is tuned to, which is the principled alternative to shortening
     the window: unconstrained kernels drift to near-linear phase and carry ~L/2 of delay.
 
-    Usage equalisation is not optional here. Without it this collapsed: 7 filters carried
+    Usage equalisation must also be strong enough to REVERSE a dropout, not just
+    discourage one. At lr_bias=0.005 with ema_decay=0.99 it was not: a filter that stopped
+    winning had its usage EMA decay away while its bias crept down at most
+    ``lr_bias * target_usage`` per step, so over 191 epochs the bias floor only reached
+    -0.056 while it needed to reach ``-lam`` = -0.1 before that filter's threshold could
+    return to zero. Dropout was effectively one-way and the dictionary bled filters:
+    64/64 used at epoch 41, 45/64 by epoch 191, while prediction error had converged by
+    epoch 20. Recovery now outpaces the decay, and the bias is floored at -lam so a
+    starved filter always reaches a zero threshold rather than an unreachable one. Without it this collapsed: 7 filters carried
     90% of the activation energy and 35 of 64 never fired at all, so they never received
     gradient and stayed at their random initialisation. A per-filter threshold bias rises
     for over-used filters and falls for under-used ones, which is the same mechanism
@@ -124,6 +132,7 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
             usage = (S != 0).mean(axis=1)
             usage_ema = ema_decay * usage_ema + (1.0 - ema_decay) * usage
             bias += lr_bias * (usage_ema - target_usage)
+            np.clip(bias, -lam, None, out=bias)   # threshold can reach 0, never below
             pred_err += float(np.mean(R_now ** 2))
             act += float(np.mean(S != 0))
         if ep % 5 == 0 or ep == n_epochs - 1:
@@ -168,3 +177,59 @@ def min_phase(V, n_fft=None, eps=1e-9):
     out = V.copy()
     out[:, :, :L] = g_mp[:, :, ::-1]                  # back to oldest-first
     return out
+
+
+class CausalFilterEncoder:
+    """Adapter so the VEN pipeline can consume a causal filter bank.
+
+    Mirrors the surface of :class:`~spiking_ven.olshausen_field.OlshausenFieldEncoder`
+    that ``evaluate.build_stimuli`` actually uses -- ``n_channels`` and an encode call
+    with the same normalisation contract -- so the two encoders are swappable and the
+    downstream stimulus construction, spike conversion and VEN training are untouched.
+    """
+
+    def __init__(self, V, bias, lam, coch_params):
+        self.V = np.asarray(V)
+        self.bias = np.asarray(bias)
+        self.lam = float(lam)
+        self.coch_params = dict(coch_params)
+        self.L = self.V.shape[2] - 1
+
+    @property
+    def n_channels(self) -> int:
+        """Output width: one activation per filter, matching the patch encoder's n_bases."""
+        return int(self.V.shape[0])
+
+    def encode_signal(self, signal, *, sr, n_ista=20, upsample_to_ms=False,
+                      T_out_ms=None, rms_from=None, divisive_gain=False, dn_sigma=1e-6):
+        from .cochleagram import cochleagram
+
+        cp = self.coch_params
+        sig = np.asarray(signal, dtype=np.float64)
+        ref = sig if rms_from is None else np.asarray(rms_from, dtype=np.float64)
+        rms = float(np.sqrt(np.mean(ref ** 2)))
+        sig = sig / max(rms, 1e-12) * cp["rms_ref"]
+
+        X = cochleagram(sig, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
+                        lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
+        Xc = causal_meansub(X, self.L)
+        acts = infer(Xc, self.V, self.lam, n_iter=n_ista, bias=self.bias)
+
+        if divisive_gain:
+            # Same two corrections as the patch path, with the causal analogues: divide by
+            # the norm of the reconstructed past window so magnitude stops reporting how
+            # well the filters matched, then restore level with the window mean that
+            # causal_meansub removed.
+            K = self.V.shape[0]
+            W = self.V[:, :, :self.L].reshape(K, -1)
+            recon = np.linalg.norm(acts.T @ W, axis=1)
+            mu = (X - Xc).mean(axis=0)
+            acts = acts * (mu / (dn_sigma + recon))[None, :]
+
+        if upsample_to_ms:
+            acts = np.repeat(acts, 1000 // cp["frame_rate"], axis=1)
+        if T_out_ms is not None:
+            T = T_out_ms if upsample_to_ms else T_out_ms // (1000 // cp["frame_rate"])
+            acts = (acts[:, :T] if acts.shape[1] >= T else
+                    np.concatenate([acts, np.zeros((acts.shape[0], T - acts.shape[1]))], axis=1))
+        return acts.astype(np.float32)

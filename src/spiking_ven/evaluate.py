@@ -119,9 +119,14 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     """
     from .olshausen_field import coch_encode, of_to_spikes
 
-    acts = coch_encode(np.asarray(sig, dtype=np.float64), encoder, sr=sr, n_ista=n_ista,
-                       upsample_to_ms=True, T_out_ms=T_out_ms, rms_from=rms_from,
-                       divisive_gain=True)
+    if hasattr(encoder, "encode_signal"):        # causal filter bank
+        acts = encoder.encode_signal(np.asarray(sig, dtype=np.float64), sr=sr, n_ista=n_ista,
+                                     upsample_to_ms=True, T_out_ms=T_out_ms,
+                                     rms_from=rms_from, divisive_gain=True)
+    else:
+        acts = coch_encode(np.asarray(sig, dtype=np.float64), encoder, sr=sr, n_ista=n_ista,
+                           upsample_to_ms=True, T_out_ms=T_out_ms, rms_from=rms_from,
+                           divisive_gain=True)
     return of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
                         calibrate_on=acts_train).astype(np.float32)
 

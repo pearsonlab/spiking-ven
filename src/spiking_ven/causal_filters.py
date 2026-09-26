@@ -31,7 +31,7 @@ frame, not bolting a readout onto a reconstruction-trained code.
 
 import numpy as np
 
-__all__ = ["causal_meansub", "infer", "learn", "min_phase"]
+__all__ = ["causal_meansub", "infer", "learn", "min_phase", "prune_silent"]
 
 
 def causal_meansub(X, w):
@@ -52,6 +52,24 @@ def _past_windows(X, L):
     padded = np.concatenate([np.zeros((C, L)), X[:, :-1]], axis=1) if T else X
     win = np.lib.stride_tricks.sliding_window_view(padded, L, axis=1)[:, :T, :]
     return win.transpose(1, 0, 2).reshape(T, C * L)
+
+
+def _roughness_grad(V):
+    """Gradient of 0.5 * ||D V||^2, D the first difference along channel and lag.
+
+    This is the smoothness prior, not weight decay. A plain L2 penalty on the entries
+    cannot do anything here: every kernel is renormalised to unit norm after each update,
+    and L2 is a uniform rescale, so it cancels exactly (and elastic net collapses to its
+    L1 soft-threshold for the same reason). Penalising *differences* changes entries
+    relative to each other, so it survives the renormalisation.
+
+    Neumann (reflecting) boundaries, so the edges are not pulled toward zero.
+    """
+    g = np.zeros_like(V)
+    for axis in (1, 2):
+        d = np.diff(V, axis=axis)
+        g -= np.diff(d, axis=axis, prepend=0.0, append=0.0)
+    return g
 
 
 def infer(X, V, lam, n_iter=20, bias=None):
@@ -81,12 +99,46 @@ def infer(X, V, lam, n_iter=20, bias=None):
 
 
 def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
-          target_usage=0.10, lr_bias=0.05, ema_decay=0.9, mp_strength=0.25):
+          target_usage=0.10, lr_bias=0.0, ema_decay=0.9, mp_strength=0.25, l1_V=7e-5,
+          smooth_V=0.0):
     """Alternate causal inference with a gradient step on the kernels.
 
     Objective is reconstruction of the strictly-past window from the sparse code, with
     the kernels pulled toward minimum phase after each update. Returns ``(V, bias)``;
     the bias must be passed to :func:`infer`.
+
+    ``smooth_V`` weights a roughness penalty on the kernels -- L2 on first differences
+    along channel and lag (see :func:`_roughness_grad`). Use this, not weight decay: a
+    plain L2 penalty is exactly cancelled by the per-filter unit-norm renormalisation.
+
+    Both penalties have to be scaled against the data gradient, which is small: at
+    ``lr = 0.1`` the median gradient step on an entry is 2.3e-6 against entries of
+    magnitude 2.6e-2. An ``l1_V`` of 0.03 puts the soft-threshold 1300x above that and
+    annihilates the dictionary -- 99.8% of entries zero, one surviving tap per kernel.
+    The useful range is a threshold of order the gradient step, so ``lr * l1_V`` around
+    1e-5 to 1e-4.
+
+    ``l1_V`` puts an L1 penalty on the kernel entries, applied as a soft-threshold after
+    each update. Without it the kernels do not converge to anything: at 3% activation a
+    filter fires too rarely to accumulate gradient, and over 80 epochs the past frames
+    move almost not at all -- measured median correlation with the random initialisation
+    +0.67 overall and +0.81 over the 15 older frames, with reconstruction error improving
+    5%. The visible "speckle" in those kernels was untouched initialisation, not a
+    learned receptive field. L1 drives those entries to zero instead of leaving noise
+    there, so what survives is what the data paid for.
+
+    Note the tension with ``mp_strength``: the minimum-phase step is an FFT resynthesis
+    and returns a dense kernel, so it partly refills what L1 zeroed. The order here is
+    gradient -> minimum-phase pull -> soft-threshold -> renormalise, which leaves the
+    stored kernels genuinely sparse and the minimum-phase constraint approximate. Both
+    are soft pulls; neither is imposed exactly.
+
+    ``lr_bias`` drives the per-filter threshold bias toward ``target_usage`` (lifetime
+    sparsity equalisation). It defaults to OFF. Forcing all K filters to fire equally on
+    a corpus this stereotyped buys nothing: it does not reduce redundancy (effective rank
+    29/64 on, 32/64 off) and it pins the code so sparse that the dictionary cannot train.
+    Letting filters die is the honest outcome -- if there were residual variance left
+    unexplained, the spare filters would go find it.
 
     ``mp_strength`` is how hard that pull is: ``V <- (1-a) V + a * min_phase(V)``, a
     proximal step on the distance to the minimum-phase manifold rather than a hard
@@ -138,8 +190,12 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
             P = _past_windows(X, L)                          # (T, C*L)
             R = (P - S.T @ V.reshape(K, C * L)).reshape(T, C, L)
             V = V + lr * np.einsum("kt,tcl->kcl", S, R) / max(T, 1)
+            if smooth_V > 0:
+                V = V - lr * smooth_V * _roughness_grad(V)
             if mp_strength > 0:
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+            if l1_V > 0:
+                V = np.sign(V) * np.maximum(np.abs(V) - lr * l1_V, 0.0)
             V /= np.maximum(np.linalg.norm(V.reshape(K, -1), axis=1), 1e-9)[:, None, None]
             usage = (S != 0).mean(axis=1)
             usage_ema = ema_decay * usage_ema + (1.0 - ema_decay) * usage
@@ -150,6 +206,7 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
         if ep % 5 == 0 or ep == n_epochs - 1:
             log(f"  epoch {ep+1:3d}/{n_epochs}  recon={recon_err/len(cochs):.6f}  "
                 f"active={act/len(cochs)*100:.2f}%  used={(usage_ema > 1e-4).sum()}/{K}  "
+                f"zeros={100 * float(np.mean(V == 0)):.0f}%  "
                 f"bias=[{bias.min():+.3f},{bias.max():+.3f}]")
     return V, bias
 
@@ -186,6 +243,23 @@ def min_phase(V, n_fft=None, eps=1e-9):
     fold[:, :, N // 2] = ceps[:, :, N // 2]
     g_mp = np.fft.irfft(np.exp(np.fft.rfft(fold, N, axis=2)), N, axis=2)[:, :, :L]
     return np.ascontiguousarray(g_mp[:, :, ::-1])     # back to oldest-first
+
+
+def prune_silent(V, bias, cochs, lam, n_iter=20):
+    """Drop filters that never win on the training corpus. Returns (V, bias, kept).
+
+    Without usage equalisation the dictionary is free to shed filters, which on a corpus
+    this stereotyped it does: at ``lam = 0.6`` only 19 of 64 ever fire. The other 45 do
+    not vanish -- they decay into near-identical stubs that lose every competition -- so
+    they have to be removed explicitly. Leaving them in is not harmless: they become
+    permanently silent auditory channels, and the VEN samples each E cell's auditory
+    inputs from that width, so they dilute its convergence.
+    """
+    fired = np.zeros(V.shape[0], dtype=bool)
+    for X in cochs:
+        fired |= (infer(X, V, lam, n_iter, bias=bias) != 0).any(axis=1)
+    kept = np.flatnonzero(fired)
+    return V[kept], np.asarray(bias)[kept], kept
 
 
 class CausalFilterEncoder:

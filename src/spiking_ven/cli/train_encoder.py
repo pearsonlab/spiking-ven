@@ -34,7 +34,7 @@ import numpy as np
 
 from ..cochleagram import cochleagram
 from ..corpus import load_corpus
-from ..causal_filters import CausalFilterEncoder, causal_meansub
+from ..causal_filters import CausalFilterEncoder, causal_meansub, prune_silent
 from ..causal_filters import learn as causal_learn
 from ..olshausen_field import OlshausenFieldEncoder, coch_extract_patches, of_to_spikes
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz
@@ -71,9 +71,18 @@ def build_parser() -> argparse.ArgumentParser:
     # 3% target usage keeps all 64 filters alive (see causal_filters.learn on why weak
     # equalisation makes dropout one-way).
     p.add_argument("--causal-epochs", type=int, default=80)
-    p.add_argument("--causal-lambda", type=float, default=0.1)
+    p.add_argument("--causal-lambda", type=float, default=0.6,
+                   help="code sparsity; also sets how many filters survive")
     p.add_argument("--causal-target-usage", type=float, default=0.03)
-    p.add_argument("--causal-lr", type=float, default=0.1)
+    p.add_argument("--causal-lr-bias", type=float, default=0.0,
+                   help="usage equalisation; off by default (see causal_filters.learn)")
+    p.add_argument("--causal-lr", type=float, default=10.0)
+    p.add_argument("--causal-l1", type=float, default=7e-5,
+                   help="L1 on kernel entries; scale against the gradient step")
+    p.add_argument("--causal-smooth", type=float, default=1e-3,
+                   help="roughness penalty over channel and lag")
+    p.add_argument("--causal-no-prune", action="store_true",
+                   help="keep filters that never fire (they are stubs, not filters)")
     p.add_argument("--causal-n-ista", type=int, default=20)
     p.add_argument("--causal-mp-strength", type=float, default=0.25,
                    help="pull toward minimum phase per update; 1.0 is the strict "
@@ -117,7 +126,13 @@ def main(argv: list[str] | None = None) -> None:
                                lam=args.causal_lambda, n_epochs=args.causal_epochs,
                                n_iter=args.causal_n_ista, lr=args.causal_lr,
                                seed=args.seed, target_usage=args.causal_target_usage,
-                               mp_strength=args.causal_mp_strength)
+                               lr_bias=args.causal_lr_bias,
+                               mp_strength=args.causal_mp_strength,
+                               l1_V=args.causal_l1, smooth_V=args.causal_smooth)
+        if not args.causal_no_prune:
+            V, bias, kept = prune_silent(V, bias, cochs, args.causal_lambda,
+                                         n_iter=args.causal_n_ista)
+            print(f"  kept {len(kept)}/{args.n_bases} filters that ever fire")
         enc = CausalFilterEncoder(V, bias, args.causal_lambda, coch_params)
         enc.save(out_path)
         print(f"Saved {out_path}")

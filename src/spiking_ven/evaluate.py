@@ -71,6 +71,28 @@ BIOLOGICAL_TARGETS = {
     #: The burst length the responder statistics were measured with.
     "noise_burst_ms": 50.0,
     "reversed_min_ratio": 1.0,  # direction only
+
+    # --- auditory input population ------------------------------------------------
+    # Schneider & Woolley 2013, Neuron 79:141-152, DOI 10.1016/j.neuron.2013.04.038.
+    # Zebra finch, awake restrained, song-driven rates by station (mean +/- SD), p. 142:
+    #   midbrain MLd (n=100)                      39.8 +/- 25.4 Hz
+    #   primary AC / Field L (n=99)               32.4 +/- 20.1 Hz
+    #   higher-level AC, narrow-spiking (n=35)    19.0 +/- 11.7 Hz
+    #   higher-level AC, broad-spiking (n=135)     2.4 +/-  2.7 Hz
+    # The broad-spiking population is the sparse, selective, background-invariant one, so
+    # it is what this encoder models -- not the dense upstream stations.
+    "aud_song_rate_hz": (2.4, 2.7),
+    #: "while more than 70% of neurons in upstream auditory areas fired during an average
+    #: 63 ms window, only 5% of BS neurons were active during the same epoch" (Fig 3B).
+    #: 63 ms is the average duration of a zebra finch song note.
+    "aud_pop_active_frac": 0.05,
+    "aud_pop_window_ms": 63,
+    #: Selectivity: BS neurons were driven by 6.9 +/- 5.2 of 15 songs, against 14.4 +/- 2.5
+    #: (midbrain), 14.7 +/- 1.9 (primary AC), 14.96 +/- 0.21 (higher-level AC NS).
+    "aud_songs_driving_of_15": (6.9, 5.2),
+    # NOTE: the paper reports no intra-burst or instantaneous rate for these neurons, so
+    # there is no target for burst strength here. Fig 3A's neurogram tops out at 67
+    # spikes/s, but that is a trial-averaged population display, not an instantaneous rate.
 }
 
 # Superseded, and wrong: a previous table listed 7.7 +/- 8.7 Hz for singing (not a number

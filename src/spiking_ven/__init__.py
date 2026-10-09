@@ -7,7 +7,12 @@ error signal on novel or perturbed sound.
 
 Pipeline
 --------
-``audio -> filterbank -> cochleagram -> OlshausenFieldEncoder -> spikes -> VocalErrorNetV2``
+``audio -> filterbank -> cochleagram -> sparse encoder -> spikes -> VocalErrorNetV2``
+
+The sparse encoder is either :class:`OlshausenFieldEncoder` (patches of a trailing
+window) or :class:`CausalFilterEncoder` (a minimum-phase filter bank, strictly causal
+and ~30 ms prompter). They are swappable: both expose ``n_channels`` and an encode call
+with the same normalisation contract.
 
 The public surface is deliberately split so that the model and training core import with
 numpy and scipy alone:
@@ -21,6 +26,7 @@ pulls in Brian2. Import it explicitly when you need live NeuronGroups.
 
 __version__ = "0.3.0"
 
+from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav
 from .common import generate_hvc_spikes, spike_to_rate
 from .filterbank import centre_frequencies, gammatone_spectrogram
@@ -41,6 +47,7 @@ __all__ = [
     "load_wav",
     # stage 1: sparse encoder
     "OlshausenFieldEncoder",
+    "CausalFilterEncoder",
     "coch_extract_patches",
     "coch_encode",
     "of_to_spikes",

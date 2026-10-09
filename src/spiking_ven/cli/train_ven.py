@@ -21,8 +21,14 @@ import argparse
 
 import numpy as np
 
-from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, SR
-from ..evaluate import build_stimuli, daf_metrics, format_metrics
+from ..constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, SR
+from ..evaluate import (
+    build_stimuli,
+    daf_metrics,
+    daf_response,
+    format_metrics,
+    format_responders,
+)
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
@@ -35,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
+    p.add_argument("--causal-encoder", default=None,
+                   help="causal minimum-phase filter bank .npz (instead of --encoder)")
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output model .npz")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
@@ -45,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--drive-i", type=float, default=0.058)
     p.add_argument("--b-scale", type=float, default=16.0)
     p.add_argument("--tau-s", type=float, default=20.0)
+    p.add_argument("--tau-e", type=float, default=30.0,
+                   help="E membrane time constant (ms). theta_e is derived from it, so "
+                        "the tonic rate stays at target_rate as this changes.")
     p.add_argument("--alpha-theta", type=float, default=0.0)
     p.add_argument("--n-rend", type=int, default=600)
     # network
@@ -60,8 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
                    help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp_eff)")
-    p.add_argument("--tau-stdp", type=float, default=0.0,
-                   help="STDP kernel width (0 = use tau_s)")
+    p.add_argument("--tau-stdp", type=float, default=20.0,
+                   help="STDP coincidence window (ms), independent of the synaptic "
+                        "tau_s; 0 falls back to tau_s")
     # protocol
     p.add_argument("--novel-ratio", type=int, default=1)
     p.add_argument("--r-e-target", type=float, default=16.0)
@@ -72,8 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
-    p.add_argument("--mean-rate-hz", type=float, default=15.0)
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
+                   help="auditory spike-rate calibration (Schneider & Woolley 2013)")
     p.add_argument("--n-ista", type=int, default=50)
+    # Spike-frequency adaptation on E. tau_sfa must stay SHORTER than the 50 ms DAF
+    # burst: at 100 ms it integrates over the motif and acts as a tonic gain change
+    # (it cut the baseline 59% while barely moving the peak), where at 10 ms it
+    # builds and recovers within the burst and truncates the response instead.
+    p.add_argument("--a-sfa", type=float, default=0.3)
+    p.add_argument("--tau-sfa", type=float, default=10.0)
     return p
 
 
@@ -90,9 +109,16 @@ def main(argv: list[str] | None = None) -> None:
     tau_stdp_eff = args.tau_stdp if args.tau_stdp > 0.0 else args.tau_s
     a_jie = args.a_jie if args.a_jie is not None else 3e-3 * (10.0 / tau_stdp_eff)
 
-    print("Loading OF encoder and motifs...")
-    encoder = OlshausenFieldEncoder.load(enc_path)
-    n_kernels = encoder.n_bases
+    if args.causal_encoder:
+        from ..causal_filters import CausalFilterEncoder
+
+        print("Loading causal filter bank and motifs...")
+        encoder = CausalFilterEncoder.load(args.causal_encoder)
+        n_kernels = encoder.n_channels
+    else:
+        print("Loading OF encoder and motifs...")
+        encoder = OlshausenFieldEncoder.load(enc_path)
+        n_kernels = encoder.n_bases
     print(f"  n_bases={n_kernels}  coch_params={encoder.coch_params}")
 
     # Stimuli are built by evaluate.build_stimuli, which the reproduction tests also
@@ -113,12 +139,14 @@ def main(argv: list[str] | None = None) -> None:
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, c_JIE=args.c_jie, tau_s=args.tau_s,
+        tau_e=args.tau_e,
         r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i, alpha_theta=args.alpha_theta,
         r_e_target=args.r_e_target, r_e_song_target=0.0,
         A_jei_plastic=0.0, use_mask=False,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
+        a_sfa=args.a_sfa, tau_sfa=args.tau_sfa,
     )
     if args.theta_e_init > 0.0:
         ven.theta_e[:] = args.theta_e_init
@@ -192,6 +220,11 @@ def main(argv: list[str] | None = None) -> None:
                     aud_daf=aud_daf, aud_reversed=aud_reversed)
     print()
     print(format_metrics(m, r_e_target=args.r_e_target))
+    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=hvc_on,
+                     acts_train=st["acts_train"], sr=args.sr, T_out_ms=st["T_rend"],
+                     n_trials=20, seed=args.seed)
+    print()
+    print(format_responders(r))
 
     np.savez(traces_path,
              rc=np.array(rc_trace), rn=np.array(rn_trace),

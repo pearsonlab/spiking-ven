@@ -19,7 +19,7 @@ Public API
 ----------
 make_figure(ven, encoder, sig_train, T_song, out_tag, *, ...)
     Generate and save the figure with the current VEN state.
-    encoder: OlshausenFieldEncoder.
+    encoder: OlshausenFieldEncoder or CausalFilterEncoder.
     Call this from experiment scripts to snapshot learning progress.
 
 compute_encoding_columns(ven, encoder, sig_train, T_song, *, ...)
@@ -45,11 +45,21 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram as scipy_spectrogram
 
-from ..constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
-from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
+from ..constants import AUD_MEAN_RATE_HZ, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from ..evaluate import daf_waveform
+from ..evaluate import encode_acts
+from ..olshausen_field import of_to_spikes
 from ..common import generate_hvc_spikes
 
-__all__ = ["make_figure", "compute_encoding_columns", "specgram"]
+__all__ = ["make_figure", "compute_encoding_columns", "specgram", "DRAWN_COLS"]
+
+# Columns DRAWN, as indices into compute_encoding_columns' output: training song,
+# time-reversed motif, DAF. The white-noise column (2) is computed but not drawn. There
+# is no experimental measurement of continuous broadband noise during singing, so it is a
+# diagnostic, not a benchmark, and showing it beside three columns that do have data
+# invites reading it as one. compute_encoding_columns still returns it for anyone who
+# wants it as a control. Both views share this list so they cannot disagree.
+DRAWN_COLS = [0, 1, 3]
 
 # Column labels shared by every view of this comparison.
 COLUMN_LABELS = [
@@ -80,7 +90,8 @@ def compute_encoding_columns(
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    t_refr_ms: float = 2.0,
     of_n_ista: int = 50,
 ):
     """Build the four stimuli, encode them, and run VEN inference.
@@ -97,10 +108,11 @@ def compute_encoding_columns(
     This is the single source of truth for the network inference behind both
     the raster figure (make_figure) and the population-rate figure.
     """
-    if not isinstance(encoder, OlshausenFieldEncoder):
-        raise TypeError(
-            f"this figure requires an OlshausenFieldEncoder, got {type(encoder).__name__}"
-        )
+    # Either encoder: the patch dictionary or the causal filter bank. encode_acts is the
+    # one place that dispatches on type, so this figure cannot normalise differently from
+    # the metrics it is drawn beside. It used to reject anything but the patch encoder and
+    # call coch_encode directly, which is the same bypass that stopped the causal bank
+    # reaching build_stimuli.
     T_rend    = T_song + T_post
     rms_train = float(np.sqrt(np.mean(sig_train ** 2)))
 
@@ -111,26 +123,27 @@ def compute_encoding_columns(
     # the same realisation, so columns 3 and 4 shared their noise.
     rng_novel  = np.random.default_rng(seed + 1)
     sig_novel  = rng_novel.standard_normal(len(sig_train)) * rms_train
-    _rng_daf   = np.random.default_rng(seed + 2)
-    daf_noise  = _rng_daf.standard_normal(len(sig_train)) * rms_train * daf_wn_amplitude
-    sig_daf    = sig_train.copy()
-    _s0, _s1   = int(DAF_WINDOW_S[0] * sr), int(DAF_WINDOW_S[1] * sr)
-    if _s0 >= len(sig_train):
-        raise ValueError(
-            f"the DAF window {DAF_WINDOW_S} s starts past the end of a "
-            f"{len(sig_train) / sr:.3f} s motif, so the DAF column would be identical to "
-            "the training column. Adjust constants.DAF_WINDOW_S for this corpus."
-        )
-    sig_daf[_s0:_s1] += daf_noise[_s0:_s1]
+    # Same function the metrics score, so the column and the number agree by construction.
+    sig_daf    = daf_waveform(sig_train, sr, seed=seed + 2, amplitude=daf_wn_amplitude)
 
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
     _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_channels
 
+    # One reference for the whole set (the song) at BOTH normalisation stages -- the
+    # waveform scaling and the spike-rate calibration. Per-signal at either stage
+    # discards the level: in the DAF column the added noise raises the composite RMS,
+    # so normalising against it quietens the very song the noise was added to. See
+    # the note in evaluate.build_stimuli.
+    acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=of_n_ista,
+                             T_out_ms=T_rend, rms_from=sig_train)
+
     def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
-        acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
-                           n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend)
+        acts = encode_acts(sig, encoder, sr=sr, n_ista=of_n_ista,
+                           T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
-                           sign_split=_sign_split, seed=seed + seed_offset)
+                           t_refr_ms=t_refr_ms,
+                           sign_split=_sign_split, seed=seed + seed_offset,
+                           calibrate_on=acts_train)
         return spk.astype(np.float32)
 
     aud_train = _sig_to_aud(sig_train, 10)
@@ -140,6 +153,7 @@ def compute_encoding_columns(
 
     # ── HVC inputs ────────────────────────────────────────────────────────────
     hvc_one = generate_hvc_spikes(
+        t_refr_ms=t_refr_ms,
         n_hvc=ven.n_hvc, T=T_rend, n_renditions=1,
         T_song=T_song, T_burn=0, T_post=T_post,
         peak_rate=peak_rate, kernel_width=kernel_width, seed=seed,
@@ -186,7 +200,8 @@ def make_figure(
     sub_l: int = 64,
     sub_i: int = 64,
     sub_e: int = 64,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    t_refr_ms: float = 2.0,
     of_n_ista: int = 50,
 ):
     """Generate and save encoding comparison figure with the current VEN state.
@@ -194,7 +209,7 @@ def make_figure(
     Parameters
     ----------
     ven         : VocalErrorNetV2 (trained or partially trained)
-    encoder     : OlshausenFieldEncoder
+    encoder     : OlshausenFieldEncoder or CausalFilterEncoder
     sig_train   : (N,) float64 training audio signal
     T_song      : int, song duration in ms
     out_tag     : str appended to output filenames, e.g. "_r0050"
@@ -212,10 +227,7 @@ def make_figure(
         daf_wn_amplitude=daf_wn_amplitude, of_mean_rate_hz=of_mean_rate_hz,
         of_n_ista=of_n_ista,
     )
-    COL_DATA  = data["columns"]
-    sig_rev   = COL_DATA[1]["sig"]
-    sig_novel = COL_DATA[2]["sig"]
-    sig_daf   = COL_DATA[3]["sig"]
+    COL_DATA  = [data["columns"][i] for i in DRAWN_COLS]
 
     # ── Neuron subsets ────────────────────────────────────────────────────────
     rng_sub = np.random.default_rng(0)
@@ -227,7 +239,7 @@ def make_figure(
         return [np.where(mat[i, :T_song] > 0.5)[0].astype(float) for i in ids_]
 
     # ── Figure layout ─────────────────────────────────────────────────────────
-    COL_LABELS = COLUMN_LABELS
+    COL_LABELS = [COLUMN_LABELS[i] for i in DRAWN_COLS]
     _enc_label = "Auditory\nneurons"
     ROW_LABELS = ["", "", _enc_label, "Inhibitory\ninterneurons", "Excitatory\nprojection\nneurons"]
     CLR = {"lew": "#2ca02c", "I": "#c0392b", "E": "#1f77b4"}
@@ -246,8 +258,8 @@ def make_figure(
     fig_height = sum(HR) * _u + 1.2
 
     fig, axes = plt.subplots(
-        5, 4,
-        figsize=(20, fig_height),
+        5, len(COL_DATA),
+        figsize=(5.0 * len(COL_DATA), fig_height),
         gridspec_kw={"height_ratios": HR, "hspace": 0.0, "wspace": 0.06},
         sharex="col",
     )
@@ -263,7 +275,7 @@ def make_figure(
     VMIN = VMAX - 60.0
 
     t_wav_ms  = np.arange(n_wav) / sr * 1000.0
-    _wav_sigs = [_pad_sig(s, n_wav) for s in (sig_train, sig_rev, sig_novel, sig_daf)]
+    _wav_sigs = [_pad_sig(cd["sig"], n_wav) for cd in COL_DATA]
     _wav_ylim = max(np.abs(s).max() for s in _wav_sigs) * 1.05
 
     for ci, cd in enumerate(COL_DATA):

@@ -41,14 +41,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ
-from .encoding_comparison import compute_encoding_columns, specgram
+from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from .encoding_comparison import DRAWN_COLS, compute_encoding_columns, specgram
 
 __all__ = ["make_rate_figure"]
 
-# Columns kept for this view (index into compute_encoding_columns output):
-# 0 training, 1 time-reversed, 3 DAF — white noise (2) is dropped.
-KEEP_COLS = [0, 1, 3]
+# Shared with the raster view so the two cannot drift apart: 0 training, 1 time-reversed,
+# 3 DAF; white noise (2) is computed but not drawn (see DRAWN_COLS).
+KEEP_COLS = DRAWN_COLS
 
 CLR = {"aud": "#2ca02c", "I": "#c0392b", "E": "#1f77b4"}
 
@@ -77,7 +77,7 @@ def make_rate_figure(
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     sigma_ms: float = 6.0,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     of_n_ista: int = 50,
 ):
     """Population-rate comparison figure with the current VEN state."""

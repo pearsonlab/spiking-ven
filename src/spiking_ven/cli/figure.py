@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
+from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
 from ..corpus import load_corpus
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
@@ -36,11 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--of-encoder", default=None, help="OF encoder .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "rates"],
-                   help="raster (the publication figure) or rates (supplementary)")
+    p.add_argument("--view", default="raster", choices=["raster", "rates", "filters"],
+                   help="raster (the publication figure), rates (supplementary), or "
+                        "filters (causal filter bank diagnostics; needs no VEN model)")
+    p.add_argument("--causal-encoder", default=None,
+                   help="causal filter bank .npz (--view filters)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=200)
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
+                   help="auditory spike-rate calibration; MUST match what the model was "
+                        "trained with, or the figure encodes a different stimulus than "
+                        "the metrics beside it")
     # No delay flags: the conduction delays are baked into the trained model and are
     # applied by its own inference pass. This entry point used to accept
     # --aud-delay-ms/--hvc-delay-ms and pass them to a function that ignored them.
@@ -56,9 +63,32 @@ def main(argv: list[str] | None = None) -> None:
     # import time by whichever training script ran first. Do not rely on that.
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
+    if args.view == "filters":
+        # The filter diagnostics describe the encoder alone, so this branch loads no VEN
+        # model and no corpus -- asking for one would make the figure undrawable before
+        # stage 2 has ever run.
+        from ..causal_filters import CausalFilterEncoder
+        from ..figures.causal_filters import make_filter_figures
+
+        enc_path = args.causal_encoder or str(output_dir() / "causal_encoder.npz")
+        print(f"Loading causal encoder: {enc_path}")
+        cenc = CausalFilterEncoder.load(enc_path)
+        patch = None
+        try:
+            patch = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
+        except (OSError, KeyError):
+            print("  (no comparable patch encoder; drawing the causal bank alone)")
+        for path in make_filter_figures(cenc, out_dir, sr=args.sr, patch_encoder=patch):
+            print(f"  wrote {path}")
+        return
+
     print("Loading model and data ...")
     print(f"  model: {model_path}")
-    enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
+    if args.causal_encoder:
+        from ..causal_filters import CausalFilterEncoder
+        enc = CausalFilterEncoder.load(args.causal_encoder)
+    else:
+        enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
     # Pin the seed so the rendered figure is reproducible, not just the training.
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
 
@@ -85,6 +115,7 @@ def main(argv: list[str] | None = None) -> None:
         "seed": args.seed,
         "kernel_width": KERNEL_WIDTH_MS,
         "peak_rate": PEAK_RATE_HZ,
+        "of_mean_rate_hz": args.mean_rate_hz,
     }
     if args.view == "raster":
         from ..figures.encoding_comparison import make_figure

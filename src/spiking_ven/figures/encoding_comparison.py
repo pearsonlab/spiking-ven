@@ -51,7 +51,15 @@ from ..evaluate import encode_acts
 from ..olshausen_field import of_to_spikes
 from ..common import generate_hvc_spikes
 
-__all__ = ["make_figure", "compute_encoding_columns", "specgram"]
+__all__ = ["make_figure", "compute_encoding_columns", "specgram", "DRAWN_COLS"]
+
+# Columns DRAWN, as indices into compute_encoding_columns' output: training song,
+# time-reversed motif, DAF. The white-noise column (2) is computed but not drawn. There
+# is no experimental measurement of continuous broadband noise during singing, so it is a
+# diagnostic, not a benchmark, and showing it beside three columns that do have data
+# invites reading it as one. compute_encoding_columns still returns it for anyone who
+# wants it as a control. Both views share this list so they cannot disagree.
+DRAWN_COLS = [0, 1, 3]
 
 # Column labels shared by every view of this comparison.
 COLUMN_LABELS = [
@@ -215,10 +223,7 @@ def make_figure(
         daf_wn_amplitude=daf_wn_amplitude, of_mean_rate_hz=of_mean_rate_hz,
         of_n_ista=of_n_ista,
     )
-    COL_DATA  = data["columns"]
-    sig_rev   = COL_DATA[1]["sig"]
-    sig_novel = COL_DATA[2]["sig"]
-    sig_daf   = COL_DATA[3]["sig"]
+    COL_DATA  = [data["columns"][i] for i in DRAWN_COLS]
 
     # ── Neuron subsets ────────────────────────────────────────────────────────
     rng_sub = np.random.default_rng(0)
@@ -230,7 +235,7 @@ def make_figure(
         return [np.where(mat[i, :T_song] > 0.5)[0].astype(float) for i in ids_]
 
     # ── Figure layout ─────────────────────────────────────────────────────────
-    COL_LABELS = COLUMN_LABELS
+    COL_LABELS = [COLUMN_LABELS[i] for i in DRAWN_COLS]
     _enc_label = "Auditory\nneurons"
     ROW_LABELS = ["", "", _enc_label, "Inhibitory\ninterneurons", "Excitatory\nprojection\nneurons"]
     CLR = {"lew": "#2ca02c", "I": "#c0392b", "E": "#1f77b4"}
@@ -249,8 +254,8 @@ def make_figure(
     fig_height = sum(HR) * _u + 1.2
 
     fig, axes = plt.subplots(
-        5, 4,
-        figsize=(20, fig_height),
+        5, len(COL_DATA),
+        figsize=(5.0 * len(COL_DATA), fig_height),
         gridspec_kw={"height_ratios": HR, "hspace": 0.0, "wspace": 0.06},
         sharex="col",
     )
@@ -266,7 +271,7 @@ def make_figure(
     VMIN = VMAX - 60.0
 
     t_wav_ms  = np.arange(n_wav) / sr * 1000.0
-    _wav_sigs = [_pad_sig(s, n_wav) for s in (sig_train, sig_rev, sig_novel, sig_daf)]
+    _wav_sigs = [_pad_sig(cd["sig"], n_wav) for cd in COL_DATA]
     _wav_ylim = max(np.abs(s).max() for s in _wav_sigs) * 1.05
 
     for ci, cd in enumerate(COL_DATA):

@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 3% target usage keeps all 64 filters alive (see causal_filters.learn on why weak
     # equalisation makes dropout one-way).
     p.add_argument("--causal-epochs", type=int, default=80)
-    p.add_argument("--causal-lambda", type=float, default=0.6,
+    p.add_argument("--causal-lambda", type=float, default=0.3,
                    help="code sparsity; also sets how many filters survive")
     p.add_argument("--causal-target-usage", type=float, default=0.03)
     p.add_argument("--causal-lr-bias", type=float, default=0.0,

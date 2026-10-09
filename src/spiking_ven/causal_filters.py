@@ -98,7 +98,7 @@ def infer(X, V, lam, n_iter=20, bias=None):
     return S.T
 
 
-def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
+def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
           target_usage=0.10, lr_bias=0.0, ema_decay=0.9, mp_strength=0.25, l1_V=7e-5,
           smooth_V=0.0):
     """Alternate causal inference with a gradient step on the kernels.
@@ -117,6 +117,16 @@ def learn(cochs, K=64, L=16, lam=0.05, n_epochs=30, n_iter=20, lr=0.1, seed=42, 
     annihilates the dictionary -- 99.8% of entries zero, one surviving tap per kernel.
     The useful range is a threshold of order the gradient step, so ``lr * l1_V`` around
     1e-5 to 1e-4.
+
+    ``lam`` now carries the code sparsity, and with it how many filters survive: 0.3 ->
+    10.7% activation and 56 of 64 filters, 0.6 -> 3.2% and 23, 1.2 -> 0.15% and 1. The
+    default is 0.3, chosen on song cancellation (song/reversed 2.47 against 1.72 at 0.6),
+    which is what the network exists to do. It costs responder fraction (52% against 43%,
+    bird 41%) and peak change (316 Hz against 262); DAF latency is inside the bird's
+    23 +/- 12 ms either way. ``lam`` is also the only thing rejecting broadband noise --
+    at 0.3 white noise drives the dictionary 17x harder than at 0.6 -- but there is no
+    experimental measurement of continuous noise during singing, so that is a diagnostic
+    and was not allowed to set the default.
 
     ``l1_V`` puts an L1 penalty on the kernel entries, applied as a soft-threshold after
     each update. Without it the kernels do not converge to anything: at 3% activation a

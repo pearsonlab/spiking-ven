@@ -167,7 +167,7 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
     n_e = int(ven.n_e)
     pre = np.zeros((n_trials, n_e))
     post = np.zeros((n_trials, n_e))
-    psth = np.zeros((n_trials, 2 * W))
+    psth = np.zeros((n_trials, n_e, 2 * W), dtype=np.float32)
     for t in range(n_trials):
         aud = encode_stimulus(
             daf_waveform(sig_train, sr, seed=seed + 1000 + t), encoder,
@@ -177,16 +177,53 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         sE = ven.transform(hvc_on, aud)
         pre[t] = sE[:, onset - W:onset].sum(axis=1)
         post[t] = sE[:, onset:onset + W].sum(axis=1)
-        psth[t] = sE[:, onset - W:onset + W].mean(axis=0) * 1000
+        psth[t] = sE[:, onset - W:onset + W] * 1000
 
     tval, pval = stats.ttest_rel(post, pre, axis=0)
     resp = (pval < alpha) & (tval > 0)
     to_hz = 1000.0 / W
     base = pre.mean(axis=0) * to_hz
     inc = (post - pre).mean(axis=0) * to_hz
-    mean_psth = psth.mean(axis=0)
-    baseline = float(mean_psth[:W].mean())
     nan = float("nan")
+
+    # The paper's ~20 Hz peak is the trial average over its SEVEN RESPONDERS (Fig 8E,
+    # n=7), so the model's peak has to be averaged over responders too. It used to average
+    # over every unit, which mixes the non-responders' flat PSTHs into a number compared
+    # against a responders-only one -- and understates the gap, since responders are
+    # roughly half the population here. The all-unit value is kept separately rather than
+    # dropped, because it is the right denominator for anything about the population.
+    def _peak(mask):
+        if not np.any(mask):
+            return nan, 0
+        mp = psth[:, mask, :].mean(axis=(0, 1))
+        return float(mp.max() - float(mp[:W].mean())), int(np.argmax(mp) - W)
+
+    peak_resp, lat_resp = _peak(resp)
+    peak_all, _ = _peak(np.ones(n_e, dtype=bool))
+
+    # Response onset latency and duration, by the paper's own rule: 2 ms bins, a bin is
+    # significant at p < 0.05 against the pre-onset distribution, latency is the first bin
+    # followed by five consecutive significant ones, duration runs to the first run of ten
+    # non-significant bins. This is an ONSET, which is what 23 +/- 12 ms refers to -- not
+    # the PSTH argmax, which is later (49 ms here) and was being printed against it.
+    BIN = 2
+    nb = (2 * W) // BIN
+    half = nb // 2
+    rate = psth.reshape(n_trials, n_e, nb, BIN).mean(axis=3).mean(axis=0)
+    lats, durs = [], []
+    for u in np.flatnonzero(resp):
+        rr = rate[u]
+        mu, sd = rr[:half].mean(), rr[:half].std()
+        if sd == 0:
+            continue
+        sig = (1.0 - stats.norm.cdf((rr[half:] - mu) / sd)) < 0.05
+        la = next((i for i in range(len(sig) - 5) if sig[i:i + 5].all()), None)
+        if la is None:
+            continue
+        lats.append(la * BIN)
+        en = next((j for j in range(la, len(sig) - 10) if not sig[j:j + 10].any()), None)
+        if en is not None:
+            durs.append((en - la) * BIN)
     return {
         "n_trials": int(n_trials),
         "n_units": n_e,
@@ -195,9 +232,18 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         "baseline_hz_all": float(base.mean()),
         "baseline_hz_responders": float(base[resp].mean()) if resp.any() else nan,
         "increase_hz_responders": float(inc[resp].mean()) if resp.any() else nan,
+        #: Extra spikes per neuron per burst, over the analysis window. The directly
+        #: interpretable form: the paper's responder gains ~1-2 spikes when it hears the
+        #: distortion, on a baseline of well under one spike in the same window.
+        "extra_spikes_responders": (float((post - pre)[:, resp].mean())
+                                    if resp.any() else nan),
         "increase_hz_all": float(inc.mean()),
-        "peak_change_hz": float(mean_psth.max() - baseline),
-        "peak_latency_ms": int(np.argmax(mean_psth) - W),
+        "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
+        "peak_change_hz_all": peak_all,
+        "peak_latency_ms": lat_resp,
+        "latency_ms": float(np.mean(lats)) if lats else nan,
+        "duration_ms": float(np.mean(durs)) if durs else nan,
+        "n_with_latency": len(lats),
         "window_ms": W,
         "burst_ms": float((DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000),
     }
@@ -208,6 +254,9 @@ def format_responders(r: dict) -> str:
     t = BIOLOGICAL_TARGETS
     lo, hi = t["singing_rate_hz"]
     lat, lat_sd = t["response_latency_ms"]
+    pk = t["responder_peak_change_hz"]
+    dur_m, dur_sd = t["response_duration_ms"]
+    dur = dur_m / 1000.0
     return "\n".join([
         f"DAF response, {r['burst_ms']:.0f} ms burst, {r['window_ms']} ms windows, "
         f"{r['n_trials']} trials (Mandelblat-Cerf 2014):",
@@ -216,10 +265,23 @@ def format_responders(r: dict) -> str:
         f"  baseline, all units       {r['baseline_hz_all']:7.2f} Hz      "
         f"paper {lo:.0f}-{hi:.0f} Hz during singing",
         f"  baseline, responders      {r['baseline_hz_responders']:7.2f} Hz",
-        f"  rate increase, responders {r['increase_hz_responders']:7.2f} Hz      "
-        f"paper ~{t['responder_peak_change_hz']:.0f} Hz peak change",
-        f"  peak change (population)  {r['peak_change_hz']:7.2f} Hz "
-        f"at {r['peak_latency_ms']:+d} ms   paper latency {lat:.0f} +/- {lat_sd:.0f} ms",
+        f"  peak change, responders   {r['peak_change_hz']:7.2f} Hz      "
+        f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7)",
+        f"  peak change, all units    {r['peak_change_hz_all']:7.2f} Hz      "
+        f"(no paper equivalent; responders only are plotted there)",
+        f"  latency, responders       {r['latency_ms']:7.1f} ms      "
+        f"paper {lat:.0f} +/- {lat_sd:.0f} ms  (onset: first of 5 consecutive 2 ms bins)",
+        f"  duration, responders      {r['duration_ms']:7.1f} ms      "
+        f"paper {dur_m:.0f} +/- {dur_sd:.0f} ms",
+        f"  peak latency, responders  {r['peak_latency_ms']:+7d} ms      "
+        f"(PSTH argmax; later than onset, no paper equivalent)",
+        # The window mean and the peak are different quantities, so the paper's peak is
+        # converted here rather than printed beside a mean as if they matched. A 20 Hz
+        # peak lasting 90 +/- 43 ms is 1.8 extra spikes if the response is rectangular,
+        # 0.9 if triangular -- the honest range given the paper reports no shape.
+        f"  extra spikes/neuron/burst {r['extra_spikes_responders']:7.2f}         "
+        f"paper ~{0.5 * pk * dur:.1f}-{pk * dur:.1f} "
+        f"({pk:.0f} Hz peak x {1000 * dur:.0f} ms, triangular..rectangular)",
     ])
 
 

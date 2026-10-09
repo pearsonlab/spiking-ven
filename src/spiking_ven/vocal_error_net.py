@@ -44,7 +44,7 @@ __all__ = ["VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate"]
 def _sim_loop_v2(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
     decay_e, decay_i, alpha_s,
-    theta_e, theta_i, v_reset, noise_e, noise_i,
+    theta_e, theta_i, v_reset, noise_e, noise_i, t_refr_ms,
     A_jie, J_max_ie, xi_th,
     drive_e, drive_i,
     learn_weights,
@@ -85,6 +85,15 @@ def _sim_loop_v2(
     _zero_aud = np.zeros(h_aud.shape[0])
     _zero_hvc = np.zeros(h_hvc.shape[0])
 
+    # Absolute refractory period, in 1 ms steps. Without it a cell can fire on every
+    # consecutive bin whenever (1 - decay) * u clears threshold from v_reset, so the
+    # ceiling is 1000 Hz. It was being reached: during a DAF burst the median E ISI was
+    # 1 ms, with 73% of burst spikes following the previous one in the very next bin. The
+    # baseline was unaffected (median ISI 31 ms), which is what makes this the right
+    # constraint rather than a knob -- it clips only what is firing impossibly fast.
+    refr_e = np.zeros(n_e)
+    refr_i = np.zeros(n_i)
+
     for t in range(T):
         h_aud_t = h_aud[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
         h_hvc_t = h_hvc[:, t - hvc_delay_ms] if t >= hvc_delay_ms else _zero_hvc
@@ -94,18 +103,33 @@ def _sim_loop_v2(
         u_e = drive_e + audio_drive_e - JIE @ sI_prev
         if noise_e > 0.0:
             u_e += rng.normal(0.0, noise_e, n_e)
+        # Countdown is decremented BEFORE the spike test, so a cell with t_refr_ms = 2
+        # may fire again 2 ms later, not 3. Testing first and decrementing after costs an
+        # extra millisecond and would silently make the refractory period t_refr_ms + 1.
+        if t_refr_ms > 0.0:
+            refr_e = np.maximum(refr_e - 1.0, 0.0)
         V_e = decay_e * V_e + (1.0 - decay_e) * u_e
-        sE  = (V_e > theta_e).astype(np.float64)
+        if t_refr_ms > 0.0:
+            V_e[refr_e > 0.0] = v_reset       # clamped while refractory, as in a LIF
+        sE  = ((V_e > theta_e) & (refr_e <= 0.0)).astype(np.float64)
         V_e[sE > 0.5] = v_reset
+        if t_refr_ms > 0.0:
+            refr_e[sE > 0.5] = t_refr_ms
         sE_mat[:, t] = sE
 
         # --- I dynamics ---
         u_i = drive_i + JEI @ sE_prev + B_hvc @ h_hvc_t
         if noise_i > 0.0:
             u_i += rng.normal(0.0, noise_i, n_i)
+        if t_refr_ms > 0.0:
+            refr_i = np.maximum(refr_i - 1.0, 0.0)
         V_i = decay_i * V_i + (1.0 - decay_i) * u_i
-        sI  = (V_i > theta_i).astype(np.float64)
+        if t_refr_ms > 0.0:
+            V_i[refr_i > 0.0] = v_reset
+        sI  = ((V_i > theta_i) & (refr_i <= 0.0)).astype(np.float64)
         V_i[sI > 0.5] = v_reset
+        if t_refr_ms > 0.0:
+            refr_i[sI > 0.5] = t_refr_ms
         sI_mat[:, t] = sI
 
         # Unfiltered E trace used for JEI homeostasis (always updated for efficiency)
@@ -248,6 +272,7 @@ class VocalErrorNetV2:
         B_hvc_scale: float = 2.0,
         c_JEI: float = 0.5,
         JEI_scale: float = 1.0,
+        t_refr_ms: float = 2.0,
         c_JIE: float = 0.5,
         r_i_th: float = 0.0,
         drive_e: float = 0.155,
@@ -291,6 +316,10 @@ class VocalErrorNetV2:
         self.B_hvc_scale   = B_hvc_scale
         self.c_JEI         = c_JEI
         self.JEI_scale     = float(JEI_scale)
+        #: Absolute refractory period (ms). 2 ms is the standard cortical value and caps
+        #: the instantaneous rate at 500 Hz. Set to 0 to recover the old unbounded
+        #: dynamics, which allowed 1000 Hz.
+        self.t_refr_ms     = float(t_refr_ms)
         self.c_JIE         = c_JIE
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
@@ -444,6 +473,7 @@ class VocalErrorNetV2:
             c_JEI=self.c_JEI, c_JIE=self.c_JIE, r_i_th=self.r_i_th,
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
+            t_refr_ms=float(getattr(self, "t_refr_ms", 2.0)),
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
             alpha_theta=self.alpha_theta, r_e_target=self.r_e_target,
             r_e_song_target=self.r_e_song_target,
@@ -471,10 +501,13 @@ class VocalErrorNetV2:
             "drive_e", "drive_i", "noise_e", "noise_i",
             "target_rate", "target_rate_i", "alpha_theta", "r_e_target", "r_e_song_target",
             "A_jei_plastic", "tau_w_ie", "W_max_ie", "epsilon_hltd", "epsilon_col",
-            "tau_stdp", "theta_i",
+            "tau_stdp", "theta_i", "t_refr_ms", "JEI_scale",
         )
         # Models saved before these knobs were removed carry extra keys; ignoring them
-        # rather than reading them is the point.
+        # rather than reading them is the point. The missing-key default of 0.0 also does
+        # the right thing for ``t_refr_ms``: a model trained before the refractory period
+        # existed had none, so it reloads with the dynamics it was actually trained under
+        # rather than silently acquiring the new constructor default.
         for k in scalar_keys:
             setattr(obj, k, float(d[k]) if k in d else 0.0)
         obj.use_mask      = bool(d["use_mask"]) if "use_mask" in d else False
@@ -585,6 +618,7 @@ class VocalErrorNetV2:
             decay_e, decay_i, alpha_s,
             theta_e, float(self.theta_i),
             float(self.v_reset), float(self.noise_e), float(self.noise_i),
+            float(getattr(self, "t_refr_ms", 2.0)),
             float(self.A_jie), float(self.J_max_ie), xi_th,
             float(self.drive_e), float(self.drive_i),
             learn_weights,

@@ -40,6 +40,37 @@ def spike_to_rate(
     return lfilter(b, a, spikes.astype(np.float32), axis=1).astype(np.float32)
 
 
+def apply_refractory(spikes, t_refr_ms: float = 2.0):
+    """Enforce an absolute refractory period on a generated spike train.
+
+    For the Poisson/Bernoulli input populations, which are sampled per 1 ms bin with no
+    history and so can emit spikes a neuron could not produce. Two separate violations
+    are fixed here: a bin carrying more than one spike (``of_to_spikes`` returns Poisson
+    COUNTS -- measured up to 5 per bin for song and 8 for DAF), and spikes closer together
+    than ``t_refr_ms`` (measured ~40% of auditory ISIs and ~27% of HVC ISIs at 1 ms).
+
+    The E and I populations do NOT use this: their refractory belongs in the membrane
+    dynamics, where it also gates integration, not in a post-hoc filter.
+
+    Thinning lowers the realised rate slightly, by construction -- it removes spikes and
+    adds none. That is the intended effect and the rate calibration is deliberately not
+    re-run afterwards, which would put the violating spikes back as higher-rate ones.
+    """
+    s = (np.asarray(spikes) > 0).astype(np.float32)     # at most one spike per bin
+    r = int(round(t_refr_ms))
+    if r <= 1:
+        return s
+    for i in range(s.shape[0]):
+        idx = np.flatnonzero(s[i])
+        last = -(10 ** 9)
+        for j in idx:
+            if j - last < r:
+                s[i, j] = 0.0
+            else:
+                last = j
+    return s
+
+
 def generate_hvc_spikes(
     n_hvc: int,
     T: int,
@@ -50,6 +81,7 @@ def generate_hvc_spikes(
     peak_rate: float = 150.0,
     kernel_width: float = 20.0,
     seed: int | None = None,
+    t_refr_ms: float = 2.0,
 ) -> np.ndarray:
     """Generate Poisson spike trains for a parametric HVC population.
 
@@ -101,7 +133,7 @@ def generate_hvc_spikes(
 
     prob = rates * 1e-3
     spikes = rng.random((n_hvc, T)) < prob
-    return spikes
+    return apply_refractory(spikes, t_refr_ms)
 
 
 def _lognormal_sparse(shape, c, mean, std, rng):

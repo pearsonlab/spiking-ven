@@ -519,6 +519,7 @@ def of_to_spikes(
     per_neuron: bool = False,
     sign_split: bool = False,
     calibrate_on: np.ndarray | None = None,
+    t_refr_ms: float = 2.0,
 ) -> np.ndarray:
     """Convert O&F activations to Poisson spike trains.
 
@@ -565,4 +566,8 @@ def of_to_spikes(
         rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
 
     lam = act * rate_scale * dt_s
-    return rng.poisson(lam).astype(np.float32)
+    # Poisson COUNTS, so a bin can carry several spikes; apply_refractory collapses that
+    # to at most one and enforces the 2 ms floor. See its docstring for the measurements.
+    from .common import apply_refractory
+
+    return apply_refractory(rng.poisson(lam), t_refr_ms)

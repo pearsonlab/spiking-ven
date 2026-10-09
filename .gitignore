@@ -11,3 +11,6 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+
+# Stray artifacts from a mistyped output path (outputs/ is ignored; outputs_* was not).
+outputs_*

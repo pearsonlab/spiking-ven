@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
+from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
 from ..corpus import load_corpus
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=200)
-    p.add_argument("--mean-rate-hz", type=float, default=15.0,
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
                    help="auditory spike-rate calibration; MUST match what the model was "
                         "trained with, or the figure encodes a different stimulus than "
                         "the metrics beside it")

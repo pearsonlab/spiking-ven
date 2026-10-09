@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--target-usage", type=float, default=0.10)
     p.add_argument("--lr-bias", type=float, default=0.005)
-    p.add_argument("--mean-rate-hz", type=float, default=15.0)
+    p.add_argument("--mean-rate-hz", type=float, default=2.5)
     # --encoder causal only. Defaults are the converged operating point: 80 epochs with
     # 3% target usage keeps all 64 filters alive (see causal_filters.learn on why weak
     # equalisation makes dropout one-way).

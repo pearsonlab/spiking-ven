@@ -17,6 +17,7 @@ __all__ = [
     "DAF_WN_AMPLITUDE",
     "DAF_WINDOW_S",
     "AUD_DELAY_MS",
+    "AUD_MEAN_RATE_HZ",
     "HVC_DELAY_MS",
 ]
 
@@ -39,6 +40,16 @@ PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
 #: See the note in :mod:`spiking_ven.evaluate`.
 DAF_WN_AMPLITUDE = 5.6
 
+#: Auditory population mean firing rate during song (Hz), the encoder's spike-rate
+#: calibration target.
+#:
+#: Schneider & Woolley 2013, Neuron 79:141-152 (DOI 10.1016/j.neuron.2013.04.038) measure
+#: 2.4 +/- 2.7 Hz for the broad-spiking neurons of the higher-level auditory cortex -- the
+#: sparse, selective, background-invariant population this encoder models. 2.5 realises
+#: 2.30 Hz after the refractory period. It was 15.0, an unsourced default repeated across
+#: seven call sites, which made the auditory input ~4x too fast.
+AUD_MEAN_RATE_HZ = 2.5
+
 #: Window within the motif that the DAF stimulus perturbs (seconds).
 #:
 #: 50 ms, matching the noise bursts in Mandelblat-Cerf et al. 2014 -- the experiment the
@@ -56,9 +67,13 @@ DAF_WINDOW_S = (0.400, 0.450)
 #: for a further ~43 ms, putting the modelled latency at ~66 ms, and makes the 23 ms
 #: comparison circular.
 #:
-#: Left at 23 pending the sweep that picks a defensible synaptic value; the residual
-#: integration time is the real target.
-AUD_DELAY_MS = 23
+#: Now 5 ms, a plausible synaptic value, which is what every validated run uses. The
+#: latency is therefore PREDICTED, not consumed: the model lands at 27-34 ms against the
+#: bird's 23 +/- 12, with the residual being genuine network integration time. At 23 ms it
+#: was double-counted and the comparison was circular.
+AUD_DELAY_MS = 5
 
-#: HVC -> AIV-I conduction delay (ms). Estimated -- no direct measurement exists.
-HVC_DELAY_MS = 5
+#: HVC -> AIV-I conduction delay (ms). Estimated -- no direct measurement exists. Zero in
+#: the validated operating point: HVC drives I directly and any delay here shifts the
+#: motor prediction relative to the auditory signal it has to cancel.
+HVC_DELAY_MS = 0

@@ -41,7 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-from ..constants import KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from .encoding_comparison import DRAWN_COLS, compute_encoding_columns, specgram
 
 __all__ = ["make_rate_figure"]
@@ -77,7 +77,7 @@ def make_rate_figure(
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     sigma_ms: float = 6.0,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     of_n_ista: int = 50,
 ):
     """Population-rate comparison figure with the current VEN state."""

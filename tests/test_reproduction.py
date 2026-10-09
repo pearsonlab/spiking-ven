@@ -38,6 +38,14 @@ pytestmark = [
 
 SEED = 42
 
+#: The auditory spike rate ``of_ven_model_k4max.npz`` was trained at. Stated here rather
+#: than inherited, because the package default is now 2.5 Hz for the causal encoder.
+TRAINED_MEAN_RATE_HZ = 15.0
+
+#: This model also predates the input-population refractory period, which changes the
+#: auditory and HVC spike trains it is driven by. Reproduce it without one.
+TRAINED_T_REFR_MS = 0.0
+
 # From the seeded 600-rendition reference run.
 REFERENCE = {
     "fwd_rev_corr": 0.0036,
@@ -52,7 +60,13 @@ REFERENCE = {
 def metrics():
     encoder = OlshausenFieldEncoder.load(str(ENCODER))
     ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
-    st = build_stimuli(encoder, MOTIFS, seed=SEED, verbose=False)
+    # Pin the auditory rate this model was TRAINED with. It used to be inherited from
+    # of_to_spikes' default, which has since moved 15.0 -> 2.5 (the Schneider & Woolley
+    # calibration), and that silently re-encoded every stimulus here and broke all seven
+    # assertions at once. A reproduction test must not depend on a default it does not
+    # state: the model file is fixed, so its stimulus parameters have to be too.
+    st = build_stimuli(encoder, MOTIFS, seed=SEED, verbose=False,
+                       mean_rate_hz=TRAINED_MEAN_RATE_HZ, t_refr_ms=TRAINED_T_REFR_MS)
     m = daf_metrics(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
                     aud_correct=st["aud_correct"], aud_daf=st["aud_daf"],
                     aud_reversed=st["aud_reversed"])
@@ -108,7 +122,9 @@ def test_figure_excitatory_row_shows_cancellation():
     corpus = load_corpus(MOTIFS)
     sig_train, _ = corpus.template()
 
-    data = compute_encoding_columns(ven, encoder, sig_train, corpus.T_song, seed=SEED)
+    data = compute_encoding_columns(ven, encoder, sig_train, corpus.T_song, seed=SEED,
+                                    of_mean_rate_hz=TRAINED_MEAN_RATE_HZ,
+                                    t_refr_ms=TRAINED_T_REFR_MS)
     rates = [float(c["sE"].mean() * 1000) for c in data["columns"]]
     trained, others = rates[0], rates[1:]
     print(f"E-row rates: {[round(r, 1) for r in rates]}")

@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n-hvc", type=int, default=60)
     p.add_argument("--t-post", type=int, default=200)
     p.add_argument("--t-burn", type=int, default=500)
-    p.add_argument("--mean-rate-hz", type=float, default=15.0)
+    p.add_argument("--mean-rate-hz", type=float, default=2.5)
     p.add_argument("--n-ista", type=int, default=50)
     p.add_argument("--r-e-target", type=float, default=16.0,
                    help="only used to annotate the no-HVC sanity line")

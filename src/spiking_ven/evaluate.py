@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .constants import AUD_MEAN_RATE_HZ  # noqa: F401  (re-exported default)
 from .constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 
 __all__ = [
@@ -151,7 +152,8 @@ def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from, divisive_gain=T
 
 
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
-                    mean_rate_hz: float = 15.0, n_ista: int = 50, seed: int = 0):
+                    mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    n_ista: int = 50, seed: int = 0):
     """Waveform to auditory spike train, on the shared reference.
 
     One definition of the encode path, so the metrics, the responder analysis and the
@@ -169,7 +171,7 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
 
 def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
                  n_trials: int = 20, window_ms: int = 150, alpha: float = 0.02,
-                 seed: int = 42, mean_rate_hz: float = 15.0, n_ista: int = 50) -> dict:
+                 seed: int = 42, mean_rate_hz: float = AUD_MEAN_RATE_HZ, n_ista: int = 50) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Replaces averaging the excitatory rate over a whole rendition, which cannot see a
@@ -393,8 +395,12 @@ def build_stimuli(
     t_post: int = 200,
     t_burn: int = 500,
     n_hvc: int = 60,
-    mean_rate_hz: float = 15.0,
+    mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     n_ista: int = 50,
+    #: Absolute refractory on the GENERATED input populations (auditory and HVC). Pass 0
+    #: to reproduce a model trained before the refractory existed -- it changes the input
+    #: spike trains, so a pinned artifact needs the conditions it was built under.
+    t_refr_ms: float = 2.0,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -434,6 +440,7 @@ def build_stimuli(
             acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
                                T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
+                           t_refr_ms=t_refr_ms,
                            seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)
 
@@ -478,6 +485,7 @@ def build_stimuli(
 
     T_total_burn = t_burn + T_rend
     hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
+                                   t_refr_ms=t_refr_ms,
                                    T_song=T_song, T_burn=t_burn, T_post=t_post,
                                    peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
                                    seed=seed)
@@ -485,6 +493,7 @@ def build_stimuli(
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
     hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
+                                 t_refr_ms=t_refr_ms,
                                  T_burn=0, T_post=t_post, peak_rate=PEAK_RATE_HZ,
                                  kernel_width=KERNEL_WIDTH_MS, seed=seed)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)

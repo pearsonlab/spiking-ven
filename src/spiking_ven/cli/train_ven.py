@@ -21,7 +21,7 @@ import argparse
 
 import numpy as np
 
-from ..constants import AUD_DELAY_MS, HVC_DELAY_MS, SR
+from ..constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, SR
 from ..evaluate import (
     build_stimuli,
     daf_metrics,
@@ -41,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
+    p.add_argument("--causal-encoder", default=None,
+                   help="causal minimum-phase filter bank .npz (instead of --encoder)")
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output model .npz")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
@@ -82,8 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
-    p.add_argument("--mean-rate-hz", type=float, default=15.0)
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
+                   help="auditory spike-rate calibration (Schneider & Woolley 2013)")
     p.add_argument("--n-ista", type=int, default=50)
+    # Spike-frequency adaptation on E. tau_sfa must stay SHORTER than the 50 ms DAF
+    # burst: at 100 ms it integrates over the motif and acts as a tonic gain change
+    # (it cut the baseline 59% while barely moving the peak), where at 10 ms it
+    # builds and recovers within the burst and truncates the response instead.
+    p.add_argument("--a-sfa", type=float, default=0.3)
+    p.add_argument("--tau-sfa", type=float, default=10.0)
     return p
 
 
@@ -100,9 +109,16 @@ def main(argv: list[str] | None = None) -> None:
     tau_stdp_eff = args.tau_stdp if args.tau_stdp > 0.0 else args.tau_s
     a_jie = args.a_jie if args.a_jie is not None else 3e-3 * (10.0 / tau_stdp_eff)
 
-    print("Loading OF encoder and motifs...")
-    encoder = OlshausenFieldEncoder.load(enc_path)
-    n_kernels = encoder.n_bases
+    if args.causal_encoder:
+        from ..causal_filters import CausalFilterEncoder
+
+        print("Loading causal filter bank and motifs...")
+        encoder = CausalFilterEncoder.load(args.causal_encoder)
+        n_kernels = encoder.n_channels
+    else:
+        print("Loading OF encoder and motifs...")
+        encoder = OlshausenFieldEncoder.load(enc_path)
+        n_kernels = encoder.n_bases
     print(f"  n_bases={n_kernels}  coch_params={encoder.coch_params}")
 
     # Stimuli are built by evaluate.build_stimuli, which the reproduction tests also
@@ -130,6 +146,7 @@ def main(argv: list[str] | None = None) -> None:
         A_jei_plastic=0.0, use_mask=False,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
+        a_sfa=args.a_sfa, tau_sfa=args.tau_sfa,
     )
     if args.theta_e_init > 0.0:
         ven.theta_e[:] = args.theta_e_init

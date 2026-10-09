@@ -512,7 +512,7 @@ class OlshausenFieldEncoder:
 
 def of_to_spikes(
     activations: np.ndarray,
-    mean_rate_hz: float = 15.0,
+    mean_rate_hz: float = 2.5,
     frame_rate: int = 1000,
     rng: np.random.Generator | None = None,
     seed: int | None = None,
@@ -566,8 +566,15 @@ def of_to_spikes(
         rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
 
     lam = act * rate_scale * dt_s
+    counts = rng.poisson(lam)
+    if t_refr_ms <= 0.0:
+        # Exactly the pre-refractory behaviour, multi-spike bins included. Not merely
+        # "no thinning": apply_refractory also collapses counts to 1, so routing through
+        # it at 0 would still change the output and a model pinned to the old dynamics
+        # would not reproduce.
+        return counts.astype(np.float32)
     # Poisson COUNTS, so a bin can carry several spikes; apply_refractory collapses that
-    # to at most one and enforces the 2 ms floor. See its docstring for the measurements.
+    # to at most one and enforces the floor. See its docstring for the measurements.
     from .common import apply_refractory
 
-    return apply_refractory(rng.poisson(lam), t_refr_ms)
+    return apply_refractory(counts, t_refr_ms)

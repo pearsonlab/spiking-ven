@@ -45,7 +45,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.signal import spectrogram as scipy_spectrogram
 
-from ..constants import DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from ..constants import AUD_MEAN_RATE_HZ, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from ..evaluate import daf_waveform
 from ..evaluate import encode_acts
 from ..olshausen_field import of_to_spikes
@@ -90,7 +90,8 @@ def compute_encoding_columns(
     kernel_width: float = KERNEL_WIDTH_MS,
     peak_rate: float = PEAK_RATE_HZ,
     daf_wn_amplitude: float = DAF_WN_AMPLITUDE,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    t_refr_ms: float = 2.0,
     of_n_ista: int = 50,
 ):
     """Build the four stimuli, encode them, and run VEN inference.
@@ -140,6 +141,7 @@ def compute_encoding_columns(
         acts = encode_acts(sig, encoder, sr=sr, n_ista=of_n_ista,
                            T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
+                           t_refr_ms=t_refr_ms,
                            sign_split=_sign_split, seed=seed + seed_offset,
                            calibrate_on=acts_train)
         return spk.astype(np.float32)
@@ -151,6 +153,7 @@ def compute_encoding_columns(
 
     # ── HVC inputs ────────────────────────────────────────────────────────────
     hvc_one = generate_hvc_spikes(
+        t_refr_ms=t_refr_ms,
         n_hvc=ven.n_hvc, T=T_rend, n_renditions=1,
         T_song=T_song, T_burn=0, T_post=T_post,
         peak_rate=peak_rate, kernel_width=kernel_width, seed=seed,
@@ -197,7 +200,8 @@ def make_figure(
     sub_l: int = 64,
     sub_i: int = 64,
     sub_e: int = 64,
-    of_mean_rate_hz: float = 15.0,
+    of_mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    t_refr_ms: float = 2.0,
     of_n_ista: int = 50,
 ):
     """Generate and save encoding comparison figure with the current VEN state.

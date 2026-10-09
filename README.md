@@ -70,31 +70,39 @@ rendition, while responses to novel or perturbed sound survive as an error signa
 
 ## Expected numbers (asserted in the test suite)
 
-Metric definitions follow Mandelblat-Cerf et al. 2014, Fig. 7/8.
+Definitions follow Mandelblat-Cerf et al. 2014: a 50 ms noise burst during singing, spike
+counts in 150 ms windows either side of onset, compared per neuron across 20 renditions by
+paired t-test, responder at p < 0.02. Latency is an onset -- the first 2 ms bin followed by
+five significant ones -- not a PSTH peak. `tests/test_reproduction_causal.py` pins these
+against the shipped model; `make test-repro` runs it.
 
-| Metric | Value | Biological target |
+| Metric | Model | Bird |
 |---|---|---|
-| encoder forward/reversed activation correlation | 0.0036 | near zero (direction selectivity is possible) |
-| K1 — correct song + HVC | 7.78 Hz | mean 7.7 Hz, SD 8.7 (Fig. 7C) |
-| K2 — white noise (DAF) + HVC | 22.19 Hz | pop. avg ~16 Hz; responders ~28 Hz |
-| K3 — K2/K1 | 2.85x | pop. avg ~2.1x; responders ~3.6x |
-| K4 — reversed motif / correct | 2.13x | > 1x |
+| auditory input rate during song | 2.15 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
+| baseline, all units | 3.20 Hz | 1–10 Hz (Fig. 7C) |
+| responders | 54% | 41% = 7/17, 95% CI 21–64% |
+| response onset latency | 29.3 ms | 23 ± 12 ms |
+| response duration | 55.0 ms | 90 ± 43 ms |
+| **extra spikes per responder per burst** | **3.34** | **0.47–2.66** |
+| peak change, responders | 96.9 Hz | ~20 Hz (Fig. 8E, n = 7) |
 
-These come from the seeded 600-rendition reference run, and `make test-repro` asserts them
-against the shipped model. The network is fully seeded, so re-running the pipeline
-reproduces them rather than landing nearby.
+**The open problem is response magnitude.** Everything else is inside the bird's range;
+the response is ~1.3–7x too strong. Stated in spikes rather than Hz because that needs no
+assumption on our side: the bird's responder adds one or two spikes on hearing the
+distortion, on a baseline under one spike in the same window. The 0.47–2.66 range comes
+from a ~20 Hz peak over a 90 ± 43 ms duration, taking the response as triangular to
+rectangular -- the paper reports no shape, and no intra-burst or instantaneous rate.
 
-The model is a **responder-only** population (every excitatory unit receives identical
-auditory drive), so the responder-only targets are the relevant ones.
+Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
+interval of 21–64%, which 54% sits inside.
 
-**What K2/K3 compare.** Every stimulus goes through the same encoder path, which
-normalises twice: to the encoder's reference RMS, and then to a target spike rate. The
-white-noise input therefore carries the *same* mean drive as the song input by
-construction, and the DAF amplitude cancels out. K2 and K3 measure the response to a
-spectrotemporal mismatch at equal input rate -- a stronger test than a loudness
-difference, since the extra response cannot come from extra drive, but not the amplitude
-manipulation the "DAF" name implies. The figure's DAF column is a genuine amplitude
-manipulation: there the noise is mixed into a window of the song.
+A previous version of this table reported K1–K4 against a "DAF" column that was pure white
+noise at 5.6x RMS, with each stimulus normalised to itself, and quoted targets of 7.7 ± 8.7
+Hz for singing and ~28 Hz for responders. None of those targets are numbers the paper
+states -- Fig. 8E plots a *change* in rate peaking near 20 Hz, not an absolute rate -- and
+the 2.1x/3.6x ratios were quotients computed from them rather than reported. The DAF
+stimulus is now song with a burst mixed into a window of it, both normalisation stages
+share the song as their reference, and the superseded assertions have been retired.
 
 ## Citing
 

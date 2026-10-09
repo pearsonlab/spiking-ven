@@ -247,6 +247,7 @@ class VocalErrorNetV2:
         c_hvc: float = 0.3,
         B_hvc_scale: float = 2.0,
         c_JEI: float = 0.5,
+        JEI_scale: float = 1.0,
         c_JIE: float = 0.5,
         r_i_th: float = 0.0,
         drive_e: float = 0.155,
@@ -289,6 +290,7 @@ class VocalErrorNetV2:
         self.c_hvc         = c_hvc
         self.B_hvc_scale   = B_hvc_scale
         self.c_JEI         = c_JEI
+        self.JEI_scale     = float(JEI_scale)
         self.c_JIE         = c_JIE
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
@@ -322,11 +324,21 @@ class VocalErrorNetV2:
         mean_Bh = B_hvc_scale
         self.B_hvc = _lognormal_sparse((n_i, n_hvc), c_hvc, mean_Bh, mean_Bh * 0.5, rng)
 
-        # E→I: sparse log-normal, fixed (not plastic)
+        # E→I: sparse log-normal, fixed (not plastic).
+        #
+        # ``JEI_scale`` multiplies it. This is the one limb that can truncate the DAF peak
+        # without raising tonic inhibition, because it is recruited by E's own excursion:
+        # measured during a burst, E goes 4.97 -> 96.33 Hz (x19.4) and the E->I input
+        # follows exactly (0.0146 -> 0.2842). The reason I barely responds (x1.32) is that
+        # firing I without HVC needs theta_i - drive_i = 0.3743 and E supplies 0.2842 --
+        # it falls just short. Scaling JEI closes that gap during the burst while leaving
+        # baseline alone, since the baseline E->I input is 26x smaller than the burst one.
+        # Raising I->E instead would suppress E at all times, including a baseline that
+        # already matches the bird's 1-10 Hz.
         srKE = np.sqrt(n_e * c_JEI)
         self.JEI = _lognormal_sparse(
             (n_i, n_e), c_JEI, 1.7 / srKE / 10, 1.7 / srKE / 10 * 0.1, rng
-        )
+        ) * float(JEI_scale)
 
         # I→E: zero-initialized; structural mask defines allowed synapses.
         # Starting from zero means only song-driven E neurons ever get trained

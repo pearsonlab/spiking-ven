@@ -44,7 +44,7 @@ __all__ = ["VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate"]
 def _sim_loop_v2(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
     decay_e, decay_i, alpha_s,
-    theta_e, theta_i, v_reset, noise_e, noise_i, t_refr_ms,
+    theta_e, theta_i, v_reset, noise_e, noise_i, t_refr_ms, a_sfa, tau_sfa,
     A_jie, J_max_ie, xi_th,
     drive_e, drive_i,
     learn_weights,
@@ -94,6 +94,23 @@ def _sim_loop_v2(
     refr_e = np.zeros(n_e)
     refr_i = np.zeros(n_i)
 
+    # Spike-frequency adaptation on E: a per-neuron hyperpolarising current that steps up
+    # by ``a_sfa`` on every spike and decays with ``tau_sfa``. Chosen over any further
+    # reduction of the auditory drive because the two are not interchangeable. Extra
+    # spikes per burst turned out to depend only on the PRODUCT of auditory rate and
+    # B_scale, as drive^0.36 -- two runs at drive 149 and 161 gave 9.04 and 9.36 spikes
+    # despite a 4x difference in rate and a 4.4x difference in weight -- so reaching the
+    # bird's ~1-2 spikes that way needs an auditory rate near 0.3 Hz, an order of
+    # magnitude under the 2.4 +/- 2.7 Hz Schneider & Woolley measured.
+    #
+    # More to the point, a gain change is the wrong SHAPE. Per responder the model already
+    # spans 1.1 to 19.9 extra spikes: the weak end is inside the bird's range and only the
+    # tail is wrong. Scaling the drive moves both. Adaptation is activity-dependent, so it
+    # bites hardest on exactly the cells firing most and barely touches a cell adding one
+    # spike.
+    w_sfa = np.zeros(n_e)
+    decay_sfa = float(np.exp(-1.0 / tau_sfa)) if tau_sfa > 0.0 else 0.0
+
     for t in range(T):
         h_aud_t = h_aud[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
         h_hvc_t = h_hvc[:, t - hvc_delay_ms] if t >= hvc_delay_ms else _zero_hvc
@@ -101,6 +118,9 @@ def _sim_loop_v2(
         # --- E dynamics ---
         audio_drive_e = B @ h_aud_t
         u_e = drive_e + audio_drive_e - JIE @ sI_prev
+        if a_sfa > 0.0:
+            w_sfa *= decay_sfa
+            u_e = u_e - w_sfa
         if noise_e > 0.0:
             u_e += rng.normal(0.0, noise_e, n_e)
         # Countdown is decremented BEFORE the spike test, so a cell with t_refr_ms = 2
@@ -115,6 +135,8 @@ def _sim_loop_v2(
         V_e[sE > 0.5] = v_reset
         if t_refr_ms > 0.0:
             refr_e[sE > 0.5] = t_refr_ms
+        if a_sfa > 0.0:
+            w_sfa += a_sfa * sE
         sE_mat[:, t] = sE
 
         # --- I dynamics ---
@@ -273,6 +295,8 @@ class VocalErrorNetV2:
         c_JEI: float = 0.5,
         JEI_scale: float = 1.0,
         t_refr_ms: float = 2.0,
+        a_sfa: float = 0.0,
+        tau_sfa: float = 100.0,
         c_JIE: float = 0.5,
         r_i_th: float = 0.0,
         drive_e: float = 0.155,
@@ -320,6 +344,11 @@ class VocalErrorNetV2:
         #: the instantaneous rate at 500 Hz. Set to 0 to recover the old unbounded
         #: dynamics, which allowed 1000 Hz.
         self.t_refr_ms     = float(t_refr_ms)
+        #: Spike-frequency adaptation: increment per spike and decay constant (ms).
+        #: ``a_sfa`` is in the same units as ``theta_e`` (~0.044), so an increment of
+        #: 0.01 means ~4 spikes in quick succession suffice to silence a cell.
+        self.a_sfa         = float(a_sfa)
+        self.tau_sfa       = float(tau_sfa)
         self.c_JIE         = c_JIE
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
@@ -474,6 +503,8 @@ class VocalErrorNetV2:
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
             t_refr_ms=float(getattr(self, "t_refr_ms", 2.0)),
+            a_sfa=float(getattr(self, "a_sfa", 0.0)),
+            tau_sfa=float(getattr(self, "tau_sfa", 100.0)),
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
             alpha_theta=self.alpha_theta, r_e_target=self.r_e_target,
             r_e_song_target=self.r_e_song_target,
@@ -501,7 +532,7 @@ class VocalErrorNetV2:
             "drive_e", "drive_i", "noise_e", "noise_i",
             "target_rate", "target_rate_i", "alpha_theta", "r_e_target", "r_e_song_target",
             "A_jei_plastic", "tau_w_ie", "W_max_ie", "epsilon_hltd", "epsilon_col",
-            "tau_stdp", "theta_i", "t_refr_ms", "JEI_scale",
+            "tau_stdp", "theta_i", "t_refr_ms", "JEI_scale", "a_sfa", "tau_sfa",
         )
         # Models saved before these knobs were removed carry extra keys; ignoring them
         # rather than reading them is the point. The missing-key default of 0.0 also does
@@ -619,6 +650,7 @@ class VocalErrorNetV2:
             theta_e, float(self.theta_i),
             float(self.v_reset), float(self.noise_e), float(self.noise_i),
             float(getattr(self, "t_refr_ms", 2.0)),
+            float(getattr(self, "a_sfa", 0.0)), float(getattr(self, "tau_sfa", 100.0)),
             float(self.A_jie), float(self.J_max_ie), xi_th,
             float(self.drive_e), float(self.drive_i),
             learn_weights,

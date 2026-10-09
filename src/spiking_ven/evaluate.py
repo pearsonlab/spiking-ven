@@ -259,6 +259,15 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         #: distortion, on a baseline of well under one spike in the same window.
         "extra_spikes_responders": (float((post - pre)[:, resp].mean())
                                     if resp.any() else nan),
+        #: The spread matters more than the mean here. Per responder the model spans
+        #: ~1-20 extra spikes: the weak end already sits inside the bird's 0.47-2.66, so
+        #: only the tail is wrong, and a uniform gain change moves both.
+        "extra_spikes_sd": (float((post - pre)[:, resp].mean(axis=0).std())
+                            if resp.any() else nan),
+        "extra_spikes_p90": (float(np.percentile((post - pre)[:, resp].mean(axis=0), 90))
+                             if resp.any() else nan),
+        "extra_spikes_max": (float((post - pre)[:, resp].mean(axis=0).max())
+                             if resp.any() else nan),
         "increase_hz_all": float(inc.mean()),
         "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
         "peak_change_hz_all": peak_all,
@@ -301,6 +310,8 @@ def format_responders(r: dict) -> str:
         # converted here rather than printed beside a mean as if they matched. A 20 Hz
         # peak lasting 90 +/- 43 ms is 1.8 extra spikes if the response is rectangular,
         # 0.9 if triangular -- the honest range given the paper reports no shape.
+        f"  extra spikes  p90 {r['extra_spikes_p90']:6.2f}  max {r['extra_spikes_max']:6.2f}"
+        f"   sd {r['extra_spikes_sd']:5.2f}",
         f"  extra spikes/neuron/burst {r['extra_spikes_responders']:7.2f}         "
         f"paper ~{0.5 * pk * dur:.1f}-{pk * dur:.1f} "
         f"({pk:.0f} Hz peak x {1000 * dur:.0f} ms, triangular..rectangular)",

@@ -44,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=200)
+    p.add_argument("--mean-rate-hz", type=float, default=15.0,
+                   help="auditory spike-rate calibration; MUST match what the model was "
+                        "trained with, or the figure encodes a different stimulus than "
+                        "the metrics beside it")
     # No delay flags: the conduction delays are baked into the trained model and are
     # applied by its own inference pass. This entry point used to accept
     # --aud-delay-ms/--hvc-delay-ms and pass them to a function that ignored them.
@@ -111,6 +115,7 @@ def main(argv: list[str] | None = None) -> None:
         "seed": args.seed,
         "kernel_width": KERNEL_WIDTH_MS,
         "peak_rate": PEAK_RATE_HZ,
+        "of_mean_rate_hz": args.mean_rate_hz,
     }
     if args.view == "raster":
         from ..figures.encoding_comparison import make_figure

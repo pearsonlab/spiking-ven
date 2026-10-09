@@ -19,7 +19,7 @@ Public API
 ----------
 make_figure(ven, encoder, sig_train, T_song, out_tag, *, ...)
     Generate and save the figure with the current VEN state.
-    encoder: OlshausenFieldEncoder.
+    encoder: OlshausenFieldEncoder or CausalFilterEncoder.
     Call this from experiment scripts to snapshot learning progress.
 
 compute_encoding_columns(ven, encoder, sig_train, T_song, *, ...)
@@ -47,7 +47,8 @@ from scipy.signal import spectrogram as scipy_spectrogram
 
 from ..constants import DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from ..evaluate import daf_waveform
-from ..olshausen_field import OlshausenFieldEncoder, coch_encode, of_to_spikes
+from ..evaluate import encode_acts
+from ..olshausen_field import of_to_spikes
 from ..common import generate_hvc_spikes
 
 __all__ = ["make_figure", "compute_encoding_columns", "specgram"]
@@ -98,10 +99,11 @@ def compute_encoding_columns(
     This is the single source of truth for the network inference behind both
     the raster figure (make_figure) and the population-rate figure.
     """
-    if not isinstance(encoder, OlshausenFieldEncoder):
-        raise TypeError(
-            f"this figure requires an OlshausenFieldEncoder, got {type(encoder).__name__}"
-        )
+    # Either encoder: the patch dictionary or the causal filter bank. encode_acts is the
+    # one place that dispatches on type, so this figure cannot normalise differently from
+    # the metrics it is drawn beside. It used to reject anything but the patch encoder and
+    # call coch_encode directly, which is the same bypass that stopped the causal bank
+    # reaching build_stimuli.
     T_rend    = T_song + T_post
     rms_train = float(np.sqrt(np.mean(sig_train ** 2)))
 
@@ -123,16 +125,12 @@ def compute_encoding_columns(
     # discards the level: in the DAF column the added noise raises the composite RMS,
     # so normalising against it quietens the very song the noise was added to. See
     # the note in evaluate.build_stimuli.
-    acts_train = coch_encode(sig_train.astype(np.float64), encoder, sr=sr,
-                             n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
-                             rms_from=sig_train,
-                           divisive_gain=True)
+    acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=of_n_ista,
+                             T_out_ms=T_rend, rms_from=sig_train)
 
     def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
-        acts = coch_encode(sig.astype(np.float64), encoder, sr=sr,
-                           n_ista=of_n_ista, upsample_to_ms=True, T_out_ms=T_rend,
-                           rms_from=sig_train,
-                           divisive_gain=True)
+        acts = encode_acts(sig, encoder, sr=sr, n_ista=of_n_ista,
+                           T_out_ms=T_rend, rms_from=sig_train)
         spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
                            sign_split=_sign_split, seed=seed + seed_offset,
                            calibrate_on=acts_train)
@@ -199,7 +197,7 @@ def make_figure(
     Parameters
     ----------
     ven         : VocalErrorNetV2 (trained or partially trained)
-    encoder     : OlshausenFieldEncoder
+    encoder     : OlshausenFieldEncoder or CausalFilterEncoder
     sig_train   : (N,) float64 training audio signal
     T_song      : int, song duration in ms
     out_tag     : str appended to output filenames, e.g. "_r0050"

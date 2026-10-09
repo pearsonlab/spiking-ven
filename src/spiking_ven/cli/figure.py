@@ -80,7 +80,11 @@ def main(argv: list[str] | None = None) -> None:
 
     print("Loading model and data ...")
     print(f"  model: {model_path}")
-    enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
+    if args.causal_encoder:
+        from ..causal_filters import CausalFilterEncoder
+        enc = CausalFilterEncoder.load(args.causal_encoder)
+    else:
+        enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
     # Pin the seed so the rendered figure is reproducible, not just the training.
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
 

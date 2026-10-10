@@ -22,7 +22,12 @@ import pytest
 
 from spiking_ven.causal_filters import CausalFilterEncoder
 from spiking_ven.constants import AUD_MEAN_RATE_HZ
-from spiking_ven.evaluate import BIOLOGICAL_TARGETS, build_stimuli, daf_response
+from spiking_ven.evaluate import (
+    BIOLOGICAL_TARGETS,
+    PEAK_BIN_MS,
+    build_stimuli,
+    daf_response,
+)
 from spiking_ven.vocal_error_net import VocalErrorNetV2
 
 OUT = Path("outputs")
@@ -86,7 +91,7 @@ def test_model_carries_the_operating_point(setup):
 def test_daf_response_matches_the_recorded_run(daf):
     assert daf["responder_fraction"] == pytest.approx(0.537, abs=0.03)
     assert daf["baseline_hz_all"] == pytest.approx(3.20, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(96.9, rel=0.10)
+    assert daf["peak_change_hz"] == pytest.approx(96.0, rel=0.10)
     assert daf["latency_ms"] == pytest.approx(29.3, abs=2.5)
     assert daf["duration_ms"] == pytest.approx(55.0, abs=4.0)
     assert daf["extra_spikes_responders"] == pytest.approx(3.34, rel=0.10)
@@ -98,6 +103,40 @@ def test_the_response_magnitude_distribution_is_pinned(daf):
     assert daf["extra_spikes_p90"] == pytest.approx(8.10, rel=0.12)
     assert daf["extra_spikes_max"] == pytest.approx(17.3, rel=0.15)
     assert daf["extra_spikes_sd"] == pytest.approx(3.11, rel=0.12)
+
+
+def test_peak_is_binned_the_way_the_paper_bins(setup, daf):
+    """The peak is bin-width dependent, so the bin width is part of the metric.
+
+    2 ms is the only binning Mandelblat-Cerf state. Measured here the peak runs
+    96.9 / 96.0 / 78.6 / 77.7 / 64.2 Hz at 1 / 2 / 5 / 10 / 20 ms bins, so a ratio
+    against their ~20 Hz carries an unknown mismatch -- the paper never says how its
+    plotted PSTHs were binned, and describes no smoothing at all.
+    """
+    import spiking_ven.evaluate as ev
+
+    assert PEAK_BIN_MS == 2
+    enc, st, _ = setup
+
+    def run(bin_ms):
+        # A fresh model each time: inference advances the network's own RNG, so reusing
+        # one instance would vary the noise draws between the two runs and make the
+        # invariance below approximate rather than exact.
+        ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
+        old = ev.PEAK_BIN_MS
+        try:
+            ev.PEAK_BIN_MS = bin_ms
+            return ev.daf_response(ven, enc, sig_train=st["sig_train"],
+                                   hvc_on=st["hvc_on"], acts_train=st["acts_train"],
+                                   sr=16000, T_out_ms=st["T_rend"], n_ista=50,
+                                   n_trials=20, seed=SEED)
+        finally:
+            ev.PEAK_BIN_MS = old
+
+    fine, coarse = run(2), run(20)
+    assert coarse["peak_change_hz"] < fine["peak_change_hz"] * 0.8
+    # The spike count is the binning-invariant quantity, and must not move at all.
+    assert coarse["extra_spikes_responders"] == fine["extra_spikes_responders"]
 
 
 def test_biological_targets_that_are_met(daf):

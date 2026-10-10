@@ -48,8 +48,14 @@ __all__ = [
     "format_metrics",
     "build_stimuli",
     "BIOLOGICAL_TARGETS",
+    "PEAK_BIN_MS",
     "DAF_WN_AMPLITUDE",
 ]
+
+#: Bin width (ms) for the responder PSTH peak. 2 ms is the only binning Mandelblat-Cerf
+#: state -- for their latency and duration z-tests -- and nothing in the paper says how
+#: the plotted PSTHs were binned or whether they were smoothed.
+PEAK_BIN_MS = 2
 
 # Verbatim targets, kept next to the code that is judged against them.
 BIOLOGICAL_TARGETS = {
@@ -61,9 +67,19 @@ BIOLOGICAL_TARGETS = {
     #: response to distorted auditory feedback (50 ms noise bursts) presented during
     #: singing ... p<0.02 for n = 7/17 neurons".
     "responder_fraction": 7 / 17,
-    #: Fig 8E, black trace ("noise during singing", n=7). Note the panel's y-axis is
-    #: CHANGE in firing rate, so this is an increase above baseline, and it is the peak
-    #: of a trial-averaged PSTH -- not a mean over a window. Read off the axis.
+    #: Fig 8E, black trace ("noise during singing", n=7). NOT A TARGET -- a documented
+    #: approximation, and the weakest number here. It is read off a figure axis rather
+    #: than stated in text, and the panel's y-axis is CHANGE in firing rate, so it is an
+    #: increase above baseline rather than a rate. Worse, a peak is bin-width dependent
+    #: and the paper never says how that PSTH was binned: the methods give 2 ms bins only
+    #: for the latency/duration z-tests, the figure legends say only "averaged PSTH", and
+    #: no smoothing is described anywhere in the paper (no Gaussian, kernel or
+    #: convolution appears in the text) although the published trace looks smoother than
+    #: 2 ms binning would give. Measured on this model the peak falls 87 -> 81 -> 67 -> 57
+    #: Hz going from 1 to 2 to 10 to 20 ms bins, so any ratio against 20 Hz carries an
+    #: unknown binning mismatch. Compare ``extra_spikes_responders`` instead: a spike
+    #: count is invariant to binning, and the paper's own bootstrap used one ("the maximal
+    #: spike count over 150 ms").
     "responder_peak_change_hz": 20.0,
     #: "an average latency of 23 +/- 12 ms from noise onset and ... an average duration
     #: of 90 +/- 43 ms" (mean, SD).
@@ -216,11 +232,19 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
     # against a responders-only one -- and understates the gap, since responders are
     # roughly half the population here. The all-unit value is kept separately rather than
     # dropped, because it is the right denominator for anything about the population.
+    #
+    # Binned at PEAK_BIN_MS, the only bin width the paper states (2 ms, for its latency
+    # and duration z-tests). This was computed at 1 ms, finer than anything the paper
+    # uses, which inflated it ~7%. See BIOLOGICAL_TARGETS["responder_peak_change_hz"] for
+    # why this quantity should not be read as a hard target either way.
     def _peak(mask):
         if not np.any(mask):
             return nan, 0
         mp = psth[:, mask, :].mean(axis=(0, 1))
-        return float(mp.max() - float(mp[:W].mean())), int(np.argmax(mp) - W)
+        nb = (2 * W) // PEAK_BIN_MS
+        mb = mp[:nb * PEAK_BIN_MS].reshape(nb, PEAK_BIN_MS).mean(axis=1)
+        base = float(mb[:nb // 2].mean())
+        return float(mb.max() - base), int(np.argmax(mb) * PEAK_BIN_MS - W)
 
     peak_resp, lat_resp = _peak(resp)
     peak_all, _ = _peak(np.ones(n_e, dtype=bool))
@@ -299,7 +323,9 @@ def format_responders(r: dict) -> str:
         f"paper {lo:.0f}-{hi:.0f} Hz during singing",
         f"  baseline, responders      {r['baseline_hz_responders']:7.2f} Hz",
         f"  peak change, responders   {r['peak_change_hz']:7.2f} Hz      "
-        f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7)",
+        f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7; both at "
+        f"{PEAK_BIN_MS} ms bins on our side, UNKNOWN on theirs -- bin-width dependent, "
+        f"not a hard target)",
         f"  peak change, all units    {r['peak_change_hz_all']:7.2f} Hz      "
         f"(no paper equivalent; responders only are plotted there)",
         f"  latency, responders       {r['latency_ms']:7.1f} ms      "

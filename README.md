@@ -84,7 +84,7 @@ against the shipped model; `make test-repro` runs it.
 | response onset latency | 29.3 ms | 23 ± 12 ms |
 | response duration | 55.0 ms | 90 ± 43 ms |
 | **extra spikes per responder per burst** | **3.34** | **0.47–2.66** |
-| peak change, responders | 96.9 Hz | ~20 Hz (Fig. 8E, n = 7) |
+| peak change, responders | 96.0 Hz | ~20 Hz (Fig. 8E, n = 7) — see caveat |
 
 **The open problem is response magnitude.** Everything else is inside the bird's range;
 the response is ~1.3–7x too strong. Stated in spikes rather than Hz because that needs no
@@ -95,6 +95,15 @@ rectangular -- the paper reports no shape, and no intra-burst or instantaneous r
 
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
 interval of 21–64%, which 54% sits inside.
+
+**The peak is a diagnostic, not a target.** It is bin-width dependent -- measured here it
+runs 96.9 / 96.0 / 78.6 / 77.7 / 64.2 Hz at 1 / 2 / 5 / 10 / 20 ms bins -- and the paper
+never states how its plotted PSTHs were binned. 2 ms is the only binning it gives (for the
+latency and duration z-tests) and is what we use; no smoothing is described anywhere in the
+paper, though the published trace looks smoother than 2 ms binning alone would give. So any
+ratio against ~20 Hz carries an unknown mismatch. The spike count does not: it is invariant
+to binning, and is the quantity the paper's own bootstrap used ("the maximal spike count
+over 150 ms").
 
 A previous version of this table reported K1–K4 against a "DAF" column that was pure white
 noise at 5.6x RMS, with each stimulus normalised to itself, and quoted targets of 7.7 ± 8.7

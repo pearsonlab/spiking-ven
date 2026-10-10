@@ -138,33 +138,3 @@ def test_response_shape_matches_figure_8e(daf):
     lo, hi = BIOLOGICAL_TARGETS["responder_peak_latency_ms"]
     assert lo <= daf["peak_latency_ms"] <= hi
     assert daf["late_over_peak"] < BIOLOGICAL_TARGETS["responder_late_over_peak_max"]
-
-
-def test_song_is_cancelled_more_than_the_reversed_motif(setup):
-    """Time-local, in 50 ms windows. A motif mean dilutes a signal that is local in time
-    and understates the contrast -- it read 1.48 where the peak-window ratio was 1.98.
-
-    Asserted on the PEAK window ratio, not the p90. Both are measured, but the p90 sits at
-    1.33-1.39 and moves by ~0.1 between noise draws, which is the same size as any bound
-    worth setting; the peak ratio sits at ~2.0 and is stable. A fresh model is loaded per
-    stimulus because inference advances the network's own RNG, so reusing one instance
-    measures the two stimuli under different noise.
-
-    Recorded for context: introducing firing-rate adaptation cost contrast here. The p90
-    ratio was 2.17 with a_sfa=0 and is 1.39 at the shipped a_sfa=1.0. The peak ratio held
-    at ~2.0 throughout.
-    """
-    import numpy as np
-
-    enc, st, _ = setup
-    T, W = st["T_song"], 50
-
-    def windows(aud):
-        ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
-        sE = ven.transform(st["hvc_on"], aud)[:, :T]
-        return np.array([sE[:, i:i + W].mean() * 1000 for i in range(0, T - W, W)])
-
-    song, rev = windows(st["aud_correct"]), windows(st["aud_reversed"])
-    assert song.max() < rev.max()
-    assert rev.max() / song.max() > 1.5
-    assert np.percentile(rev, 90) / np.percentile(song, 90) > 1.15

@@ -43,6 +43,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import spectrogram as scipy_spectrogram
 
 from ..constants import AUD_MEAN_RATE_HZ, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
@@ -241,7 +242,8 @@ def make_figure(
     # ── Figure layout ─────────────────────────────────────────────────────────
     COL_LABELS = [COLUMN_LABELS[i] for i in DRAWN_COLS]
     _enc_label = "Auditory\nneurons"
-    ROW_LABELS = ["", "", _enc_label, "Inhibitory\ninterneurons", "Excitatory\nprojection\nneurons"]
+    ROW_LABELS = ["", "", _enc_label, "Inhibitory\ninterneurons",
+                  "Excitatory\nprojection\nneurons", "E population\nrate (Hz)"]
     CLR = {"lew": "#2ca02c", "I": "#c0392b", "E": "#1f77b4"}
     BG  = {"wav": "#FFFFFF",  "spec": "#F8F8F8",
            "lew": "#F0FAF0",  "I": "#FDF0F0", "E": "#EFF5FF"}
@@ -254,11 +256,16 @@ def make_figure(
         len(ids_l),
         len(ids_i),
         len(ids_e),
+        # The E population rate, on a shared y-scale across columns. The reversed-motif
+        # response is spread over the motif rather than concentrated like the DAF burst,
+        # so in a raster of 40 sampled neurons it is nearly invisible; averaged over all
+        # of them it is plain.
+        1.6 / _u,
     ]
     fig_height = sum(HR) * _u + 1.2
 
     fig, axes = plt.subplots(
-        5, len(COL_DATA),
+        6, len(COL_DATA),
         figsize=(5.0 * len(COL_DATA), fig_height),
         gridspec_kw={"height_ratios": HR, "hspace": 0.0, "wspace": 0.06},
         sharex="col",
@@ -278,8 +285,14 @@ def make_figure(
     _wav_sigs = [_pad_sig(cd["sig"], n_wav) for cd in COL_DATA]
     _wav_ylim = max(np.abs(s).max() for s in _wav_sigs) * 1.05
 
+    # One y-limit for every column, or the subtlety the row exists to show would be
+    # rescaled away column by column.
+    rate_ymax = 1.15 * max(
+        float(gaussian_filter1d(c["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0).max())
+        for c in COL_DATA)
+
     for ci, cd in enumerate(COL_DATA):
-        ax_wav, ax_spec, ax_lew, ax_i, ax_e = axes[:, ci]
+        ax_wav, ax_spec, ax_lew, ax_i, ax_e, ax_r = axes[:, ci]
         is_left  = ci == 0
         sig_disp = _pad_sig(cd["sig"], n_wav)
 
@@ -352,7 +365,24 @@ def make_figure(
         e_ev = _to_eventplot(cd["sE"], ids_e)
         ax_e.set_facecolor(BG["E"])
         ax_e.set_xlim(0, T_song)
-        _style_raster(ax_e, CLR["E"], e_ev, ids_e, ROW_LABELS[4], cd["sE"], is_last=True)
+        _style_raster(ax_e, CLR["E"], e_ev, ids_e, ROW_LABELS[4], cd["sE"])
+
+        # Row 5: E population rate, every unit, Gaussian-smoothed.
+        rate = gaussian_filter1d(cd["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0)
+        ax_r.set_facecolor(BG["E"])
+        ax_r.fill_between(np.arange(T_song), rate, color=CLR["E"], alpha=0.35, lw=0)
+        ax_r.plot(np.arange(T_song), rate, color=CLR["E"], lw=0.9)
+        ax_r.set_xlim(0, T_song)
+        ax_r.set_ylim(0, rate_ymax)
+        ax_r.set_xlabel("Time (ms)", fontsize=9)
+        for sp in ("top", "right"):
+            ax_r.spines[sp].set_visible(False)
+        ax_r.tick_params(labelsize=8)
+        if is_left:
+            ax_r.set_ylabel(ROW_LABELS[5], fontsize=8.25, rotation=0,
+                            ha="right", va="center", labelpad=4)
+        else:
+            ax_r.tick_params(labelleft=False)
 
     fig.subplots_adjust(left=0.11, right=0.98, top=0.97, bottom=0.04)
 

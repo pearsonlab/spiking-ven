@@ -81,6 +81,18 @@ BIOLOGICAL_TARGETS = {
     #: count is invariant to binning, and the paper's own bootstrap used one ("the maximal
     #: spike count over 150 ms").
     "responder_peak_change_hz": 20.0,
+    #: Fig 8E, black trace, READ OFF THE PANEL (the paper states no number): the peak of
+    #: the averaged responder PSTH falls ~40-60 ms after noise onset. Widened to 35-75 to
+    #: cover figure-reading error. Unlike the peak's amplitude this is robust to the
+    #: unknown binning -- across 1/2/5/10/20 ms bins the model's peak latency moves
+    #: 54 -> 50 ms (7%) where its amplitude moves 97 -> 64 Hz (33%).
+    "responder_peak_latency_ms": (35.0, 75.0),
+    #: Also off Fig 8E: the black trace is back to ~0 by 120-150 ms and stays there, i.e.
+    #: a transient rather than a step. The isolated-noise trace in the same panel does
+    #: show a late sustained rise, so this discriminates between the two shapes. Note it
+    #: only catches a response that ramps and stays up; a response SHORTER than the
+    #: bird's also passes, and "response_duration_ms" is what covers that side.
+    "responder_late_over_peak_max": 0.15,
     #: "an average latency of 23 +/- 12 ms from noise onset and ... an average duration
     #: of 90 +/- 43 ms" (mean, SD).
     "response_latency_ms": (23.0, 12.0),
@@ -249,6 +261,17 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
     peak_resp, lat_resp = _peak(resp)
     peak_all, _ = _peak(np.ones(n_e, dtype=bool))
 
+    # Transient or step: the responder PSTH 100-150 ms after onset, relative to its peak.
+    def _late_over_peak(mask):
+        if not np.any(mask):
+            return nan
+        mp = psth[:, mask, :].mean(axis=(0, 1))
+        d = mp - float(mp[:W].mean())
+        pk = float(d[W:].max())
+        return float(d[W + 100:W + 150].mean() / pk) if pk > 0 else nan
+
+    late_over_peak = _late_over_peak(resp)
+
     # Response onset latency and duration, by the paper's own rule: 2 ms bins, a bin is
     # significant at p < 0.05 against the pre-onset distribution, latency is the first bin
     # followed by five consecutive significant ones, duration runs to the first run of ten
@@ -298,6 +321,7 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
         "peak_change_hz_all": peak_all,
         "peak_latency_ms": lat_resp,
+        "late_over_peak": late_over_peak,
         "latency_ms": float(np.mean(lats)) if lats else nan,
         "duration_ms": float(np.mean(durs)) if durs else nan,
         "n_with_latency": len(lats),
@@ -313,6 +337,7 @@ def format_responders(r: dict) -> str:
     lat, lat_sd = t["response_latency_ms"]
     pk = t["responder_peak_change_hz"]
     dur_m, dur_sd = t["response_duration_ms"]
+    pl_lo, pl_hi = t["responder_peak_latency_ms"]
     dur = dur_m / 1000.0
     return "\n".join([
         f"DAF response, {r['burst_ms']:.0f} ms burst, {r['window_ms']} ms windows, "
@@ -333,7 +358,9 @@ def format_responders(r: dict) -> str:
         f"  duration, responders      {r['duration_ms']:7.1f} ms      "
         f"paper {dur_m:.0f} +/- {dur_sd:.0f} ms",
         f"  peak latency, responders  {r['peak_latency_ms']:+7d} ms      "
-        f"(PSTH argmax; later than onset, no paper equivalent)",
+        f"paper ~{pl_lo:.0f}-{pl_hi:.0f} ms (Fig 8E, read off the panel)",
+        f"  late (100-150ms) / peak   {r['late_over_peak']:7.3f}         "
+        f"paper < {t['responder_late_over_peak_max']:.2f} (Fig 8E: a transient, not a step)",
         # The window mean and the peak are different quantities, so the paper's peak is
         # converted here rather than printed beside a mean as if they matched. A 20 Hz
         # peak lasting 90 +/- 43 ms is 1.8 extra spikes if the response is rectangular,

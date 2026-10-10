@@ -123,6 +123,23 @@ def test_biological_targets_that_are_met(daf):
     assert 0.21 <= daf["responder_fraction"] <= 0.64
 
 
+def test_response_shape_matches_figure_8e(daf):
+    """Fig. 8E, black trace (noise during singing, n = 7), read off the panel.
+
+    Shape rather than magnitude. The peak's AMPLITUDE depends on a bin width the paper
+    never states -- across 1/2/5/10/20 ms bins the model's peak moves 97 -> 64 Hz -- so it
+    is deliberately not asserted anywhere. When the peak occurs, and whether the response
+    is a transient or a step, do not depend on that: the same sweep moves peak latency
+    only 54 -> 50 ms.
+
+    Both bounds come from reading a published panel, not from a stated number, so they are
+    wider than the figure appears to justify.
+    """
+    lo, hi = BIOLOGICAL_TARGETS["responder_peak_latency_ms"]
+    assert lo <= daf["peak_latency_ms"] <= hi
+    assert daf["late_over_peak"] < BIOLOGICAL_TARGETS["responder_late_over_peak_max"]
+
+
 def test_song_is_cancelled_more_than_the_reversed_motif(setup):
     """Time-local, in 50 ms windows. A motif mean dilutes a signal that is local in time
     and understates the contrast -- it read 1.48 where the peak-window ratio was 1.98."""

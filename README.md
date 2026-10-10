@@ -84,7 +84,9 @@ against the shipped model; `make test-repro` runs it.
 | response onset latency | 29.3 ms | 23 ± 12 ms |
 | response duration | 55.0 ms | 90 ± 43 ms |
 | **extra spikes per responder per burst** | **3.34** | **0.47–2.66** |
-| peak change, responders | 96.0 Hz | ~20 Hz (Fig. 8E, n = 7) — see caveat |
+| peak change, responders | 96.0 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| time to peak | 54 ms | ~40–60 ms (Fig. 8E, read off the panel) |
+| late (100–150 ms) / peak | 0.023 | < 0.15 — a transient, not a step (Fig. 8E) |
 
 **The open problem is response magnitude.** Everything else is inside the bird's range;
 the response is ~1.3–7x too strong. Stated in spikes rather than Hz because that needs no

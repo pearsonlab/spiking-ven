@@ -24,7 +24,7 @@ numpy and scipy alone:
 pulls in Brian2. Import it explicitly when you need live NeuronGroups.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav

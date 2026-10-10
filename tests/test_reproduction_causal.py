@@ -82,7 +82,7 @@ def test_auditory_input_matches_schneider_woolley(setup):
 def test_model_carries_the_operating_point(setup):
     _, _, ven = setup
     assert ven.t_refr_ms == pytest.approx(2.0)
-    assert ven.a_sfa == pytest.approx(0.3)
+    assert ven.a_sfa == pytest.approx(1.0)
     assert ven.tau_sfa == pytest.approx(10.0)
     assert ven.aud_delay_ms == 5 and ven.hvc_delay_ms == 0
     assert AUD_MEAN_RATE_HZ == pytest.approx(2.5)
@@ -94,20 +94,20 @@ def test_model_carries_the_operating_point(setup):
 
 
 def test_daf_response_matches_the_recorded_run(daf):
-    assert daf["responder_fraction"] == pytest.approx(0.537, abs=0.03)
-    assert daf["baseline_hz_all"] == pytest.approx(3.20, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(96.0, rel=0.10)
-    assert daf["latency_ms"] == pytest.approx(29.3, abs=2.5)
-    assert daf["duration_ms"] == pytest.approx(55.0, abs=4.0)
-    assert daf["extra_spikes_responders"] == pytest.approx(3.34, rel=0.10)
+    assert daf["responder_fraction"] == pytest.approx(0.555, abs=0.03)
+    assert daf["baseline_hz_all"] == pytest.approx(2.20, rel=0.08)
+    assert daf["peak_change_hz"] == pytest.approx(58.1, rel=0.10)
+    assert daf["latency_ms"] == pytest.approx(32.7, abs=2.5)
+    assert daf["duration_ms"] == pytest.approx(53.9, abs=4.0)
+    assert daf["extra_spikes_responders"] == pytest.approx(1.79, rel=0.10)
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation, and the mean alone hid that distinction across two sweeps."""
-    assert daf["extra_spikes_p90"] == pytest.approx(8.10, rel=0.12)
-    assert daf["extra_spikes_max"] == pytest.approx(17.3, rel=0.15)
-    assert daf["extra_spikes_sd"] == pytest.approx(3.11, rel=0.12)
+    assert daf["extra_spikes_p90"] == pytest.approx(3.84, rel=0.12)
+    assert daf["extra_spikes_max"] == pytest.approx(10.2, rel=0.15)
+    assert daf["extra_spikes_sd"] == pytest.approx(1.54, rel=0.12)
 
 
 def test_biological_targets_that_are_met(daf):
@@ -142,15 +142,29 @@ def test_response_shape_matches_figure_8e(daf):
 
 def test_song_is_cancelled_more_than_the_reversed_motif(setup):
     """Time-local, in 50 ms windows. A motif mean dilutes a signal that is local in time
-    and understates the contrast -- it read 1.48 where the peak-window ratio was 1.98."""
+    and understates the contrast -- it read 1.48 where the peak-window ratio was 1.98.
+
+    Asserted on the PEAK window ratio, not the p90. Both are measured, but the p90 sits at
+    1.33-1.39 and moves by ~0.1 between noise draws, which is the same size as any bound
+    worth setting; the peak ratio sits at ~2.0 and is stable. A fresh model is loaded per
+    stimulus because inference advances the network's own RNG, so reusing one instance
+    measures the two stimuli under different noise.
+
+    Recorded for context: introducing firing-rate adaptation cost contrast here. The p90
+    ratio was 2.17 with a_sfa=0 and is 1.39 at the shipped a_sfa=1.0. The peak ratio held
+    at ~2.0 throughout.
+    """
     import numpy as np
 
-    _, st, ven = setup
-    T = st["T_song"]
-    W = 50
+    enc, st, _ = setup
+    T, W = st["T_song"], 50
+
     def windows(aud):
+        ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
         sE = ven.transform(st["hvc_on"], aud)[:, :T]
         return np.array([sE[:, i:i + W].mean() * 1000 for i in range(0, T - W, W)])
+
     song, rev = windows(st["aud_correct"]), windows(st["aud_reversed"])
     assert song.max() < rev.max()
-    assert np.percentile(rev, 90) / np.percentile(song, 90) > 1.3
+    assert rev.max() / song.max() > 1.5
+    assert np.percentile(rev, 90) / np.percentile(song, 90) > 1.15

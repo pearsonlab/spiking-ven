@@ -62,6 +62,14 @@ BIOLOGICAL_TARGETS = {
     # Quoted from Mandelblat-Cerf et al. 2014 (eLife 3:e02152), pp. 10-13.
     #: "AIV single-units discharged at low rates during singing (1-10 Hz, Figure 7C)".
     #: A range for the population of 37 single units, not a mean.
+    #:
+    #: Compare ``baseline_hz_all`` against this, NEVER ``baseline_hz_responders``.
+    #: Responders are selected by a paired t-test for post > pre, which preferentially
+    #: picks neurons that happened to be quiet in the pre-window, so their baseline is
+    #: biased low by the selection itself -- measured here 0.63 Hz against the
+    #: population's 3.20 Hz, a factor of 5. The paper applies the same criterion, so the
+    #: bias is shared and the responder-vs-responder comparisons stay fair; it just means
+    #: the responder baseline is not an estimate of anything's firing rate.
     "singing_rate_hz": (1.0, 10.0),
     #: "More than 40% of the VTA/SNc-projecting neurons exhibited a significant neuronal
     #: response to distorted auditory feedback (50 ms noise bursts) presented during
@@ -346,7 +354,8 @@ def format_responders(r: dict) -> str:
         f"= {r['responder_fraction']:5.0%}      paper {t['responder_fraction']:.0%} (7/17)",
         f"  baseline, all units       {r['baseline_hz_all']:7.2f} Hz      "
         f"paper {lo:.0f}-{hi:.0f} Hz during singing",
-        f"  baseline, responders      {r['baseline_hz_responders']:7.2f} Hz",
+        f"  baseline, responders      {r['baseline_hz_responders']:7.2f} Hz      "
+        f"(biased low by the responder selection; not a rate target)",
         f"  peak change, responders   {r['peak_change_hz']:7.2f} Hz      "
         f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7; both at "
         f"{PEAK_BIN_MS} ms bins on our side, UNKNOWN on theirs -- bin-width dependent, "
@@ -368,8 +377,8 @@ def format_responders(r: dict) -> str:
         f"  extra spikes  p90 {r['extra_spikes_p90']:6.2f}  max {r['extra_spikes_max']:6.2f}"
         f"   sd {r['extra_spikes_sd']:5.2f}",
         f"  extra spikes/neuron/burst {r['extra_spikes_responders']:7.2f}         "
-        f"paper ~{0.5 * pk * dur:.1f}-{pk * dur:.1f} "
-        f"({pk:.0f} Hz peak x {1000 * dur:.0f} ms, triangular..rectangular)",
+        f"bird ~0.7-1.1 ({pk:.0f} Hz peak over {1000 * dur:.0f} ms; "
+        f"shape-matched to this model's PSTH, and rise-then-exponential)",
     ])
 
 

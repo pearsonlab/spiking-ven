@@ -85,17 +85,29 @@ against the shipped model; `make test-repro` runs it.
 | responders | 54% | 41% = 7/17, 95% CI 21–64% |
 | response onset latency | 29.3 ms | 23 ± 12 ms |
 | response duration | 55.0 ms | 90 ± 43 ms |
-| **extra spikes per responder per burst** | **3.34** | **0.47–2.66** |
+| **extra spikes per responder per burst** | **3.34** | **~0.7–1.1** |
 | peak change, responders | 96.0 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
 | time to peak | 54 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.023 | < 0.15 — a transient, not a step (Fig. 8E) |
 
-**The open problem is response magnitude.** Everything else is inside the bird's range;
-the response is ~1.3–7x too strong. Stated in spikes rather than Hz because that needs no
-assumption on our side: the bird's responder adds one or two spikes on hearing the
-distortion, on a baseline under one spike in the same window. The 0.47–2.66 range comes
-from a ~20 Hz peak over a 90 ± 43 ms duration, taking the response as triangular to
-rectangular -- the paper reports no shape, and no intra-burst or instantaneous rate.
+**The open problem is response magnitude: the model is ~3–5x too strong.** Everything
+else is inside the bird's range. Stated in spikes rather than Hz because a count needs no
+assumption about binning: the bird's responder adds about one spike on hearing the
+distortion, on a baseline under one spike in the same window.
+
+Converting the paper's ~20 Hz peak over a 90 ± 43 ms duration into a count does need an
+assumed shape, since none is reported. Rectangular gives 1.80 but is not physical — Fig.
+8E rises to a peak and decays, never sitting at its peak for 90 ms. Triangular gives 0.90;
+a rise to +50 ms then an exponential decay (τ 30–50 ms) gives 0.94–1.05. Best of all,
+assume no shape: this model's PSTH timing matches the panel, so scaling its measured shape
+to a 20 Hz peak gives 0.70 spikes. Integration is linear in amplitude, so on that estimate
+the spike ratio equals the peak ratio exactly — both 4.8x.
+
+`baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
+by a paired t-test for post > pre, which preferentially picks neurons quiet in the
+pre-window, so their baseline is biased low by the selection (0.63 Hz here against the
+population's 3.20 Hz). The paper applies the same criterion, so responder-vs-responder
+comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
 interval of 21–64%, which 54% sits inside.

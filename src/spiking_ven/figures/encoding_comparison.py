@@ -259,8 +259,9 @@ def make_figure(
         # The E population rate, on a shared y-scale across columns. The reversed-motif
         # response is spread over the motif rather than concentrated like the DAF burst,
         # so in a raster of 40 sampled neurons it is nearly invisible; averaged over all
-        # of them it is plain.
-        1.6 / _u,
+        # of them it is plain. A thin trace: it is a reference strip under the rasters,
+        # not a panel in its own right.
+        0.53 / _u,
     ]
     fig_height = sum(HR) * _u + 1.2
 
@@ -370,8 +371,7 @@ def make_figure(
         # Row 5: E population rate, every unit, Gaussian-smoothed.
         rate = gaussian_filter1d(cd["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0)
         ax_r.set_facecolor(BG["E"])
-        ax_r.fill_between(np.arange(T_song), rate, color=CLR["E"], alpha=0.35, lw=0)
-        ax_r.plot(np.arange(T_song), rate, color=CLR["E"], lw=0.9)
+        ax_r.plot(np.arange(T_song), rate, color=CLR["E"], lw=1.0)
         ax_r.set_xlim(0, T_song)
         ax_r.set_ylim(0, rate_ymax)
         ax_r.set_xlabel("Time (ms)", fontsize=9)

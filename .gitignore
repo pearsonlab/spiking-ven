@@ -14,3 +14,6 @@ build/
 
 # Stray artifacts from a mistyped output path (outputs/ is ignored; outputs_* was not).
 outputs_*
+
+# Agent worktrees and session state live here; never part of the repo.
+.claude/

@@ -109,6 +109,13 @@ pre-window, so their baseline is biased low by the selection (0.63 Hz here again
 population's 3.20 Hz). The paper applies the same criterion, so responder-vs-responder
 comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
+**The gap is two errors that partly cancel.** Since peak = spikes / effective width, the
+model is 4.8x too tall *and* 0.7–0.9x too narrow (effective width 34.8 ms against the
+bird's 39–50 ms). That is why the peak excess exceeds the spike excess. The width error is
+confirmed independently by the measured duration, 55 ms against 90 ± 43 ms. So a uniform
+gain reduction is the wrong shape: it would fix the peak and leave the response too narrow,
+undershooting the spike count. What is needed is ~3.7x fewer spikes *and* ~1.3x more width.
+
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
 interval of 21–64%, which 54% sits inside.
 

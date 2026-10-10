@@ -132,6 +132,33 @@ BIOLOGICAL_TARGETS = {
     # spikes/s, but that is a trial-averaged population display, not an instantaneous rate.
 }
 
+# The magnitude gap is TWO errors, not one, and they partly cancel.
+#
+# peak = extra spikes / effective width, so decomposing: the model is 4.8x too TALL
+# (96 vs ~20 Hz) and 0.7-0.9x too NARROW (effective width 34.8 ms against the bird's
+# 39-50 ms under decaying shapes). That is why the peak excess (4.8x) exceeds the spike
+# excess (3.3-3.7x) -- they differ by exactly the width ratio.
+#
+# The width error is confirmed independently: measured response duration is 55 ms against
+# 90 +/- 43 ms, a ratio of 0.61, from the paper's own z-test criterion rather than from
+# any of this arithmetic. Two unrelated routes agreeing is what makes it credible.
+#
+# Consequence for any fix: a uniform gain reduction is the WRONG SHAPE. Scaling the
+# response down would bring the peak to ~20 Hz but leave it ~30% too narrow, landing the
+# spike count near 0.7 against a bird at ~0.9 -- overshooting into too FEW spikes. What is
+# needed is 3.7x fewer spikes AND 1.3x more width. Spacing spikes out without removing
+# them barely helps: it would move the peak only 96 -> 74 Hz and leave the count untouched.
+#
+# Already ruled out on this basis: JEI_scale and reduced auditory drive are uniform gain
+# changes; spike-frequency adaptation shortened duration further (65 -> 55 ms across its
+# sweep), buying peak reduction by making the width error worse.
+#
+# NOT a way out: lengthening the refractory period to 3-4 ms. The absolute refractory is
+# 1-2 ms (sodium h-gate recovery), and zebra finch RA projection neurons have a singing
+# ISI histogram sharply peaked at 2 ms with intra-burst rates to 455-700 Hz
+# (doi:10.1523/JNEUROSCI.3036-04.2005), which a 3-4 ms block would make impossible. 2 ms
+# is the measured value, not a conservative choice with room in it.
+
 # Superseded, and wrong: a previous table listed 7.7 +/- 8.7 Hz for singing (not a number
 # the paper states) and 28 Hz for responders citing Fig 8E (which plots a *change* in rate
 # peaking near 20 Hz, not an absolute rate). The 2.1x and 3.6x "targets" were quotients of

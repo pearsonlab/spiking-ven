@@ -96,9 +96,11 @@ rectangular -- the paper reports no shape, and no intra-burst or instantaneous r
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
 interval of 21–64%, which 54% sits inside.
 
-**The peak is a diagnostic, not a target.** It is bin-width dependent -- measured here it
-runs 96.9 / 96.0 / 78.6 / 77.7 / 64.2 Hz at 1 / 2 / 5 / 10 / 20 ms bins -- and the paper
-never states how its plotted PSTHs were binned. 2 ms is the only binning it gives (for the
+**The peak is a diagnostic, not a target, and is not asserted.** It is bin-width dependent
+-- measured here it runs 96.9 / 96.0 / 78.6 / 77.7 / 64.2 Hz at 1 / 2 / 5 / 10 / 20 ms
+bins -- and the paper never states how its plotted PSTHs were binned. Only the bin width
+is pinned, so changing it has to be deliberate; a real assertion would need values read
+off Fig. 8E itself, which nobody has done. 2 ms is the only binning it gives (for the
 latency and duration z-tests) and is what we use; no smoothing is described anywhere in the
 paper, though the published trace looks smoother than 2 ms binning alone would give. So any
 ratio against ~20 Hz carries an unknown mismatch. The spike count does not: it is invariant

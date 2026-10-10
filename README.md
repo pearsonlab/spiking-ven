@@ -30,6 +30,8 @@ make figure      # data -> encoder -> VEN -> figure   (~10 min, CPU)
 make verify      # check artifact checksums against MANIFEST.sha256
 make test        # fast unit tests (no artifacts needed)
 make test-repro  # the reproduction assertions below, against outputs/
+sven-figure --view psth --model outputs/of_ven_model_default.npz \
+            --causal-encoder outputs/causal_encoder.npz  # DAF time course
 make rates       # the supplementary population-rate view
 ```
 

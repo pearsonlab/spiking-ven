@@ -36,9 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--of-encoder", default=None, help="OF encoder .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "rates", "filters"],
-                   help="raster (the publication figure), rates (supplementary), or "
-                        "filters (causal filter bank diagnostics; needs no VEN model)")
+    p.add_argument("--view", default="raster", choices=["raster", "rates", "filters", "psth"],
+                   help="raster (the publication figure), rates (supplementary), "
+                        "filters (causal filter bank diagnostics; needs no VEN model), or "
+                        "psth (DAF response time course against the Fig. 8E reading)")
     p.add_argument("--causal-encoder", default=None,
                    help="causal filter bank .npz (--view filters)")
     p.add_argument("--seed", type=int, default=42)
@@ -117,6 +118,18 @@ def main(argv: list[str] | None = None) -> None:
         "peak_rate": PEAK_RATE_HZ,
         "of_mean_rate_hz": args.mean_rate_hz,
     }
+    if args.view == "psth":
+        from ..evaluate import build_stimuli
+        from ..figures.daf_psth import make_psth_figure
+
+        st = build_stimuli(enc, motifs_path, sr=args.sr, seed=args.seed,
+                           t_post=args.t_post, mean_rate_hz=args.mean_rate_hz,
+                           verbose=False)
+        for path in make_psth_figure(ven, enc, st, out_dir, tag=tag, seed=args.seed,
+                                     mean_rate_hz=args.mean_rate_hz):
+            print(f"  wrote {path}")
+        return
+
     if args.view == "raster":
         from ..figures.encoding_comparison import make_figure
 

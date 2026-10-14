@@ -13,6 +13,14 @@ import pytest
 import spiking_ven as sv
 
 
+def test_version_matches_package_metadata():
+    """pyproject reads the version from __version__; v0.5.0 shipped with the two set by
+    hand and disagreeing (0.4.0 vs 0.5.0), so pip and uv reported the wrong release."""
+    from importlib.metadata import version
+
+    assert sv.__version__ == version("spiking-ven")
+
+
 def test_core_import_does_not_pull_in_brian2():
     """`import spiking_ven` must never drag in Brian2 (it is an optional extra).
 

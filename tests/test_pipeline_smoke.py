@@ -81,7 +81,7 @@ def test_encoder_then_network_end_to_end(tmp_path):
     tr = np.load(tmp_path / "ven_traces.npz")
     # Not asserting biology on synthetic audio -- only that the pipeline produced
     # finite, structurally sane numbers.
-    for key in ("rc", "rn", "jie", "theta"):
+    for key in ("rc", "rn", "jie"):
         assert tr[key].shape == (2,), f"{key} should have one entry per rendition"
         assert np.isfinite(tr[key]).all(), f"{key} contains non-finite values"
     for key in ("k1", "rc_hvc"):

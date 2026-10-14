@@ -41,10 +41,10 @@ __all__ = [
     # 2. the network operating point
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
-    "DRIVE_E", "DRIVE_I", "R_E_TARGET",
+    "DRIVE_E", "DRIVE_I",
     "TAU_S", "TAU_E", "TAU_STDP",
-    "C_JIE", "R_I_TH", "J_MAX_IE",
-    "ALPHA_THETA", "A_SFA", "TAU_SFA",
+    "R_I_TH", "J_MAX_IE",
+    "A_SFA", "TAU_SFA",
     "T_POST", "T_BURN", "N_ISTA",
     "a_jie_for",
     # 3. the causal encoder operating point
@@ -138,7 +138,6 @@ C_HVC = 0.1
 #: the drive raises the threshold with it rather than the firing rate.
 DRIVE_E = 0.06
 DRIVE_I = 0.058
-R_E_TARGET = 16.0
 
 TAU_S = 20.0
 TAU_E = 30.0
@@ -148,12 +147,8 @@ TAU_STDP = 20.0
 
 #: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
 #: E cells ever acquire inhibition.
-C_JIE = 0.1
 R_I_TH = 6.0
 J_MAX_IE = 1.0
-
-#: Threshold homeostasis, off at the shipped point.
-ALPHA_THETA = 0.0
 
 #: Firing-rate adaptation on E. ``TAU_SFA`` must stay SHORTER than the 50 ms DAF burst it
 #: has to truncate: at 100 ms the current integrates over the whole motif and acts as a

@@ -9,10 +9,7 @@ Architecture
 
 Plasticity
 ----------
-- fit()   : song stimulus — JIE STDP on, theta adaptation off
-- adapt() : novel stimulus — JIE STDP off, per-neuron theta adaptation on
-            theta_e[k] += alpha_theta * (sE[k] - r_e_target_per_bin)
-            Gated to novel so homeostasis doesn't fight JIE learning.
+Only JIE learns, by causal STDP, during ``fit()``. Everything else is fixed.
 """
 
 import numpy as np
@@ -38,9 +35,6 @@ def _sim_loop_v2(
     A_jie, J_max_ie, xi_th,
     drive_e, drive_i,
     learn_weights, alpha_stdp, rng,
-    learn_theta=False,
-    alpha_theta=0.0,
-    r_e_target_per_bin=0.0,
     aud_delay_ms: int = 0,
     hvc_delay_ms: int = 0,
 ):
@@ -143,13 +137,10 @@ def _sim_loop_v2(
             JIE += A_jie * np.outer(gate_sE, x_i - xi_th)
             np.clip(JIE, 0.0, J_max_ie, out=JIE)
 
-        if learn_theta:
-            theta_e += alpha_theta * (sE - r_e_target_per_bin)
-
         sE_prev = sE
         sI_prev = sI
 
-    return sE_mat, sI_mat, JIE, theta_e
+    return sE_mat, sI_mat, JIE
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +175,6 @@ class VocalErrorNetV2:
     c_hvc        : HVC→I connection probability
     B_hvc_scale  : mean weight scale for HVC→I (tune so HVC burst drives I reliably)
     c_JEI        : E→I connection probability (fixed throughout)
-    c_JIE        : stored for provenance; JIE starts at zero and is not masked
     r_i_th       : I baseline rate threshold for STDP (Hz); x_i below this → LTD on JIE.
                    Set to mean I rate during song so rule is zero-mean for uncorrelated activity.
     tau_stdp     : STDP coincidence window (ms) for the I trace; 0 falls back to tau_s
@@ -216,7 +206,6 @@ class VocalErrorNetV2:
         t_refr_ms: float = 2.0,
         a_sfa: float = 0.0,
         tau_sfa: float = 100.0,
-        c_JIE: float = 0.5,
         r_i_th: float = 0.0,
         drive_e: float = 0.155,
         drive_i: float = 0.058,
@@ -224,8 +213,6 @@ class VocalErrorNetV2:
         noise_i: float = 0.0,
         target_rate: float = 0.025,
         target_rate_i: float = 0.05,
-        alpha_theta: float = 0.0,
-        r_e_target: float = 4.0,
         aud_delay_ms: int = 0,
         hvc_delay_ms: int = 0,
         tau_stdp: float = 0.0,
@@ -258,7 +245,6 @@ class VocalErrorNetV2:
         #: 0.01 means ~4 spikes in quick succession suffice to silence a cell.
         self.a_sfa         = float(a_sfa)
         self.tau_sfa       = float(tau_sfa)
-        self.c_JIE         = c_JIE
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
         self.drive_i       = drive_i
@@ -266,8 +252,6 @@ class VocalErrorNetV2:
         self.noise_i       = noise_i
         self.target_rate   = target_rate
         self.target_rate_i = target_rate_i
-        self.alpha_theta   = alpha_theta
-        self.r_e_target    = r_e_target
         self.aud_delay_ms  = int(aud_delay_ms)
         self.hvc_delay_ms  = int(hvc_delay_ms)
         self.tau_stdp      = float(tau_stdp)
@@ -294,7 +278,7 @@ class VocalErrorNetV2:
         # get trained (via STDP in fit()), leaving novel-E rows at zero.
         self.JIE = np.zeros((n_e, n_i), dtype=np.float32)
 
-        # E threshold: per-neuron array (adapts via adapt() when alpha_theta > 0).
+        # E threshold, per neuron.
         # Effective steady-state input is drive_e (tonic), not target_rate * tau_s —
         # tau_s is the STDP trace constant and must not appear in the membrane threshold.
         _decay_e  = float(np.exp(-1.0 / tau_e))
@@ -317,22 +301,6 @@ class VocalErrorNetV2:
     def fit(self, hvc_spikes: np.ndarray, aud_spikes: np.ndarray) -> np.ndarray:
         """Train on paired HVC+auditory input: updates JIE by STDP. Returns sE_mat."""
         sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=True)
-        return sE
-
-    def adapt(
-        self,
-        hvc_spikes: np.ndarray,
-        aud_spikes: np.ndarray,
-    ) -> np.ndarray:
-        """Novel-stimulus pass: per-neuron theta homeostasis on, JIE STDP off.
-
-        With ``alpha_theta = 0`` -- the shipped operating point -- this updates nothing:
-        it is a plain inference pass. It is not free, though. It advances the simulation
-        noise stream, so a training loop that calls it is not interchangeable with one
-        that does not. See the note in ``spiking_ven.cli.train_ven``.
-        """
-        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=False,
-                            learn_theta=self.alpha_theta > 0.0)
         return sE
 
     def transform(
@@ -361,12 +329,11 @@ class VocalErrorNetV2:
             A_jie=self.A_jie, J_max_ie=self.J_max_ie,
             c_B=self.c_B, B_scale=self.B_scale,
             c_hvc=self.c_hvc, B_hvc_scale=self.B_hvc_scale,
-            c_JEI=self.c_JEI, c_JIE=self.c_JIE, r_i_th=self.r_i_th,
+            c_JEI=self.c_JEI, r_i_th=self.r_i_th,
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
             t_refr_ms=self.t_refr_ms, a_sfa=self.a_sfa, tau_sfa=self.tau_sfa,
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
-            alpha_theta=self.alpha_theta, r_e_target=self.r_e_target,
             aud_delay_ms=self.aud_delay_ms, hvc_delay_ms=self.hvc_delay_ms,
             tau_stdp=self.tau_stdp,
             theta_e=self.theta_e, theta_i=self.theta_i,
@@ -381,9 +348,9 @@ class VocalErrorNetV2:
             setattr(obj, k, int(d[k]))
         scalar_keys = (
             "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
-            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "c_JIE", "r_i_th",
+            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
             "drive_e", "drive_i", "noise_e", "noise_i",
-            "target_rate", "target_rate_i", "alpha_theta", "r_e_target",
+            "target_rate", "target_rate_i",
             "tau_stdp", "theta_i", "t_refr_ms", "a_sfa", "tau_sfa",
         )
         # Models saved before these knobs were removed carry extra keys; ignoring them
@@ -456,7 +423,6 @@ class VocalErrorNetV2:
         hvc_spikes: np.ndarray,
         aud_spikes: np.ndarray,
         learn_weights: bool = False,
-        learn_theta: bool = False,
     ):
         dt      = 1.0
         decay_e = float(np.exp(-dt / self.tau_e))
@@ -470,29 +436,23 @@ class VocalErrorNetV2:
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
 
-        theta_e = self.theta_e.copy()
-        sE_mat, sI_mat, JIE, theta_e = _sim_loop_v2(
+        sE_mat, sI_mat, JIE = _sim_loop_v2(
             h_aud, h_hvc,
             self.B.astype(np.float64),
             self.B_hvc.astype(np.float64),
             self.JEI.astype(np.float64),
             self.JIE.astype(np.float64),
             decay_e, decay_i,
-            theta_e, float(self.theta_i),
+            self.theta_e, float(self.theta_i),
             float(self.v_reset), float(self.noise_e), float(self.noise_i),
             self.t_refr_ms, self.a_sfa, self.tau_sfa,
             float(self.A_jie), float(self.J_max_ie), xi_th,
             float(self.drive_e), float(self.drive_i),
             learn_weights, alpha_stdp, self._sim_rng,
-            learn_theta=learn_theta,
-            alpha_theta=float(self.alpha_theta),
-            r_e_target_per_bin=float(self.r_e_target) * 1e-3,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
         )
 
         if learn_weights:
             self.JIE = JIE.astype(np.float32)
-        if learn_theta:
-            self.theta_e = theta_e
         return sE_mat, sI_mat

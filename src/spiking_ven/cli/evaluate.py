@@ -20,7 +20,7 @@ import argparse
 import json
 
 from ..causal_filters import CausalFilterEncoder
-from ..constants import SR, N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST
+from ..constants import AUD_MEAN_RATE_HZ, N_HVC, N_ISTA, SR, T_BURN, T_POST
 from ..evaluate import (
     build_stimuli,
     daf_metrics,
@@ -36,17 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=None, help="trained VEN .npz")
-    p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
+    p.add_argument("--encoder", default=None, help="trained causal filter bank .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--n-hvc", type=int, default=N_HVC)
     p.add_argument("--t-post", type=int, default=T_POST)
     p.add_argument("--t-burn", type=int, default=T_BURN)
-    p.add_argument("--mean-rate-hz", type=float, default=2.5)
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ)
     p.add_argument("--n-ista", type=int, default=N_ISTA)
-    p.add_argument("--r-e-target", type=float, default=R_E_TARGET,
-                   help="only used to annotate the no-HVC sanity line")
     p.add_argument("--n-trials", type=int, default=20,
                    help="renditions with independent noise draws for the DAF response")
     p.add_argument("--json", action="store_true", help="emit the metrics as JSON")
@@ -87,7 +85,7 @@ def main(argv: list[str] | None = None) -> None:
                           "train_idx": st["train_idx"], "model": model_path}, indent=2))
     else:
         print()
-        print(format_metrics(m, r_e_target=args.r_e_target))
+        print(format_metrics(m))
         print()
         print(format_responders(r))
         print(f"\n  encoder forward/reversed correlation: {st['fwd_rev_corr']:.4f}")

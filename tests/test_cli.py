@@ -165,11 +165,11 @@ def test_train_encoder_front_end_is_sane():
         ("n_e", "N_E"), ("n_i", "N_I"), ("n_hvc", "N_HVC"), ("n_rend", "N_RENDITIONS"),
         ("b_scale", "B_SCALE"), ("c_b", "C_B"),
         ("b_hvc_scale", "B_HVC_SCALE"), ("c_hvc", "C_HVC"),
-        ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"), ("r_e_target", "R_E_TARGET"),
+        ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"),
         ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
-        ("c_jie", "C_JIE"), ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
+        ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
-        ("alpha_theta", "ALPHA_THETA"), ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
+        ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):
@@ -206,7 +206,7 @@ def test_train_ven_delays_track_the_constants():
 def test_evaluate_shares_the_operating_point():
     a = cli_evaluate.build_parser().parse_args([])
     assert (a.n_hvc, a.n_ista) == (C.N_HVC, C.N_ISTA)
-    assert (a.t_post, a.t_burn, a.r_e_target) == (C.T_POST, C.T_BURN, C.R_E_TARGET)
+    assert (a.t_post, a.t_burn) == (C.T_POST, C.T_BURN)
     assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True

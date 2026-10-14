@@ -387,7 +387,7 @@ def _rate_hz(ven, hvc, aud) -> float:
 
 
 def daf_metrics(ven, *, hvc_on, hvc_off, aud_correct, aud_daf, aud_reversed) -> dict:
-    """Compute K1-K4 for a trained network.
+    """Rendition-level E rates for a trained network: K1, K4 and the no-HVC DAF control.
 
     Parameters
     ----------
@@ -395,29 +395,26 @@ def daf_metrics(ven, *, hvc_on, hvc_off, aud_correct, aud_daf, aud_reversed) -> 
     hvc_on       : (n_hvc, T) HVC premotor spikes -- the singing condition
     hvc_off      : (n_hvc, T) zeros -- the not-singing control
     aud_correct  : (n_aud, T) spikes for the trained song
-    aud_daf      : (n_aud, T) spikes for white noise at DAF amplitude
+    aud_daf      : (n_aud, T) spikes for the DAF stimulus (song + noise burst)
     aud_reversed : (n_aud, T) spikes for the time-reversed motif
 
     Returns
     -------
-    dict with k1, k2, k2_no_hvc, k4_rate (all Hz) and the k3, k4 ratios.
+    dict with k1, k2_no_hvc, k4_rate (all Hz) and the k4 ratio.
     """
     k1 = _rate_hz(ven, hvc_on, aud_correct)
-    k2 = _rate_hz(ven, hvc_on, aud_daf)
     k2_no_hvc = _rate_hz(ven, hvc_off, aud_daf)
     k4_rate = _rate_hz(ven, hvc_on, aud_reversed)
     nan = float("nan")
     return {
         "k1": k1,
-        "k2": k2,
         "k2_no_hvc": k2_no_hvc,
         "k4_rate": k4_rate,
-        "k3": (k2 / k1) if k1 > 0 else nan,
         "k4": (k4_rate / k1) if k1 > 0 else nan,
     }
 
 
-def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
+def format_metrics(m: dict) -> str:
     """Render the rendition-level rates from :func:`daf_metrics`.
 
     The DAF rate is deliberately NOT reported here. Averaged over a whole rendition it
@@ -426,8 +423,6 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
     """
     t = BIOLOGICAL_TARGETS
     lo, hi = t["singing_rate_hz"]
-    sanity = (f"  (sanity; homeostasis target {r_e_target:.0f} Hz)"
-              if r_e_target is not None else "")
     return "\n".join([
         "Excitatory rate per rendition (Mandelblat-Cerf 2014):",
         f"  trained song, singing     {m['k1']:6.2f} Hz   paper {lo:.0f}-{hi:.0f} Hz "
@@ -435,7 +430,7 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
         f"  reversed song, singing    {m['k4_rate']:6.2f} Hz",
         f"  reversed / trained        {m['k4']:6.2f}x     target > "
         f"{t['reversed_min_ratio']:.0f}x",
-        f"  DAF stimulus, not singing {m['k2_no_hvc']:6.2f} Hz{sanity}",
+        f"  DAF stimulus, not singing {m['k2_no_hvc']:6.2f} Hz",
     ])
 
 # ---------------------------------------------------------------------------

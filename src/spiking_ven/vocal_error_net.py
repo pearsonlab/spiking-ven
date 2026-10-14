@@ -373,45 +373,37 @@ class VocalErrorNetV2:
         return obj
 
     def to_brian_weights(self) -> dict:
-        """Return trained weight matrices ready for build_ven_synapses(learn=False).
+        """Everything :mod:`spiking_ven.brian2_runtime` needs to run this network.
 
-        Returns
-        -------
-        dict with keys:
-            B, B_hvc, JIE, JEI  — float64 numpy arrays
-            theta_e             — (n_e,) float64 array of per-neuron E thresholds
-            xi_th               — dimensionless I-trace threshold (r_i_th * the STDP
-                                  trace constant * 1e-3)
-            tau_s, tau_e, tau_i, drive_e, drive_i, A_jie, J_max_ie — scalar floats
-            theta_i, v_reset    — scalar floats
-            n_e, n_i, n_aud, n_hvc — ints
+        Weight matrices (float64, post x pre), the per-neuron E thresholds, and every
+        scalar the dynamics use -- including spike-frequency adaptation, the refractory
+        period and the conduction delays, without which the Brian2 network would not be
+        the one that was trained.
         """
         return {
-            "B":        self.B.astype(np.float64),
-            "B_hvc":    self.B_hvc.astype(np.float64),
-            "JIE":      self.JIE.astype(np.float64),
-            "JEI":      self.JEI.astype(np.float64),
-            "theta_e":  self.theta_e.astype(np.float64),
-            "theta_i":  float(self.theta_i),
-            # The trace this debiases decays at tau_stdp when that is set, so xi_th
-            # must be calibrated to the same constant the simulation uses -- it was
-            # computed from tau_s here, which silently mis-scaled the Brian2 threshold
-            # whenever the two differed.
-            "xi_th":    float(self.r_i_th * (self.tau_stdp or self.tau_s) * 1e-3),
-            "tau_s":    float(self.tau_s),
-            "tau_e":    float(self.tau_e),
-            "tau_i":    float(self.tau_i),
-            "drive_e":  float(self.drive_e),
-            "drive_i":  float(self.drive_i),
-            "noise_e":  float(self.noise_e),
-            "noise_i":  float(self.noise_i),
-            "v_reset":  float(self.v_reset),
-            "A_jie":    float(self.A_jie),
-            "J_max_ie": float(self.J_max_ie),
-            "n_e":      int(self.n_e),
-            "n_i":      int(self.n_i),
-            "n_aud":    int(self.n_aud),
-            "n_hvc":    int(self.n_hvc),
+            "B":            self.B.astype(np.float64),
+            "B_hvc":        self.B_hvc.astype(np.float64),
+            "JIE":          self.JIE.astype(np.float64),
+            "JEI":          self.JEI.astype(np.float64),
+            "theta_e":      self.theta_e.astype(np.float64),
+            "theta_i":      float(self.theta_i),
+            "tau_s":        float(self.tau_s),
+            "tau_e":        float(self.tau_e),
+            "tau_i":        float(self.tau_i),
+            "drive_e":      float(self.drive_e),
+            "drive_i":      float(self.drive_i),
+            "noise_e":      float(self.noise_e),
+            "noise_i":      float(self.noise_i),
+            "v_reset":      float(self.v_reset),
+            "a_sfa":        float(self.a_sfa),
+            "tau_sfa":      float(self.tau_sfa),
+            "t_refr_ms":    float(self.t_refr_ms),
+            "aud_delay_ms": int(self.aud_delay_ms),
+            "hvc_delay_ms": int(self.hvc_delay_ms),
+            "n_e":          int(self.n_e),
+            "n_i":          int(self.n_i),
+            "n_aud":        int(self.n_aud),
+            "n_hvc":        int(self.n_hvc),
         }
 
     # ------------------------------------------------------------------

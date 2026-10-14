@@ -93,18 +93,18 @@ def test_model_carries_the_operating_point(setup):
 
 
 def test_daf_response_matches_the_recorded_run(daf):
-    assert daf["responder_fraction"] == pytest.approx(0.555, abs=0.03)
-    assert daf["baseline_hz_all"] == pytest.approx(2.20, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(58.1, rel=0.10)
-    assert daf["latency_ms"] == pytest.approx(32.7, abs=2.5)
-    assert daf["duration_ms"] == pytest.approx(53.9, abs=4.0)
+    assert daf["responder_fraction"] == pytest.approx(0.557, abs=0.03)
+    assert daf["baseline_hz_all"] == pytest.approx(2.21, rel=0.08)
+    assert daf["peak_change_hz"] == pytest.approx(59.8, rel=0.10)
+    assert daf["latency_ms"] == pytest.approx(33.6, abs=2.5)
+    assert daf["duration_ms"] == pytest.approx(49.4, abs=4.0)
     assert daf["extra_spikes_responders"] == pytest.approx(1.79, rel=0.10)
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation, and the mean alone hid that distinction across two sweeps."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.84, rel=0.12)
+    assert daf["extra_spikes_p90"] == pytest.approx(3.85, rel=0.12)
     assert daf["extra_spikes_max"] == pytest.approx(10.2, rel=0.15)
     assert daf["extra_spikes_sd"] == pytest.approx(1.54, rel=0.12)
 

@@ -81,12 +81,12 @@ against the shipped model; `make test-repro` runs it.
 | Metric | Model | Bird |
 |---|---|---|
 | auditory input rate during song | 2.15 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
-| baseline, all units | 2.20 Hz | 1–10 Hz (Fig. 7C) |
+| baseline, all units | 2.21 Hz | 1–10 Hz (Fig. 7C) |
 | responders | 56% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 32.7 ms | 23 ± 12 ms |
-| response duration | 53.9 ms | 90 ± 43 ms |
+| response onset latency | 33.6 ms | 23 ± 12 ms |
+| response duration | 49.4 ms | 90 ± 43 ms |
 | **extra spikes per responder per burst** | **1.79** | **~0.8–1.0** |
-| peak change, responders | 58.1 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| peak change, responders | 59.8 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
 | time to peak | 48 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.021 | < 0.15 — a transient, not a step (Fig. 8E) |
 

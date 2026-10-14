@@ -3,7 +3,7 @@
 Replaces the shell + curl approach used previously. Two reasons this is Python and
 stdlib-only:
 
-* Both hosts sit behind CloudFront, which answers the default ``curl``/``urllib``
+* The host sits behind CloudFront, which answers the default ``curl``/``urllib``
   User-Agent with ``403 Request blocked``. The browser UA is set here, in code, so the
   failure cannot come back through a forgotten shell flag.
 * No ``requests`` dependency, and no dependence on ``curl``/``unzip`` being present.
@@ -12,12 +12,6 @@ Sources
 -------
 Koch 2024, adult zebra finch R469 -- WAV + Evsonganaly ``.not.mat`` annotations.
     https://doi.org/10.18738/T8/SAWMUN  (TDL Dataverse, file id 650237)
-
-Gong et al. 2025 -- ``adult_songs/data.npz``.
-    https://research.repository.duke.edu/record/438
-    OPTIONAL: those are spectrogram features for the paper's rate-based Wilson-Cowan
-    models, and are not used by this spiking pipeline. The endpoint is also flaky (it has
-    returned an empty HTTP 202), so a failure here is reported and skipped, never fatal.
 """
 
 from __future__ import annotations
@@ -30,19 +24,15 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-__all__ = ["fetch_r469", "fetch_optional_duke_features", "BROWSER_UA"]
+__all__ = ["fetch_r469", "BROWSER_UA"]
 
-# CloudFront 403s the default urllib/curl agent on both hosts.
+# CloudFront 403s the default urllib/curl agent.
 BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 )
 
 KOCH_URL = "https://dataverse.tdl.org/api/access/datafile/650237"
-DUKE_URL = (
-    "https://research.repository.duke.edu/record/438/files/"
-    "example_data_for_model_simulations.zip"
-)
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -118,33 +108,3 @@ def fetch_r469(data_dir: Path, *, verbose: bool = True) -> Path:
     if verbose:
         print(f"  -> {wav_dir} ({n_wav} WAVs, {n_ann} annotation files)")
     return wav_dir
-
-
-def fetch_optional_duke_features(data_dir: Path, *, verbose: bool = True) -> Path | None:
-    """Best-effort fetch of the Duke feature archive. Returns None if unavailable.
-
-    Never raises: this archive is not used by the spiking pipeline.
-    """
-    out_dir = Path(data_dir) / "example_data_for_model_simulations"
-    if (out_dir / "adult_songs" / "data.npz").exists():
-        if verbose:
-            print("  Duke features already present, skipping")
-        return out_dir
-
-    zip_path = Path(data_dir) / "example_data_for_model_simulations.zip"
-    try:
-        if verbose:
-            print("  downloading optional Duke feature archive (~40 MB) ...")
-        _download(DUKE_URL, zip_path)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(data_dir)
-        if verbose:
-            print(f"  -> {out_dir}")
-        return out_dir
-    except Exception as exc:  # noqa: BLE001 - optional, must never be fatal
-        if verbose:
-            print(f"  !! skipped optional Duke archive ({type(exc).__name__}: {exc})")
-            print("     Not needed by the spiking pipeline; continuing.")
-        return None
-    finally:
-        zip_path.unlink(missing_ok=True)

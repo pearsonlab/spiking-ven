@@ -1,10 +1,9 @@
 """``sven-prep-data`` -- acquire the song corpus and build ``motifs.npz``.
 
-Three stages, each skipped if its output already exists:
+Two stages, each skipped if its output already exists:
 
 1. download the R469 WAV + ``.not.mat`` pairs (Koch 2024)
-2. optionally build ``R469_concat.npy`` / ``R469_ann.npz`` (concatenated corpus)
-3. resample + DTW-align into ``outputs/motifs.npz``
+2. resample + DTW-align into ``outputs/motifs.npz``
 
 If the download is blocked (a TLS-inspecting proxy, or no network), place the WAV +
 ``.not.mat`` pairs in ``<data-dir>/song_wavs`` yourself and pass ``--skip-download``;
@@ -28,9 +27,6 @@ def main(argv: list[str] | None = None) -> None:
                         help="output motifs .npz (default: $SVEN_OUTPUT_DIR/motifs.npz)")
     parser.add_argument("--skip-download", action="store_true",
                         help="assume <data-dir>/song_wavs is already populated")
-    parser.add_argument("--with-concat", action="store_true",
-                        help="also build R469_concat.npy / R469_ann.npz "
-                             "(concatenated corpus; nothing in this package reads it)")
     args = parser.parse_args(argv)
 
     ddir = Path(args.data_dir) if args.data_dir else data_dir()
@@ -41,7 +37,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"output:   {out}")
 
     # --- 1. corpus ---------------------------------------------------------
-    print("\nStep 1/3 - song corpus")
+    print("\nStep 1/2 - song corpus")
     if args.skip_download:
         if not (wav_dir.is_dir() and any(wav_dir.glob("*.wav"))):
             raise SystemExit(f"--skip-download given but no WAVs found in {wav_dir}")
@@ -51,21 +47,8 @@ def main(argv: list[str] | None = None) -> None:
 
         fetch_r469(ddir)
 
-    # --- 2. optional concatenated corpus ----------------------------------
-    print("\nStep 2/3 - concatenated corpus (optional)")
-    if args.with_concat:
-        from ..data.r469 import main as build_concat
-
-        build_concat([
-            "--wav-dir", str(wav_dir),
-            "--out", str(ddir / "R469_concat.npy"),
-            "--ann-out", str(ddir / "R469_ann.npz"),
-        ])
-    else:
-        print("  skipped (pass --with-concat for the concatenated corpus)")
-
-    # --- 3. aligned motifs -------------------------------------------------
-    print("\nStep 3/3 - resample + DTW align")
+    # --- 2. aligned motifs -------------------------------------------------
+    print("\nStep 2/2 - resample + DTW align")
     if out.exists():
         print(f"  {out} already present, skipping")
     else:

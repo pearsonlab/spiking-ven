@@ -9,8 +9,8 @@ definition) moved these by 2x or more, and only a recorded reference makes that 
 Marked ``slow`` -- each test re-runs VEN inference over several stimuli -- and skipped
 when the artifacts are absent so a bare checkout still gets a green suite. Regenerate with
 
-    sven-train-ven --causal-encoder outputs/causal_encoder.npz \
-                   --out outputs/of_ven_model_default.npz
+    sven-train-ven --encoder outputs/causal_encoder.npz \
+                   --out outputs/ven_model.npz
 
 The model is deterministic (test_determinism.py), so these are tight: the tolerances
 allow for platform differences in floating-point reductions, not run-to-run noise.
@@ -33,7 +33,7 @@ from spiking_ven.vocal_error_net import VocalErrorNetV2
 OUT = Path("outputs")
 MOTIFS = OUT / "motifs.npz"
 ENCODER = OUT / "causal_encoder.npz"
-MODEL = OUT / "of_ven_model_default.npz"
+MODEL = OUT / "ven_model.npz"
 
 pytestmark = [
     pytest.mark.slow,
@@ -58,9 +58,7 @@ def setup():
 @pytest.fixture(scope="module")
 def daf(setup):
     enc, st, ven = setup
-    return daf_response(ven, enc, sig_train=st["sig_train"], hvc_on=st["hvc_on"],
-                        acts_train=st["acts_train"], sr=16000, T_out_ms=st["T_rend"],
-                        n_ista=50, n_trials=20, seed=SEED)
+    return daf_response(ven, enc, st, n_trials=20, seed=SEED)
 
 
 def test_encoder_is_the_pruned_causal_bank(setup):
@@ -75,8 +73,9 @@ def test_auditory_input_matches_schneider_woolley(setup):
     _, st, _ = setup
     rate = float(st["aud_correct"].mean() * 1000)
     assert rate == pytest.approx(2.15, abs=0.15)
-    # 2.4 +/- 2.7 Hz; the SD is larger than the mean, so only the mean is worth asserting.
-    assert abs(rate - 2.4) < 2.7
+    # The SD is larger than the mean, so only the mean is worth asserting.
+    mean, sd = BIOLOGICAL_TARGETS["aud_song_rate_hz"]
+    assert abs(rate - mean) < sd
 
 
 def test_model_carries_the_operating_point(setup):
@@ -94,18 +93,18 @@ def test_model_carries_the_operating_point(setup):
 
 
 def test_daf_response_matches_the_recorded_run(daf):
-    assert daf["responder_fraction"] == pytest.approx(0.555, abs=0.03)
-    assert daf["baseline_hz_all"] == pytest.approx(2.20, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(58.1, rel=0.10)
-    assert daf["latency_ms"] == pytest.approx(32.7, abs=2.5)
-    assert daf["duration_ms"] == pytest.approx(53.9, abs=4.0)
+    assert daf["responder_fraction"] == pytest.approx(0.557, abs=0.03)
+    assert daf["baseline_hz_all"] == pytest.approx(2.21, rel=0.08)
+    assert daf["peak_change_hz"] == pytest.approx(59.8, rel=0.10)
+    assert daf["latency_ms"] == pytest.approx(33.6, abs=2.5)
+    assert daf["duration_ms"] == pytest.approx(49.4, abs=4.0)
     assert daf["extra_spikes_responders"] == pytest.approx(1.79, rel=0.10)
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation, and the mean alone hid that distinction across two sweeps."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.84, rel=0.12)
+    assert daf["extra_spikes_p90"] == pytest.approx(3.85, rel=0.12)
     assert daf["extra_spikes_max"] == pytest.approx(10.2, rel=0.15)
     assert daf["extra_spikes_sd"] == pytest.approx(1.54, rel=0.12)
 

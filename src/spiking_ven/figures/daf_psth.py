@@ -18,7 +18,6 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
-from scipy import stats
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -27,45 +26,15 @@ from ..constants import DAF_WINDOW_S  # noqa: E402
 from ..evaluate import (  # noqa: E402
     BIOLOGICAL_TARGETS,
     PEAK_BIN_MS,
-    daf_waveform,
-    encode_stimulus,
+    daf_responders,
+    daf_trials,
 )
 
 __all__ = ["make_psth_figure"]
 
 
-def _responder_psth(ven, encoder, st, *, pre_ms, post_ms, n_trials, seed, n_ista,
-                    mean_rate_hz, alpha=0.02, win=150):
-    """(time_ms, mean change in Hz, SEM, n_responders), binned at PEAK_BIN_MS."""
-    onset = int(DAF_WINDOW_S[0] * 1000)
-    lo, hi = onset - pre_ms, onset + post_ms
-    spk = np.zeros((n_trials, int(ven.n_e), hi - lo), dtype=np.float32)
-    for t in range(n_trials):
-        aud = encode_stimulus(
-            daf_waveform(st["sig_train"], st["sr"], seed=seed + 1000 + t), encoder,
-            sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
-            rms_from=st["sig_train"], mean_rate_hz=mean_rate_hz, n_ista=n_ista,
-            seed=seed + 2000 + t)
-        spk[t] = ven.transform(st["hvc_on"], aud)[:, lo:hi]
-
-    # Responders by the paper's criterion, on the same 150 ms windows the metrics use.
-    p0 = pre_ms
-    pre = spk[:, :, p0 - win:p0].sum(axis=2)
-    post = spk[:, :, p0:p0 + win].sum(axis=2)
-    tval, pval = stats.ttest_rel(post, pre, axis=0)
-    resp = (pval < alpha) & (tval > 0)
-
-    nb = (hi - lo) // PEAK_BIN_MS
-    binned = spk[:, :, :nb * PEAK_BIN_MS].reshape(n_trials, ven.n_e, nb, PEAK_BIN_MS)
-    per_neuron = binned.mean(axis=(0, 3)) * 1000.0            # (n_e, nb) Hz
-    base = per_neuron[:, :p0 // PEAK_BIN_MS].mean(axis=1, keepdims=True)
-    d = (per_neuron - base)[resp]
-    t_ms = (np.arange(nb) * PEAK_BIN_MS) - pre_ms
-    return t_ms, d.mean(axis=0), d.std(axis=0) / np.sqrt(max(d.shape[0], 1)), int(resp.sum())
-
-
 def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=400,
-                     n_trials=20, seed=42, n_ista=50, mean_rate_hz=2.5):
+                     n_trials=20, seed=42):
     # Stay inside the motif. The burst is at DAF_WINDOW_S[0]; running past T_song reaches
     # song offset, where HVC drive stops and E is released from inhibition -- a large
     # rise that has nothing to do with DAF and only invites misreading.
@@ -73,9 +42,21 @@ def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=4
     post_ms = min(post_ms, int(st["T_song"]) - onset - PEAK_BIN_MS)
     pre_ms = min(pre_ms, onset)
 
-    t_ms, mean, sem, n_resp = _responder_psth(
-        ven, encoder, st, pre_ms=pre_ms, post_ms=post_ms, n_trials=n_trials, seed=seed,
-        n_ista=n_ista, mean_rate_hz=mean_rate_hz)
+    # The same trials and responder criterion as evaluate.daf_response.
+    trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed)
+    resp, _, _ = daf_responders(trials)
+    n_resp = int(resp.sum())
+
+    # Per-neuron change from its own pre-onset mean, binned at PEAK_BIN_MS, averaged over
+    # responders.
+    spk = trials[:, :, onset - pre_ms:onset + post_ms]
+    nb = spk.shape[2] // PEAK_BIN_MS
+    binned = spk[:, :, :nb * PEAK_BIN_MS].reshape(n_trials, ven.n_e, nb, PEAK_BIN_MS)
+    per_neuron = binned.mean(axis=(0, 3)) * 1000.0            # (n_e, nb) Hz
+    base = per_neuron[:, :pre_ms // PEAK_BIN_MS].mean(axis=1, keepdims=True)
+    d = (per_neuron - base)[resp]
+    t_ms = (np.arange(nb) * PEAK_BIN_MS) - pre_ms
+    mean, sem = d.mean(axis=0), d.std(axis=0) / np.sqrt(max(d.shape[0], 1))
 
     pk_lo, pk_hi = BIOLOGICAL_TARGETS["responder_peak_latency_ms"]
     paper_peak = BIOLOGICAL_TARGETS["responder_peak_change_hz"]

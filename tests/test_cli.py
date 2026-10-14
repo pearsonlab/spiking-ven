@@ -93,7 +93,7 @@ def test_seed_default_is_shared(mod):
 
 @pytest.mark.parametrize(
     "mod",
-    [cli_train_encoder, cli_train_ven, cli_evaluate, cli_figure],
+    [cli_train_ven, cli_evaluate, cli_figure],
     ids=lambda m: m.__name__.rsplit(".", 1)[-1],
 )
 def test_mean_rate_tracks_the_constant(mod):
@@ -123,10 +123,9 @@ def test_paths_default_to_none_so_the_paths_module_decides(mod, path_dests):
         assert getattr(args, dest) is None, dest
 
 
-def test_encoder_flag_means_one_thing_everywhere():
-    """It used to mean two: a TYPE in train_encoder (patch/causal) and a PATH elsewhere.
-    With one encoder left it is a path in all three consumers, and train_encoder has no
-    such flag at all."""
+def test_encoder_flag_is_a_path_everywhere():
+    """``--encoder`` is the trained encoder's path in every consumer; train_encoder,
+    which produces it, has no such flag."""
     assert "encoder" not in vars(cli_train_encoder.build_parser().parse_args([]))
     for mod in (cli_train_ven, cli_evaluate, cli_figure):
         assert mod.build_parser().parse_args([]).encoder is None
@@ -138,16 +137,14 @@ def test_encoder_flag_means_one_thing_everywhere():
 
 def test_train_encoder_causal_defaults_come_from_the_operating_point():
     a = cli_train_encoder.build_parser().parse_args([])
-    assert a.causal_lambda == C.CAUSAL_LAMBDA
-    assert a.causal_mp_strength == C.CAUSAL_MP_STRENGTH
-    assert a.causal_lr == C.CAUSAL_LR
-    assert a.causal_l1 == C.CAUSAL_L1
-    assert a.causal_smooth == C.CAUSAL_SMOOTH
-    assert a.causal_lr_bias == C.CAUSAL_LR_BIAS
-    assert a.causal_target_usage == C.CAUSAL_TARGET_USAGE
-    assert a.causal_epochs == C.CAUSAL_EPOCHS
-    assert a.causal_n_ista == C.CAUSAL_N_ISTA
-    assert a.causal_no_prune is False, "silent filters are pruned by default"
+    assert a.lam == C.CAUSAL_LAMBDA
+    assert a.mp_strength == C.CAUSAL_MP_STRENGTH
+    assert a.lr == C.CAUSAL_LR
+    assert a.l1 == C.CAUSAL_L1
+    assert a.smooth == C.CAUSAL_SMOOTH
+    assert a.epochs == C.CAUSAL_EPOCHS
+    assert a.n_ista == C.CAUSAL_N_ISTA
+    assert a.no_prune is False, "silent filters are pruned by default"
 
 
 def test_train_encoder_front_end_is_sane():
@@ -168,11 +165,11 @@ def test_train_encoder_front_end_is_sane():
         ("n_e", "N_E"), ("n_i", "N_I"), ("n_hvc", "N_HVC"), ("n_rend", "N_RENDITIONS"),
         ("b_scale", "B_SCALE"), ("c_b", "C_B"),
         ("b_hvc_scale", "B_HVC_SCALE"), ("c_hvc", "C_HVC"),
-        ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"), ("r_e_target", "R_E_TARGET"),
+        ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"),
         ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
-        ("c_jie", "C_JIE"), ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
+        ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
-        ("alpha_theta", "ALPHA_THETA"), ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
+        ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):
@@ -203,19 +200,13 @@ def test_train_ven_delays_track_the_constants():
     assert (a.aud_delay_ms, a.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
 
 
-def test_train_ven_encoder_path_is_optional():
-    p = cli_train_ven.build_parser()
-    assert p.parse_args([]).encoder is None, "None falls back to paths.encoder_npz()"
-    assert p.parse_args(["--encoder", "e.npz"]).encoder == "e.npz"
-
-
 # ------------------------------------------------------------------------ evaluate
 
 
 def test_evaluate_shares_the_operating_point():
     a = cli_evaluate.build_parser().parse_args([])
     assert (a.n_hvc, a.n_ista) == (C.N_HVC, C.N_ISTA)
-    assert (a.t_post, a.t_burn, a.r_e_target) == (C.T_POST, C.T_BURN, C.R_E_TARGET)
+    assert (a.t_post, a.t_burn) == (C.T_POST, C.T_BURN)
     assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True
@@ -231,7 +222,7 @@ def test_figure_shares_the_operating_point():
 def test_figure_views():
     p = cli_figure.build_parser()
     assert p.parse_args([]).view == "raster"
-    for view in ("raster", "rates", "filters", "psth"):
+    for view in ("raster", "psth"):
         assert p.parse_args(["--view", view]).view == view
     with pytest.raises(SystemExit):
         p.parse_args(["--view", "psth-plot"])
@@ -242,48 +233,3 @@ def test_figure_type_coercion():
         ["--seed", "7", "--sr", "22050", "--t-post", "0", "--mean-rate-hz", "3.5"])
     assert (a.seed, a.sr, a.t_post) == (7, 22050, 0)
     assert isinstance(a.mean_rate_hz, float) and a.mean_rate_hz == 3.5
-
-
-# ------------------------------------------------------------------------ dispatch
-
-
-def test_figure_filters_view_needs_no_ven_model(monkeypatch, tmp_path):
-    """The filter diagnostics describe the encoder alone. Requiring a model would make
-    them undrawable before stage 2 has ever run, so this branch must not load one."""
-    pytest.importorskip("matplotlib")
-    import spiking_ven.causal_filters as cf
-    import spiking_ven.figures.causal_filters as figmod
-
-    seen = {}
-
-    def fake_load(path):
-        seen["encoder"] = path
-        return object()
-
-    def fake_make(enc, out_dir, *, tag="", sr=16000, patch_encoder=None):
-        seen["out_dir"], seen["sr"] = out_dir, sr
-        return [tmp_path / "a.png"]
-
-    monkeypatch.setattr(cf.CausalFilterEncoder, "load", staticmethod(fake_load))
-    monkeypatch.setattr(figmod, "make_filter_figures", fake_make)
-    monkeypatch.setattr(cli_figure, "VocalErrorNetV2", _Exploding("VocalErrorNetV2"))
-    monkeypatch.setattr(cli_figure, "load_corpus", _exploding("load_corpus"))
-
-    cli_figure.main(["--view", "filters", "--encoder", "enc.npz",
-                     "--out-dir", str(tmp_path)])
-    assert seen["encoder"] == "enc.npz"
-    assert seen["sr"] == SR
-
-
-def _exploding(name):
-    def _fail(*a, **k):
-        raise AssertionError(f"{name} must not be called on this path")
-    return _fail
-
-
-class _Exploding:
-    def __init__(self, name):
-        self._name = name
-
-    def load(self, *a, **k):
-        raise AssertionError(f"{self._name}.load must not be called on this path")

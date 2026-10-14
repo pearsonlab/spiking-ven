@@ -1,47 +1,39 @@
 """Error-signal metrics for a trained vocal error network.
 
-The K1-K4 family from Mandelblat-Cerf et al. 2014 (Fig. 7/8), which is how "did the
-network learn to cancel the bird's own song?" gets turned into numbers:
+How "did the network learn to cancel the bird's own song?" is turned into numbers,
+against Mandelblat-Cerf et al. 2014 (eLife 3:e02152, Figs. 7/8):
 
-===== ============================================ ==========================
-K1     correct song + HVC, mean E rate              target mean 7.7 Hz, SD 8.7
-K2     white noise at DAF amplitude + HVC           pop. avg ~16 Hz; responders ~28 Hz
-K3     K2 / K1                                      pop. avg ~2.1x; responders ~3.6x
-K4     (time-reversed motif + HVC) / K1             > 1x
-===== ============================================ ==========================
+- :func:`daf_metrics` -- E rate per rendition: K1 (trained song + HVC), K4 (time-reversed
+  motif + HVC, as a ratio to K1, target > 1x), and the DAF stimulus without HVC.
+- :func:`daf_response` -- the DAF response as the experiment measures it: responders by a
+  per-neuron paired t-test, their peak, onset latency, duration and extra spikes.
 
-The model is a **responder-only** population -- every excitatory unit receives identical
-auditory drive, so there is no non-responder subpopulation to average in. The
-responder-only targets are therefore the relevant ones.
-
-What K2/K3 measure
-------------------
-The response to white noise presented at ``DAF_WN_AMPLITUDE`` times the song's RMS,
-against the response to the song -- level difference included.
-
-This was not always so. The encode path used to scale every signal to the encoder's
-reference RMS *individually*, which divided ``DAF_WN_AMPLITUDE`` straight back out and
-left K2/K3 reporting a pure spectrotemporal mismatch at matched drive. The stimulus set
-is now normalised against one reference (the song) instead, so relative level survives
-into the cochleagram. ``of_to_spikes`` still rate-calibrates, but on the song window via
-``calibrate_on``, so it no longer flattens the levels either.
-
-This lives here, as a function returning a dict, rather than as a block of prints at the
-bottom of a training script, so the same numbers can be asserted in tests and recomputed
-for a saved model without retraining.
+Every stimulus is built by :func:`build_stimuli`, normalised against one reference (the
+song) at both the waveform and the spike-rate stage, so relative level -- the DAF noise is
+5.6x the song's RMS -- reaches the network. The trainer, the CLI, the tests and the
+figures all use it, so they cannot drift apart.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from .constants import AUD_MEAN_RATE_HZ  # noqa: F401  (re-exported default)
-from .constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from .common import acts_to_spikes, generate_hvc_spikes
+from .constants import (
+    AUD_MEAN_RATE_HZ,
+    DAF_WINDOW_S,
+    DAF_WN_AMPLITUDE,
+    KERNEL_WIDTH_MS,
+    PEAK_RATE_HZ,
+)
+from .corpus import load_corpus
 
 __all__ = [
     "daf_waveform",
     "encode_acts",
     "encode_stimulus",
+    "daf_trials",
+    "daf_responders",
     "daf_response",
     "format_responders",
     "daf_metrics",
@@ -66,8 +58,8 @@ BIOLOGICAL_TARGETS = {
     #: Compare ``baseline_hz_all`` against this, NEVER ``baseline_hz_responders``.
     #: Responders are selected by a paired t-test for post > pre, which preferentially
     #: picks neurons that happened to be quiet in the pre-window, so their baseline is
-    #: biased low by the selection itself -- measured here 0.63 Hz against the
-    #: population's 3.20 Hz, a factor of 5. The paper applies the same criterion, so the
+    #: biased low by the selection itself -- measured here ~0.6 Hz against the
+    #: population's ~2.2 Hz. The paper applies the same criterion, so the
     #: bias is shared and the responder-vs-responder comparisons stay fair; it just means
     #: the responder baseline is not an estimate of anything's firing rate.
     "singing_rate_hz": (1.0, 10.0),
@@ -83,8 +75,7 @@ BIOLOGICAL_TARGETS = {
     #: for the latency/duration z-tests, the figure legends say only "averaged PSTH", and
     #: no smoothing is described anywhere in the paper (no Gaussian, kernel or
     #: convolution appears in the text) although the published trace looks smoother than
-    #: 2 ms binning would give. Measured on this model the peak falls 87 -> 81 -> 67 -> 57
-    #: Hz going from 1 to 2 to 10 to 20 ms bins, so any ratio against 20 Hz carries an
+    #: 2 ms binning would give. The model's peak falls steadily as the bins widen, so any ratio against 20 Hz carries an
     #: unknown binning mismatch. Compare ``extra_spikes_responders`` instead: a spike
     #: count is invariant to binning, and the paper's own bootstrap used one ("the maximal
     #: spike count over 150 ms").
@@ -105,8 +96,6 @@ BIOLOGICAL_TARGETS = {
     #: of 90 +/- 43 ms" (mean, SD).
     "response_latency_ms": (23.0, 12.0),
     "response_duration_ms": (90.0, 43.0),
-    #: The burst length the responder statistics were measured with.
-    "noise_burst_ms": 50.0,
     "reversed_min_ratio": 1.0,  # direction only
 
     # --- auditory input population ------------------------------------------------
@@ -119,67 +108,16 @@ BIOLOGICAL_TARGETS = {
     # The broad-spiking population is the sparse, selective, background-invariant one, so
     # it is what this encoder models -- not the dense upstream stations.
     "aud_song_rate_hz": (2.4, 2.7),
-    #: "while more than 70% of neurons in upstream auditory areas fired during an average
-    #: 63 ms window, only 5% of BS neurons were active during the same epoch" (Fig 3B).
-    #: 63 ms is the average duration of a zebra finch song note.
-    "aud_pop_active_frac": 0.05,
-    "aud_pop_window_ms": 63,
-    #: Selectivity: BS neurons were driven by 6.9 +/- 5.2 of 15 songs, against 14.4 +/- 2.5
-    #: (midbrain), 14.7 +/- 1.9 (primary AC), 14.96 +/- 0.21 (higher-level AC NS).
-    "aud_songs_driving_of_15": (6.9, 5.2),
-    # NOTE: the paper reports no intra-burst or instantaneous rate for these neurons, so
-    # there is no target for burst strength here. Fig 3A's neurogram tops out at 67
-    # spikes/s, but that is a trial-averaged population display, not an instantaneous rate.
 }
-
-# The magnitude gap is TWO errors, not one, and they partly cancel.
-#
-# peak = extra spikes / effective width, so decomposing: the model is 4.8x too TALL
-# (96 vs ~20 Hz) and 0.7-0.9x too NARROW (effective width 34.8 ms against the bird's
-# 39-50 ms under decaying shapes). That is why the peak excess (4.8x) exceeds the spike
-# excess (3.3-3.7x) -- they differ by exactly the width ratio.
-#
-# The width error is confirmed independently: measured response duration is 55 ms against
-# 90 +/- 43 ms, a ratio of 0.61, from the paper's own z-test criterion rather than from
-# any of this arithmetic. Two unrelated routes agreeing is what makes it credible.
-#
-# Consequence for any fix: a uniform gain reduction is the WRONG SHAPE. Scaling the
-# response down would bring the peak to ~20 Hz but leave it ~30% too narrow, landing the
-# spike count near 0.7 against a bird at ~0.9 -- overshooting into too FEW spikes. What is
-# needed is 3.7x fewer spikes AND 1.3x more width. Spacing spikes out without removing
-# them barely helps: it would move the peak only 96 -> 74 Hz and leave the count untouched.
-#
-# Already ruled out on this basis: JEI_scale and reduced auditory drive are uniform gain
-# changes; spike-frequency adaptation shortened duration further (65 -> 55 ms across its
-# sweep), buying peak reduction by making the width error worse.
-#
-# NOT a way out: lengthening the refractory period to 3-4 ms. The absolute refractory is
-# 1-2 ms (sodium h-gate recovery), and zebra finch RA projection neurons have a singing
-# ISI histogram sharply peaked at 2 ms with intra-burst rates to 455-700 Hz
-# (doi:10.1523/JNEUROSCI.3036-04.2005), which a 3-4 ms block would make impossible. 2 ms
-# is the measured value, not a conservative choice with room in it.
-
-# Superseded, and wrong: a previous table listed 7.7 +/- 8.7 Hz for singing (not a number
-# the paper states) and 28 Hz for responders citing Fig 8E (which plots a *change* in rate
-# peaking near 20 Hz, not an absolute rate). The 2.1x and 3.6x "targets" were quotients of
-# those two, computed here rather than reported by the paper. Do not reinstate them.
-
 
 def daf_waveform(sig_train, sr: int, *, seed: int = 42,
                  amplitude: float = DAF_WN_AMPLITUDE,
                  window_s: tuple[float, float] = DAF_WINDOW_S):
     """The DAF stimulus: the song, with white noise mixed into one window.
 
-    Defined once, here, and used by both the metrics and the figure. They used to
-    build different stimuli under the same name -- the metrics scored *pure* white
-    noise for the whole rendition, with no song in it at all, while the figure drew
-    song plus a noise burst. Only the latter is the DAF paradigm the biological
-    numbers come from: the bird sings, and noise is played back during singing.
-
-    Returns the waveform; the caller encodes it.
+    This is the paradigm the biological numbers come from: the bird sings, and noise is
+    played back during singing. Returns the waveform; the caller encodes it.
     """
-    import numpy as np
-
     sig = np.asarray(sig_train, dtype=np.float64)
     rms = float(np.sqrt(np.mean(sig ** 2)))
     noise = np.random.default_rng(seed).standard_normal(len(sig)) * rms * amplitude
@@ -195,16 +133,15 @@ def daf_waveform(sig_train, sr: int, *, seed: int = 42,
     return out
 
 
-def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from, divisive_gain=True):
-    """Waveform -> (n_channels, T) activations, dispatching on the encoder type.
+def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from):
+    """Waveform -> (n_channels, T) activations at 1 ms resolution.
 
     Every activation in this module goes through here, so the metrics, the responder
     analysis and the figure cannot normalise differently from one another.
     """
     sig = np.asarray(sig, dtype=np.float64)
     return encoder.encode_signal(sig, sr=sr, n_ista=n_ista, upsample_to_ms=True,
-                                 T_out_ms=T_out_ms, rms_from=rms_from,
-                                 divisive_gain=divisive_gain)
+                                 T_out_ms=T_out_ms, rms_from=rms_from)
 
 
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
@@ -217,61 +154,75 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     from the song: the waveform scaling from ``rms_from``, the spike rate from
     ``acts_train``.
     """
-    from .common import acts_to_spikes
-
     acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista, T_out_ms=T_out_ms,
                        rms_from=rms_from)
     return acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
                         calibrate_on=acts_train).astype(np.float32)
 
 
-def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
-                 n_trials: int = 20, window_ms: int = 150, alpha: float = 0.02,
-                 seed: int = 42, mean_rate_hz: float = AUD_MEAN_RATE_HZ, n_ista: int = 50) -> dict:
+def daf_trials(ven, encoder, st: dict, *, n_trials: int = 20, seed: int = 42):
+    """E spikes for ``n_trials`` DAF renditions: ``(n_trials, n_e, T_rend)`` float32.
+
+    Trials are renditions with independent noise draws; the song and the HVC drive are
+    fixed, as in the experiment. ``st`` is :func:`build_stimuli`'s output, so the trials
+    are encoded exactly like every other stimulus.
+    """
+    out = np.zeros((n_trials, int(ven.n_e), st["T_rend"]), dtype=np.float32)
+    for t in range(n_trials):
+        aud = encode_stimulus(
+            daf_waveform(st["sig_train"], st["sr"], seed=seed + 1000 + t), encoder,
+            sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
+            rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
+            n_ista=st["n_ista"], seed=seed + 2000 + t,
+        )
+        out[t] = ven.transform(st["hvc_on"], aud)
+    return out
+
+
+def daf_responders(trials, *, window_ms: int = 150, alpha: float = 0.02):
+    """Per-neuron responders by the paper's criterion. Returns ``(resp, pre, post)``.
+
+    Spike counts in a ``window_ms`` window before and after burst onset, compared per
+    neuron with a paired t-test across trials; a unit responds at ``p < alpha`` with an
+    increase. ``pre``/``post`` are the ``(n_trials, n_e)`` counts.
+    """
+    from scipy import stats
+
+    onset = int(DAF_WINDOW_S[0] * 1000)
+    W = int(window_ms)
+    pre = trials[:, :, onset - W:onset].sum(axis=2).astype(np.float64)
+    post = trials[:, :, onset:onset + W].sum(axis=2).astype(np.float64)
+    tval, pval = stats.ttest_rel(post, pre, axis=0)
+    return (pval < alpha) & (tval > 0), pre, post
+
+
+def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int = 150,
+                 alpha: float = 0.02, seed: int = 42) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Replaces averaging the excitatory rate over a whole rendition, which cannot see a
     50 ms burst: diluted ~20:1 in a 1048 ms rendition, that number is dominated by the
     cancelled song and lands on top of the reversed-song rate.
 
-    Follows Mandelblat-Cerf et al. 2014: spike counts in a ``window_ms`` window before
-    and after burst onset, compared per neuron with a paired t-test across trials, and
-    a unit counts as a responder at ``p < alpha`` with an increase. Trials are
-    renditions with independent noise draws; the song and the HVC drive are fixed, as
-    in the experiment.
+    Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
+    :func:`daf_responders`.
     """
     from scipy import stats
 
     onset = int(DAF_WINDOW_S[0] * 1000)
     W = int(window_ms)
+    trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed)
     n_e = int(ven.n_e)
-    pre = np.zeros((n_trials, n_e))
-    post = np.zeros((n_trials, n_e))
-    psth = np.zeros((n_trials, n_e, 2 * W), dtype=np.float32)
-    for t in range(n_trials):
-        aud = encode_stimulus(
-            daf_waveform(sig_train, sr, seed=seed + 1000 + t), encoder,
-            sr=sr, T_out_ms=T_out_ms, acts_train=acts_train, rms_from=sig_train,
-            mean_rate_hz=mean_rate_hz, n_ista=n_ista, seed=seed + 2000 + t,
-        )
-        sE = ven.transform(hvc_on, aud)
-        pre[t] = sE[:, onset - W:onset].sum(axis=1)
-        post[t] = sE[:, onset:onset + W].sum(axis=1)
-        psth[t] = sE[:, onset - W:onset + W] * 1000
-
-    tval, pval = stats.ttest_rel(post, pre, axis=0)
-    resp = (pval < alpha) & (tval > 0)
-    to_hz = 1000.0 / W
-    base = pre.mean(axis=0) * to_hz
-    inc = (post - pre).mean(axis=0) * to_hz
+    resp, pre, post = daf_responders(trials, window_ms=W, alpha=alpha)
+    psth = trials[:, :, onset - W:onset + W] * 1000
+    base = pre.mean(axis=0) * (1000.0 / W)
     nan = float("nan")
 
     # The paper's ~20 Hz peak is the trial average over its SEVEN RESPONDERS (Fig 8E,
     # n=7), so the model's peak has to be averaged over responders too. It used to average
     # over every unit, which mixes the non-responders' flat PSTHs into a number compared
     # against a responders-only one -- and understates the gap, since responders are
-    # roughly half the population here. The all-unit value is kept separately rather than
-    # dropped, because it is the right denominator for anything about the population.
+    # roughly half the population here.
     #
     # Binned at PEAK_BIN_MS, the only bin width the paper states (2 ms, for its latency
     # and duration z-tests). This was computed at 1 ms, finer than anything the paper
@@ -287,7 +238,6 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         return float(mb.max() - base), int(np.argmax(mb) * PEAK_BIN_MS - W)
 
     peak_resp, lat_resp = _peak(resp)
-    peak_all, _ = _peak(np.ones(n_e, dtype=bool))
 
     # Transient or step: the responder PSTH 100-150 ms after onset, relative to its peak.
     def _late_over_peak(mask):
@@ -330,7 +280,6 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         "responder_fraction": float(resp.mean()),
         "baseline_hz_all": float(base.mean()),
         "baseline_hz_responders": float(base[resp].mean()) if resp.any() else nan,
-        "increase_hz_responders": float(inc[resp].mean()) if resp.any() else nan,
         #: Extra spikes per neuron per burst, over the analysis window. The directly
         #: interpretable form: the paper's responder gains ~1-2 spikes when it hears the
         #: distortion, on a baseline of well under one spike in the same window.
@@ -345,14 +294,11 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
                              if resp.any() else nan),
         "extra_spikes_max": (float((post - pre)[:, resp].mean(axis=0).max())
                              if resp.any() else nan),
-        "increase_hz_all": float(inc.mean()),
         "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
-        "peak_change_hz_all": peak_all,
         "peak_latency_ms": lat_resp,
         "late_over_peak": late_over_peak,
         "latency_ms": float(np.mean(lats)) if lats else nan,
         "duration_ms": float(np.mean(durs)) if durs else nan,
-        "n_with_latency": len(lats),
         "window_ms": W,
         "burst_ms": float((DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000),
     }
@@ -380,8 +326,6 @@ def format_responders(r: dict) -> str:
         f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7; both at "
         f"{PEAK_BIN_MS} ms bins on our side, UNKNOWN on theirs -- bin-width dependent, "
         f"not a hard target)",
-        f"  peak change, all units    {r['peak_change_hz_all']:7.2f} Hz      "
-        f"(no paper equivalent; responders only are plotted there)",
         f"  latency, responders       {r['latency_ms']:7.1f} ms      "
         f"paper {lat:.0f} +/- {lat_sd:.0f} ms  (onset: first of 5 consecutive 2 ms bins)",
         f"  duration, responders      {r['duration_ms']:7.1f} ms      "
@@ -408,7 +352,7 @@ def _rate_hz(ven, hvc, aud) -> float:
 
 
 def daf_metrics(ven, *, hvc_on, hvc_off, aud_correct, aud_daf, aud_reversed) -> dict:
-    """Compute K1-K4 for a trained network.
+    """Rendition-level E rates for a trained network: K1, K4 and the no-HVC DAF control.
 
     Parameters
     ----------
@@ -416,29 +360,26 @@ def daf_metrics(ven, *, hvc_on, hvc_off, aud_correct, aud_daf, aud_reversed) -> 
     hvc_on       : (n_hvc, T) HVC premotor spikes -- the singing condition
     hvc_off      : (n_hvc, T) zeros -- the not-singing control
     aud_correct  : (n_aud, T) spikes for the trained song
-    aud_daf      : (n_aud, T) spikes for white noise at DAF amplitude
+    aud_daf      : (n_aud, T) spikes for the DAF stimulus (song + noise burst)
     aud_reversed : (n_aud, T) spikes for the time-reversed motif
 
     Returns
     -------
-    dict with k1, k2, k2_no_hvc, k4_rate (all Hz) and the k3, k4 ratios.
+    dict with k1, k2_no_hvc, k4_rate (all Hz) and the k4 ratio.
     """
     k1 = _rate_hz(ven, hvc_on, aud_correct)
-    k2 = _rate_hz(ven, hvc_on, aud_daf)
     k2_no_hvc = _rate_hz(ven, hvc_off, aud_daf)
     k4_rate = _rate_hz(ven, hvc_on, aud_reversed)
     nan = float("nan")
     return {
         "k1": k1,
-        "k2": k2,
         "k2_no_hvc": k2_no_hvc,
         "k4_rate": k4_rate,
-        "k3": (k2 / k1) if k1 > 0 else nan,
         "k4": (k4_rate / k1) if k1 > 0 else nan,
     }
 
 
-def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
+def format_metrics(m: dict) -> str:
     """Render the rendition-level rates from :func:`daf_metrics`.
 
     The DAF rate is deliberately NOT reported here. Averaged over a whole rendition it
@@ -447,8 +388,6 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
     """
     t = BIOLOGICAL_TARGETS
     lo, hi = t["singing_rate_hz"]
-    sanity = (f"  (sanity; homeostasis target {r_e_target:.0f} Hz)"
-              if r_e_target is not None else "")
     return "\n".join([
         "Excitatory rate per rendition (Mandelblat-Cerf 2014):",
         f"  trained song, singing     {m['k1']:6.2f} Hz   paper {lo:.0f}-{hi:.0f} Hz "
@@ -456,7 +395,7 @@ def format_metrics(m: dict, *, r_e_target: float | None = None) -> str:
         f"  reversed song, singing    {m['k4_rate']:6.2f} Hz",
         f"  reversed / trained        {m['k4']:6.2f}x     target > "
         f"{t['reversed_min_ratio']:.0f}x",
-        f"  DAF stimulus, not singing {m['k2_no_hvc']:6.2f} Hz{sanity}",
+        f"  DAF stimulus, not singing {m['k2_no_hvc']:6.2f} Hz",
     ])
 
 # ---------------------------------------------------------------------------
@@ -479,25 +418,17 @@ def build_stimuli(
     n_hvc: int = 60,
     mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     n_ista: int = 50,
-    #: Absolute refractory on the GENERATED input populations (auditory and HVC). Pass 0
-    #: to reproduce a model trained before the refractory existed -- it changes the input
-    #: spike trains, so a pinned artifact needs the conditions it was built under.
-    t_refr_ms: float = 2.0,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
 
-    Returns a dict with the auditory spike arrays (``aud_correct``, ``aud_reversed``,
-    ``aud_daf``, plus the full ``correct_pool``), the HVC inputs (``hvc_on``,
-    ``hvc_off``, ``hvc_burn`` and its padded ``aud_burn``), and the bookkeeping the
-    caller needs (``T_song``, ``T_rend``, ``train_idx``, ``fwd_rev_corr``, ``n_kernels``).
+    Returns a dict with the waveforms (``sig_train``, ``sig_reversed``, ``sig_daf``),
+    their auditory spike arrays (``aud_correct``, ``aud_reversed``, ``aud_daf``, plus the
+    full ``correct_pool``), the HVC inputs (``hvc_on``, ``hvc_off``, ``hvc_burn`` and its
+    padded ``aud_burn``), and the bookkeeping the caller needs (``T_song``, ``T_rend``,
+    ``train_idx``, ``fwd_rev_corr``, ``n_kernels``, and the encoding settings
+    ``mean_rate_hz``/``n_ista`` so later encodes match).
     """
-    import numpy as np
-
-    from .common import generate_hvc_spikes
-    from .corpus import load_corpus
-    from .common import acts_to_spikes
-
     corpus = load_corpus(motifs_path)
     n_motifs = corpus.n_motifs
     T_song = corpus.T_song
@@ -510,28 +441,24 @@ def build_stimuli(
     # The encoder path normalises TWICE, and both have to share one reference or the
     # level difference does not reach the network:
     #   encode_signal scales the waveform  -> rms_from=sig_train
-    #   of_to_spikes  scales the spike rate -> calibrate_on=acts_train
+    #   acts_to_spikes scales the spike rate -> calibrate_on=acts_train
     # Fixing only the first restores level in the activations and then flattens it again
     # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
     # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
     acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=n_ista,
                              T_out_ms=T_rend, rms_from=sig_train)
 
-    def sig_to_aud(sig, seed_offset: int, acts=None):
-        if acts is None:
-            acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
-                               T_out_ms=T_rend, rms_from=sig_train)
-        spk = acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
-                           t_refr_ms=t_refr_ms,
-                           seed=seed + seed_offset, calibrate_on=acts_train)
-        return spk.astype(np.float32)
+    def sig_to_aud(sig, seed_offset: int):
+        return encode_stimulus(sig, encoder, sr=sr, T_out_ms=T_rend, acts_train=acts_train,
+                               rms_from=sig_train, mean_rate_hz=mean_rate_hz,
+                               n_ista=n_ista, seed=seed + seed_offset)
 
     if verbose:
         print(f"T_song={T_song} ms  T_rend={T_rend} ms  train_motif={train_idx}  "
               f"rms={rms_train:.4f}")
         print(f"Building correct training pool ({n_motifs} motifs)...")
 
-    aud_correct = sig_to_aud(sig_train, 10, acts=acts_train)
+    aud_correct = sig_to_aud(sig_train, 10)
     correct_pool = [aud_correct]                 # index 0 is the template motif
     for ci in range(n_motifs):
         if ci == train_idx:
@@ -551,10 +478,9 @@ def build_stimuli(
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))
     del acts_rev, fv, rv
 
-    # Song with noise mixed into one window -- the same construction the figure draws,
-    # from the same function. seed + 2 matches the figure's stream, so the two describe
-    # the identical stimulus rather than two draws of a similar one.
-    aud_daf = sig_to_aud(daf_waveform(sig_train, sr, seed=seed + 2), 20)
+    # Song with noise mixed into one window. The figure draws these same arrays.
+    sig_daf = daf_waveform(sig_train, sr, seed=seed + 2)
+    aud_daf = sig_to_aud(sig_daf, 20)
 
     if verbose:
         for label, arr in (("training motif", aud_correct), ("reversed motif", aud_reversed),
@@ -567,7 +493,6 @@ def build_stimuli(
 
     T_total_burn = t_burn + T_rend
     hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
-                                   t_refr_ms=t_refr_ms,
                                    T_song=T_song, T_burn=t_burn, T_post=t_post,
                                    peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
                                    seed=seed)
@@ -575,7 +500,6 @@ def build_stimuli(
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
     hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
-                                 t_refr_ms=t_refr_ms,
                                  T_burn=0, T_post=t_post, peak_rate=PEAK_RATE_HZ,
                                  kernel_width=KERNEL_WIDTH_MS, seed=seed)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
@@ -594,7 +518,11 @@ def build_stimuli(
         "train_idx": train_idx,
         "acts_train": acts_train,
         "sig_train": sig_train,
+        "sig_reversed": sig_rev,
+        "sig_daf": sig_daf,
         "sr": sr,
+        "mean_rate_hz": mean_rate_hz,
+        "n_ista": n_ista,
         "fwd_rev_corr": fwd_rev_corr,
         "n_kernels": n_kernels,
         "n_motifs": n_motifs,

@@ -1,17 +1,13 @@
-"""``sven-evaluate`` -- recompute the K1-K4 error metrics for a saved model.
+"""``sven-evaluate`` -- recompute the error metrics for a saved model.
 
-Loads a trained network and re-derives the Mandelblat-Cerf metrics without retraining,
-which is what you want when checking a model you were handed, or after changing the
-stimulus construction.
+Loads a trained network and re-derives the Mandelblat-Cerf metrics (K1, K4 and the DAF
+response) without retraining. Fully seeded: the same model file and seed give the same
+numbers every time.
 
-Because the network is fully seeded, this is reproducible: the same model file and seed
-give the same numbers every time.
-
-Expect these to differ slightly (well inside the test tolerances) from the metrics printed
-at the end of training. Nothing has changed about the model: training-time metrics are
+Expect them to differ slightly from the metrics printed at the end of training: those are
 computed with the simulation noise stream already advanced by hundreds of renditions,
-whereas a freshly loaded model starts that stream at position zero. Same distribution,
-different draw.
+whereas a freshly loaded model starts that stream at zero. Same distribution, different
+draw.
 """
 
 from __future__ import annotations
@@ -20,7 +16,7 @@ import argparse
 import json
 
 from ..causal_filters import CausalFilterEncoder
-from ..constants import SR, N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST
+from ..constants import AUD_MEAN_RATE_HZ, N_HVC, N_ISTA, SR, T_BURN, T_POST
 from ..evaluate import (
     build_stimuli,
     daf_metrics,
@@ -36,17 +32,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=None, help="trained VEN .npz")
-    p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
+    p.add_argument("--encoder", default=None, help="trained causal filter bank .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--n-hvc", type=int, default=N_HVC)
     p.add_argument("--t-post", type=int, default=T_POST)
     p.add_argument("--t-burn", type=int, default=T_BURN)
-    p.add_argument("--mean-rate-hz", type=float, default=2.5)
+    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ)
     p.add_argument("--n-ista", type=int, default=N_ISTA)
-    p.add_argument("--r-e-target", type=float, default=R_E_TARGET,
-                   help="only used to annotate the no-HVC sanity line")
     p.add_argument("--n-trials", type=int, default=20,
                    help="renditions with independent noise draws for the DAF response")
     p.add_argument("--json", action="store_true", help="emit the metrics as JSON")
@@ -78,16 +72,14 @@ def main(argv: list[str] | None = None) -> None:
     # The DAF number that means something: a windowed, per-neuron responder measurement
     # rather than an excitatory rate averaged over a whole rendition, which cannot see a
     # 50 ms burst.
-    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=st["hvc_on"],
-                     acts_train=st["acts_train"], sr=st["sr"], T_out_ms=st["T_rend"],
-                     n_trials=args.n_trials, seed=args.seed)
+    r = daf_response(ven, encoder, st, n_trials=args.n_trials, seed=args.seed)
 
     if args.json:
         print(json.dumps({**m, "daf_response": r, "fwd_rev_corr": st["fwd_rev_corr"],
                           "train_idx": st["train_idx"], "model": model_path}, indent=2))
     else:
         print()
-        print(format_metrics(m, r_e_target=args.r_e_target))
+        print(format_metrics(m))
         print()
         print(format_responders(r))
         print(f"\n  encoder forward/reversed correlation: {st['fwd_rev_corr']:.4f}")

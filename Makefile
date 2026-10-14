@@ -3,7 +3,7 @@ OUT  ?= outputs
 DATA ?= data
 SEED ?= 42
 
-.PHONY: all figure rates verify manifest test smoke clean-artifacts
+.PHONY: all figure psth verify manifest test test-repro smoke clean-artifacts
 
 all: figure
 
@@ -15,26 +15,20 @@ $(OUT)/motifs.npz:
 $(OUT)/causal_encoder.npz: $(OUT)/motifs.npz
 	uv run sven-train-encoder --motifs $< --out $@ --seed $(SEED)
 
-## 3. Vocal error network -> outputs/of_ven_model_default.npz
+## 3. Vocal error network -> outputs/ven_model.npz
 ##    No tuning flags: the operating point is the default, and lives in constants.py.
-$(OUT)/of_ven_model_default.npz: $(OUT)/causal_encoder.npz $(OUT)/motifs.npz
+$(OUT)/ven_model.npz: $(OUT)/causal_encoder.npz $(OUT)/motifs.npz
 	uv run sven-train-ven --encoder $(OUT)/causal_encoder.npz --motifs $(OUT)/motifs.npz \
 		--out $@ --seed $(SEED)
 
-## 4. The cancellation figure (runs the whole chain if needed).
-figure: $(OUT)/of_ven_model_default.npz
+## 4. Figures (runs the whole chain if needed): the cancellation figure, then the DAF
+##    response time course against the Fig 8E reading.
+figure: $(OUT)/ven_model.npz psth
 	uv run --extra plots sven-figure --model $< --encoder $(OUT)/causal_encoder.npz \
 		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
 
-## The DAF response time course, against the Fig 8E reading.
-psth: $(OUT)/of_ven_model_default.npz
+psth: $(OUT)/ven_model.npz
 	uv run --extra plots sven-figure --view psth --model $< \
-		--encoder $(OUT)/causal_encoder.npz \
-		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
-
-## Supplementary population-rate view.
-rates: $(OUT)/of_ven_model_default.npz
-	uv run --extra plots sven-figure --view rates --model $< \
 		--encoder $(OUT)/causal_encoder.npz \
 		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
 
@@ -53,13 +47,14 @@ test:
 test-repro:
 	uv run --extra dev --extra plots pytest -m slow -v
 
-## Fast end-to-end smoke run (tiny encoder, few renditions) -- what CI runs.
+## Fast end-to-end smoke run (tiny encoder, few renditions).
 smoke: $(OUT)/motifs.npz
 	uv run sven-train-encoder --motifs $(OUT)/motifs.npz --out $(OUT)/smoke_encoder.npz \
-		--n-bases 16 --n-epochs 5 --seed $(SEED)
+		--n-bases 16 --epochs 5 --seed $(SEED)
 	uv run sven-train-ven --encoder $(OUT)/smoke_encoder.npz --motifs $(OUT)/motifs.npz \
 		--out $(OUT)/smoke_ven.npz --n-rend 3 --seed $(SEED)
 
 clean-artifacts:
-	rm -f $(OUT)/causal_encoder.npz $(OUT)/of_ven_model_default.npz \
-		$(OUT)/encoding_comparison*.png $(OUT)/encoding_comparison*.pdf
+	rm -f $(OUT)/causal_encoder.npz $(OUT)/ven_model.npz \
+		$(OUT)/ven_model_traces.npz $(OUT)/daf_psth*.p* \
+		$(OUT)/cancellation.p*

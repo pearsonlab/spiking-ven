@@ -30,12 +30,11 @@ def test_noise_is_nonzero_by_default():
 
 
 def test_same_seed_gives_identical_training():
-    hvc, aud, T_song, T_post = _tiny_inputs()
+    hvc, aud, _, _ = _tiny_inputs()
     out = []
     for _ in range(2):
         ven = _tiny_net(42)
-        ven.fit(hvc, aud, n_renditions=1, T_song=T_song, T_burn=0, T_post=T_post,
-                verbose=False)
+        ven.fit(hvc, aud)
         out.append(ven.JIE.copy())
     np.testing.assert_array_equal(out[0], out[1])
 

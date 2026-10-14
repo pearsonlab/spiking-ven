@@ -60,13 +60,13 @@ def test_encoder_then_network_end_to_end(tmp_path):
 
     train_encoder.main([
         "--motifs", str(motifs), "--out", str(encoder_out),
-        "--n-bases", "8", "--causal-epochs", "2", "--k-frames", "8",
+        "--n-bases", "8", "--epochs", "2", "--k-frames", "8",
         "--n-coch-ch", "20", "--seed", "42",
         # Synthetic audio at the shipped lambda produces almost no activations in two
         # epochs, so nothing drives E and JIE never leaves zero. Loosening the code
         # sparsity here keeps the smoke run exercising the whole chain; it is not a
         # statement about the operating point, which lives in constants.py.
-        "--causal-lambda", "0.02",
+        "--lambda", "0.02",
     ])
     assert encoder_out.exists(), "encoder artifact not written"
 
@@ -81,7 +81,7 @@ def test_encoder_then_network_end_to_end(tmp_path):
     tr = np.load(tmp_path / "ven_traces.npz")
     # Not asserting biology on synthetic audio -- only that the pipeline produced
     # finite, structurally sane numbers.
-    for key in ("rc", "rn", "jie", "theta"):
+    for key in ("rc", "rn", "jie"):
         assert tr[key].shape == (2,), f"{key} should have one entry per rendition"
         assert np.isfinite(tr[key]).all(), f"{key} contains non-finite values"
     for key in ("k1", "rc_hvc"):

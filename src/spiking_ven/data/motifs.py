@@ -1,10 +1,10 @@
 """Segment and DTW-align R469 song motifs into ``motifs.npz``.
 
-Scans every WAV + Evsonganaly ``.not.mat`` pair in ``--wav_dir``, finds each complete
+Scans every WAV + Evsonganaly ``.not.mat`` pair in ``--wav-dir``, finds each complete
 ``abcded`` motif run, resamples to 16 kHz, DTW-aligns all renditions to a common template
 (the highest-RMS rendition), and writes the aligned corpus.
 
-This is the single upstream artifact for everything else: the sparse encoder trains on it
+This is the single upstream artifact for everything else: the causal encoder trains on it
 and the vocal error network is trained and evaluated against it.
 
 Output keys: ``audio``, ``lengths``, ``sr``, ``syl_on``, ``syl_off``, ``song_Ts``,

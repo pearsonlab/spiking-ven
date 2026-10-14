@@ -68,13 +68,6 @@ def test_hvc_spikes_are_binary_and_seed_deterministic():
     assert a.sum() > 0, "HVC population should emit spikes"
 
 
-def _two_levels(sr=16000, dur_s=0.2, gain=5.6, seed=0):
-    """The same waveform at two levels -- the DAF manipulation in miniature."""
-    rng = np.random.default_rng(seed)
-    quiet = rng.standard_normal(int(sr * dur_s)) * 0.01
-    return quiet, quiet * gain
-
-
 def test_every_subpackage_is_importable():
     """Guard against a subpackage being missing from the distribution.
 
@@ -97,7 +90,6 @@ def test_every_subpackage_is_importable():
         "spiking_ven.data",
         "spiking_ven.data.download",
         "spiking_ven.data.motifs",
-        "spiking_ven.data.r469",
         "spiking_ven.cli",
         "spiking_ven.cli.prep_data",
         "spiking_ven.cli.train_encoder",
@@ -116,7 +108,7 @@ def test_figures_subpackage_is_importable():
     for name in (
         "spiking_ven.figures",
         "spiking_ven.figures.encoding_comparison",
-        "spiking_ven.figures.encoding_rates",
+        "spiking_ven.figures.daf_psth",
     ):
         importlib.import_module(name)
 
@@ -127,7 +119,7 @@ def test_importing_the_figures_does_not_create_directories(tmp_path):
     out = subprocess.run(
         [sys.executable, "-c",
          "import os, spiking_ven.figures.encoding_comparison, "
-         "spiking_ven.figures.encoding_rates; print(os.path.exists('outputs'))"],
+         "spiking_ven.figures.daf_psth; print(os.path.exists('outputs'))"],
         cwd=tmp_path, capture_output=True, text=True, check=True,
     )
     assert out.stdout.strip() == "False", "importing a figure module created outputs/"

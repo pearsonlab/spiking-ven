@@ -35,8 +35,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from .constants import AUD_MEAN_RATE_HZ  # noqa: F401  (re-exported default)
-from .constants import DAF_WINDOW_S, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
+from .common import acts_to_spikes, generate_hvc_spikes
+from .constants import (
+    AUD_MEAN_RATE_HZ,
+    DAF_WINDOW_S,
+    DAF_WN_AMPLITUDE,
+    KERNEL_WIDTH_MS,
+    PEAK_RATE_HZ,
+)
+from .corpus import load_corpus
 
 __all__ = [
     "daf_waveform",
@@ -105,8 +112,6 @@ BIOLOGICAL_TARGETS = {
     #: of 90 +/- 43 ms" (mean, SD).
     "response_latency_ms": (23.0, 12.0),
     "response_duration_ms": (90.0, 43.0),
-    #: The burst length the responder statistics were measured with.
-    "noise_burst_ms": 50.0,
     "reversed_min_ratio": 1.0,  # direction only
 
     # --- auditory input population ------------------------------------------------
@@ -119,17 +124,6 @@ BIOLOGICAL_TARGETS = {
     # The broad-spiking population is the sparse, selective, background-invariant one, so
     # it is what this encoder models -- not the dense upstream stations.
     "aud_song_rate_hz": (2.4, 2.7),
-    #: "while more than 70% of neurons in upstream auditory areas fired during an average
-    #: 63 ms window, only 5% of BS neurons were active during the same epoch" (Fig 3B).
-    #: 63 ms is the average duration of a zebra finch song note.
-    "aud_pop_active_frac": 0.05,
-    "aud_pop_window_ms": 63,
-    #: Selectivity: BS neurons were driven by 6.9 +/- 5.2 of 15 songs, against 14.4 +/- 2.5
-    #: (midbrain), 14.7 +/- 1.9 (primary AC), 14.96 +/- 0.21 (higher-level AC NS).
-    "aud_songs_driving_of_15": (6.9, 5.2),
-    # NOTE: the paper reports no intra-burst or instantaneous rate for these neurons, so
-    # there is no target for burst strength here. Fig 3A's neurogram tops out at 67
-    # spikes/s, but that is a trial-averaged population display, not an instantaneous rate.
 }
 
 # The magnitude gap is TWO errors, not one, and they partly cancel.
@@ -178,8 +172,6 @@ def daf_waveform(sig_train, sr: int, *, seed: int = 42,
 
     Returns the waveform; the caller encodes it.
     """
-    import numpy as np
-
     sig = np.asarray(sig_train, dtype=np.float64)
     rms = float(np.sqrt(np.mean(sig ** 2)))
     noise = np.random.default_rng(seed).standard_normal(len(sig)) * rms * amplitude
@@ -195,16 +187,15 @@ def daf_waveform(sig_train, sr: int, *, seed: int = 42,
     return out
 
 
-def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from, divisive_gain=True):
-    """Waveform -> (n_channels, T) activations, dispatching on the encoder type.
+def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from):
+    """Waveform -> (n_channels, T) activations at 1 ms resolution.
 
     Every activation in this module goes through here, so the metrics, the responder
     analysis and the figure cannot normalise differently from one another.
     """
     sig = np.asarray(sig, dtype=np.float64)
     return encoder.encode_signal(sig, sr=sr, n_ista=n_ista, upsample_to_ms=True,
-                                 T_out_ms=T_out_ms, rms_from=rms_from,
-                                 divisive_gain=divisive_gain)
+                                 T_out_ms=T_out_ms, rms_from=rms_from)
 
 
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
@@ -217,8 +208,6 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     from the song: the waveform scaling from ``rms_from``, the spike rate from
     ``acts_train``.
     """
-    from .common import acts_to_spikes
-
     acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista, T_out_ms=T_out_ms,
                        rms_from=rms_from)
     return acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
@@ -261,17 +250,14 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
 
     tval, pval = stats.ttest_rel(post, pre, axis=0)
     resp = (pval < alpha) & (tval > 0)
-    to_hz = 1000.0 / W
-    base = pre.mean(axis=0) * to_hz
-    inc = (post - pre).mean(axis=0) * to_hz
+    base = pre.mean(axis=0) * (1000.0 / W)
     nan = float("nan")
 
     # The paper's ~20 Hz peak is the trial average over its SEVEN RESPONDERS (Fig 8E,
     # n=7), so the model's peak has to be averaged over responders too. It used to average
     # over every unit, which mixes the non-responders' flat PSTHs into a number compared
     # against a responders-only one -- and understates the gap, since responders are
-    # roughly half the population here. The all-unit value is kept separately rather than
-    # dropped, because it is the right denominator for anything about the population.
+    # roughly half the population here.
     #
     # Binned at PEAK_BIN_MS, the only bin width the paper states (2 ms, for its latency
     # and duration z-tests). This was computed at 1 ms, finer than anything the paper
@@ -287,7 +273,6 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         return float(mb.max() - base), int(np.argmax(mb) * PEAK_BIN_MS - W)
 
     peak_resp, lat_resp = _peak(resp)
-    peak_all, _ = _peak(np.ones(n_e, dtype=bool))
 
     # Transient or step: the responder PSTH 100-150 ms after onset, relative to its peak.
     def _late_over_peak(mask):
@@ -330,7 +315,6 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
         "responder_fraction": float(resp.mean()),
         "baseline_hz_all": float(base.mean()),
         "baseline_hz_responders": float(base[resp].mean()) if resp.any() else nan,
-        "increase_hz_responders": float(inc[resp].mean()) if resp.any() else nan,
         #: Extra spikes per neuron per burst, over the analysis window. The directly
         #: interpretable form: the paper's responder gains ~1-2 spikes when it hears the
         #: distortion, on a baseline of well under one spike in the same window.
@@ -345,14 +329,11 @@ def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
                              if resp.any() else nan),
         "extra_spikes_max": (float((post - pre)[:, resp].mean(axis=0).max())
                              if resp.any() else nan),
-        "increase_hz_all": float(inc.mean()),
         "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
-        "peak_change_hz_all": peak_all,
         "peak_latency_ms": lat_resp,
         "late_over_peak": late_over_peak,
         "latency_ms": float(np.mean(lats)) if lats else nan,
         "duration_ms": float(np.mean(durs)) if durs else nan,
-        "n_with_latency": len(lats),
         "window_ms": W,
         "burst_ms": float((DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000),
     }
@@ -380,8 +361,6 @@ def format_responders(r: dict) -> str:
         f"paper ~{t['responder_peak_change_hz']:.0f} Hz (Fig 8E, n=7; both at "
         f"{PEAK_BIN_MS} ms bins on our side, UNKNOWN on theirs -- bin-width dependent, "
         f"not a hard target)",
-        f"  peak change, all units    {r['peak_change_hz_all']:7.2f} Hz      "
-        f"(no paper equivalent; responders only are plotted there)",
         f"  latency, responders       {r['latency_ms']:7.1f} ms      "
         f"paper {lat:.0f} +/- {lat_sd:.0f} ms  (onset: first of 5 consecutive 2 ms bins)",
         f"  duration, responders      {r['duration_ms']:7.1f} ms      "
@@ -479,10 +458,6 @@ def build_stimuli(
     n_hvc: int = 60,
     mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     n_ista: int = 50,
-    #: Absolute refractory on the GENERATED input populations (auditory and HVC). Pass 0
-    #: to reproduce a model trained before the refractory existed -- it changes the input
-    #: spike trains, so a pinned artifact needs the conditions it was built under.
-    t_refr_ms: float = 2.0,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -492,12 +467,6 @@ def build_stimuli(
     ``hvc_off``, ``hvc_burn`` and its padded ``aud_burn``), and the bookkeeping the
     caller needs (``T_song``, ``T_rend``, ``train_idx``, ``fwd_rev_corr``, ``n_kernels``).
     """
-    import numpy as np
-
-    from .common import generate_hvc_spikes
-    from .corpus import load_corpus
-    from .common import acts_to_spikes
-
     corpus = load_corpus(motifs_path)
     n_motifs = corpus.n_motifs
     T_song = corpus.T_song
@@ -510,7 +479,7 @@ def build_stimuli(
     # The encoder path normalises TWICE, and both have to share one reference or the
     # level difference does not reach the network:
     #   encode_signal scales the waveform  -> rms_from=sig_train
-    #   of_to_spikes  scales the spike rate -> calibrate_on=acts_train
+    #   acts_to_spikes scales the spike rate -> calibrate_on=acts_train
     # Fixing only the first restores level in the activations and then flattens it again
     # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
     # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
@@ -522,8 +491,7 @@ def build_stimuli(
             acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
                                T_out_ms=T_rend, rms_from=sig_train)
         spk = acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
-                           t_refr_ms=t_refr_ms,
-                           seed=seed + seed_offset, calibrate_on=acts_train)
+                             seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)
 
     if verbose:
@@ -567,7 +535,6 @@ def build_stimuli(
 
     T_total_burn = t_burn + T_rend
     hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
-                                   t_refr_ms=t_refr_ms,
                                    T_song=T_song, T_burn=t_burn, T_post=t_post,
                                    peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
                                    seed=seed)
@@ -575,7 +542,6 @@ def build_stimuli(
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
     hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
-                                 t_refr_ms=t_refr_ms,
                                  T_burn=0, T_post=t_post, peak_rate=PEAK_RATE_HZ,
                                  kernel_width=KERNEL_WIDTH_MS, seed=seed)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)

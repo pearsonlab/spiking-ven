@@ -128,7 +128,6 @@ def compute_encoding_columns(
     sig_daf    = daf_waveform(sig_train, sr, seed=seed + 2, amplitude=daf_wn_amplitude)
 
     # ── Encoder → Poisson spikes ──────────────────────────────────────────────
-    _sign_split = hasattr(ven, "n_aud") and ven.n_aud == 2 * encoder.n_channels
 
     # One reference for the whole set (the song) at BOTH normalisation stages -- the
     # waveform scaling and the spike-rate calibration. Per-signal at either stage
@@ -142,9 +141,8 @@ def compute_encoding_columns(
         acts = encode_acts(sig, encoder, sr=sr, n_ista=of_n_ista,
                            T_out_ms=T_rend, rms_from=sig_train)
         spk = acts_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
-                           t_refr_ms=t_refr_ms,
-                           sign_split=_sign_split, seed=seed + seed_offset,
-                           calibrate_on=acts_train)
+                             t_refr_ms=t_refr_ms, seed=seed + seed_offset,
+                             calibrate_on=acts_train)
         return spk.astype(np.float32)
 
     aud_train = _sig_to_aud(sig_train, 10)

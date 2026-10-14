@@ -12,7 +12,14 @@ import numpy as np
 import pytest
 
 from spiking_ven import CausalFilterEncoder
-from spiking_ven.causal_filters import _past_windows, causal_meansub, infer, learn, min_phase
+from spiking_ven.causal_filters import (
+    _past_windows,
+    causal_meansub,
+    infer,
+    learn,
+    min_phase,
+    prune_silent,
+)
 
 
 @pytest.fixture
@@ -99,16 +106,18 @@ def test_min_phase_is_idempotent(toy):
     assert np.abs(M - min_phase(M)).max() / np.abs(M).max() < 0.01
 
 
-def test_learn_keeps_every_filter_alive(rng):
-    """Usage equalisation must reverse dropout, not merely discourage it."""
+def test_learn_and_prune(rng):
+    """learn returns unit-norm kernels; prune_silent keeps exactly the filters that fire."""
     cochs = [causal_meansub(rng.standard_normal((8, 120)) * 0.3, 6) for _ in range(3)]
-    V, bias = learn(cochs, K=10, L=6, lam=0.05, n_epochs=8, n_iter=10, seed=1,
-                    target_usage=0.05, log=lambda _m: None)
-    assert V.shape == (10, 8, 6)
-    assert np.all(np.isfinite(V)) and np.all(np.isfinite(bias))
-    assert bias.min() >= -0.05 - 1e-12          # threshold can reach 0, never below
-    usage = (infer(cochs[0], V, 0.05, bias=bias) != 0).mean(axis=1)
-    assert (usage > 0).all(), f"{int((usage == 0).sum())} filters never fire"
+    V = learn(cochs, K=10, L=6, lam=0.05, n_epochs=8, n_iter=10, seed=1,
+              log=lambda _m: None)
+    assert V.shape == (10, 8, 6) and np.all(np.isfinite(V))
+    np.testing.assert_allclose(np.linalg.norm(V.reshape(10, -1), axis=1), 1.0)
+    V_kept, kept = prune_silent(V, cochs, 0.05, n_iter=10)
+    fired = np.zeros(len(V), dtype=bool)
+    for X in cochs:
+        fired |= (infer(X, V, 0.05, n_iter=10) != 0).any(axis=1)
+    assert np.array_equal(kept, np.flatnonzero(fired)) and len(V_kept) == len(kept)
 
 
 def test_encoder_roundtrip_and_width(tmp_path, toy):

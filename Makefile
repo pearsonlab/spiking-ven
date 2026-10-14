@@ -3,7 +3,7 @@ OUT  ?= outputs
 DATA ?= data
 SEED ?= 42
 
-.PHONY: all figure psth rates verify manifest test test-repro smoke clean-artifacts
+.PHONY: all figure psth verify manifest test test-repro smoke clean-artifacts
 
 all: figure
 
@@ -29,12 +29,6 @@ figure: $(OUT)/of_ven_model_default.npz
 ## The DAF response time course, against the Fig 8E reading.
 psth: $(OUT)/of_ven_model_default.npz
 	uv run --extra plots sven-figure --view psth --model $< \
-		--encoder $(OUT)/causal_encoder.npz \
-		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
-
-## Supplementary population-rate view.
-rates: $(OUT)/of_ven_model_default.npz
-	uv run --extra plots sven-figure --view rates --model $< \
 		--encoder $(OUT)/causal_encoder.npz \
 		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
 

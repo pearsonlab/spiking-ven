@@ -48,7 +48,7 @@ __all__ = [
     "T_POST", "T_BURN", "N_ISTA",
     "a_jie_for",
     # 3. the causal encoder operating point
-    "CAUSAL_EPOCHS", "CAUSAL_LAMBDA", "CAUSAL_TARGET_USAGE", "CAUSAL_LR_BIAS",
+    "CAUSAL_EPOCHS", "CAUSAL_LAMBDA",
     "CAUSAL_LR", "CAUSAL_L1", "CAUSAL_SMOOTH", "CAUSAL_N_ISTA", "CAUSAL_MP_STRENGTH",
 ]
 
@@ -204,12 +204,6 @@ CAUSAL_MP_STRENGTH = 0.25
 #: 1300x above it and annihilates the dictionary.
 CAUSAL_L1 = 7e-5
 CAUSAL_SMOOTH = 1e-3
-
-#: Usage equalisation, OFF. It did not reduce redundancy -- effective rank 29/64 with it
-#: and 32/64 without -- and it pinned the code so sparse that the dictionary could not
-#: train: kernels stayed 0.67 correlated with their random initialisation.
-CAUSAL_LR_BIAS = 0.0
-CAUSAL_TARGET_USAGE = 0.03
 
 CAUSAL_LR = 10.0
 CAUSAL_EPOCHS = 80

@@ -75,8 +75,9 @@ def test_auditory_input_matches_schneider_woolley(setup):
     _, st, _ = setup
     rate = float(st["aud_correct"].mean() * 1000)
     assert rate == pytest.approx(2.15, abs=0.15)
-    # 2.4 +/- 2.7 Hz; the SD is larger than the mean, so only the mean is worth asserting.
-    assert abs(rate - 2.4) < 2.7
+    # The SD is larger than the mean, so only the mean is worth asserting.
+    mean, sd = BIOLOGICAL_TARGETS["aud_song_rate_hz"]
+    assert abs(rate - mean) < sd
 
 
 def test_model_carries_the_operating_point(setup):

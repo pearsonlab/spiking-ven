@@ -155,27 +155,20 @@ def acts_to_spikes(
     activations: np.ndarray,
     mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     frame_rate: int = 1000,
-    rng: np.random.Generator | None = None,
     seed: int | None = None,
-    per_neuron: bool = False,
-    sign_split: bool = False,
     calibrate_on: np.ndarray | None = None,
     t_refr_ms: float = 2.0,
 ) -> np.ndarray:
-    """Convert O&F activations to Poisson spike trains.
+    """Convert encoder activations to Poisson spike trains.
+
+    The activations are rectified and scaled by one population-wide factor so the mean
+    rate is ``mean_rate_hz``.
 
     Parameters
     ----------
-    activations  : (n_bases, T) float, signed ISTA coefficients
-    mean_rate_hz : target mean firing rate (Hz); applied per-neuron when
-                   per_neuron=True, else over the whole population
+    activations  : (n_channels, T) float, signed ISTA coefficients
+    mean_rate_hz : target mean firing rate (Hz) over the whole population
     frame_rate   : temporal resolution of activations in Hz
-    per_neuron   : if True, calibrate each neuron independently to
-                   mean_rate_hz rather than using a single global scale
-    sign_split   : if True, return (2*n_bases, T) where the first n_bases
-                   rows encode positive loadings and the last n_bases rows
-                   encode negative loadings (each independently calibrated
-                   when per_neuron=True)
     calibrate_on : activations to derive the rate scale from, instead of
                    ``activations`` itself. Use this when ``activations`` is a
                    sparse timeline -- e.g. one song tiled into motif windows with
@@ -185,28 +178,14 @@ def acts_to_spikes(
                    target rate means what it says.
     Returns
     -------
-    spikes : (n_bases, T) or (2*n_bases, T) float32 spike counts per bin.
+    spikes : (n_channels, T) float32, at most one spike per bin when ``t_refr_ms > 0``.
     """
-    if rng is None:
-        rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed)
+    act = np.maximum(activations.astype(np.float64), 0.0)
+    ref = act if calibrate_on is None else np.maximum(calibrate_on.astype(np.float64), 0.0)
 
-    def _rectify(a: np.ndarray) -> np.ndarray:
-        a = a.astype(np.float64)
-        if sign_split:
-            return np.concatenate([np.maximum(a, 0.0), np.maximum(-a, 0.0)], axis=0)
-        return np.maximum(a, 0.0)
-
-    act = _rectify(activations)
-    ref = act if calibrate_on is None else _rectify(calibrate_on)
-
-    dt_s = 1.0 / frame_rate
-    if per_neuron:
-        ref_mean = ref.mean(axis=1, keepdims=True)          # (n_neurons, 1)
-        rate_scale = mean_rate_hz / np.maximum(ref_mean, 1e-12)
-    else:
-        rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
-
-    lam = act * rate_scale * dt_s
+    rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
+    lam = act * rate_scale * (1.0 / frame_rate)
     counts = rng.poisson(lam)
     if t_refr_ms <= 0.0:
         # Exactly the pre-refractory behaviour, multi-spike bins included. Not merely

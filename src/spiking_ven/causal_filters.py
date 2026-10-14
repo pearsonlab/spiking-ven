@@ -75,9 +75,8 @@ def _roughness_grad(V):
 def infer(X, V, lam, n_iter=20, bias=None):
     """Strictly causal sparse activations. ``V`` is (K, C, L); returns S (K, T).
 
-    ``bias`` is a per-filter threshold offset from :func:`learn`'s usage equalisation.
-    It must be carried to inference, exactly as the patch encoder carries its ``_bias``
-    -- without it the thresholds are wrong and the usage balance is lost.
+    ``bias`` is an optional per-filter threshold offset added to ``lam``. Encoders
+    trained here carry an all-zero bias; it is kept so saved encoders round-trip.
     """
     K, C, L = V.shape
     T = X.shape[1]
@@ -99,13 +98,11 @@ def infer(X, V, lam, n_iter=20, bias=None):
 
 
 def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, log=print,
-          target_usage=0.10, lr_bias=0.0, ema_decay=0.9, mp_strength=0.25, l1_V=7e-5,
-          smooth_V=0.0):
-    """Alternate causal inference with a gradient step on the kernels.
+          mp_strength=0.25, l1_V=7e-5, smooth_V=0.0):
+    """Alternate causal inference with a gradient step on the kernels; returns ``V``.
 
     Objective is reconstruction of the strictly-past window from the sparse code, with
-    the kernels pulled toward minimum phase after each update. Returns ``(V, bias)``;
-    the bias must be passed to :func:`infer`.
+    the kernels pulled toward minimum phase after each update.
 
     ``smooth_V`` weights a roughness penalty on the kernels -- L2 on first differences
     along channel and lag (see :func:`_roughness_grad`). Use this, not weight decay: a
@@ -143,12 +140,10 @@ def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, l
     stored kernels genuinely sparse and the minimum-phase constraint approximate. Both
     are soft pulls; neither is imposed exactly.
 
-    ``lr_bias`` drives the per-filter threshold bias toward ``target_usage`` (lifetime
-    sparsity equalisation). It defaults to OFF. Forcing all K filters to fire equally on
-    a corpus this stereotyped buys nothing: it does not reduce redundancy (effective rank
-    29/64 on, 32/64 off) and it pins the code so sparse that the dictionary cannot train.
-    Letting filters die is the honest outcome -- if there were residual variance left
-    unexplained, the spare filters would go find it.
+    There is no usage equalisation: filters that stop winning are allowed to die, and
+    :func:`prune_silent` removes them. Forcing all K filters to fire equally on a corpus
+    this stereotyped bought nothing (effective rank 29/64 with it, 32/64 without) and
+    pinned the code so sparse that the dictionary could not train.
 
     ``mp_strength`` is how hard that pull is: ``V <- (1-a) V + a * min_phase(V)``, a
     proximal step on the distance to the minimum-phase manifold rather than a hard
@@ -172,31 +167,16 @@ def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, l
     enough to alias the cepstrum, which made the "projection" accidentally soft. That is
     a bad way to set a hyperparameter; the softness is explicit here and the projection
     itself is now accurate.
-
-    Usage equalisation must be strong enough to REVERSE a dropout, not just discourage
-    one. At ``lr_bias=0.005`` with ``ema_decay=0.99`` it was not: a filter that stopped
-    winning had its usage EMA decay away while its bias crept down at most
-    ``lr_bias * target_usage`` per step, so over 191 epochs the bias floor only reached
-    -0.056 while it needed to reach ``-lam`` = -0.1 before that filter's threshold could
-    return to zero. Dropout was effectively one-way and the dictionary bled filters:
-    64/64 used at epoch 41, 45/64 by epoch 191, while the error had converged by epoch
-    20. Recovery now outpaces the decay, and the bias is floored at ``-lam`` so a starved
-    filter always reaches a zero threshold rather than an unreachable one. Without any
-    equalisation this collapsed outright: 7 filters carried 90% of the activation energy
-    and 35 of 64 never fired, so they never received gradient and stayed at their random
-    initialisation.
     """
     C = cochs[0].shape[0]
     rng = np.random.default_rng(seed)
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
-    bias = np.zeros(K)
-    usage_ema = np.full(K, target_usage)
     for ep in range(n_epochs):
         recon_err, act = 0.0, 0.0
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
-            S = infer(X, V, lam, n_iter, bias=bias)
+            S = infer(X, V, lam, n_iter)
             P = _past_windows(X, L)                          # (T, C*L)
             R = (P - S.T @ V.reshape(K, C * L)).reshape(T, C, L)
             V = V + lr * np.einsum("kt,tcl->kcl", S, R) / max(T, 1)
@@ -207,18 +187,13 @@ def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, l
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - lr * l1_V, 0.0)
             V /= np.maximum(np.linalg.norm(V.reshape(K, -1), axis=1), 1e-9)[:, None, None]
-            usage = (S != 0).mean(axis=1)
-            usage_ema = ema_decay * usage_ema + (1.0 - ema_decay) * usage
-            bias += lr_bias * (usage_ema - target_usage)
-            np.clip(bias, -lam, None, out=bias)   # threshold can reach 0, never below
             recon_err += float(np.mean(R ** 2))
             act += float(np.mean(S != 0))
         if ep % 5 == 0 or ep == n_epochs - 1:
             log(f"  epoch {ep+1:3d}/{n_epochs}  recon={recon_err/len(cochs):.6f}  "
-                f"active={act/len(cochs)*100:.2f}%  used={(usage_ema > 1e-4).sum()}/{K}  "
-                f"zeros={100 * float(np.mean(V == 0)):.0f}%  "
-                f"bias=[{bias.min():+.3f},{bias.max():+.3f}]")
-    return V, bias
+                f"active={act/len(cochs)*100:.2f}%  "
+                f"zeros={100 * float(np.mean(V == 0)):.0f}%")
+    return V
 
 
 def min_phase(V, n_fft=None, eps=1e-9):
@@ -255,8 +230,8 @@ def min_phase(V, n_fft=None, eps=1e-9):
     return np.ascontiguousarray(g_mp[:, :, ::-1])     # back to oldest-first
 
 
-def prune_silent(V, bias, cochs, lam, n_iter=20):
-    """Drop filters that never win on the training corpus. Returns (V, bias, kept).
+def prune_silent(V, cochs, lam, n_iter=20):
+    """Drop filters that never win on the training corpus. Returns (V, kept).
 
     Without usage equalisation the dictionary is free to shed filters, which on a corpus
     this stereotyped it does: at ``lam = 0.6`` only 19 of 64 ever fire. The other 45 do
@@ -267,9 +242,9 @@ def prune_silent(V, bias, cochs, lam, n_iter=20):
     """
     fired = np.zeros(V.shape[0], dtype=bool)
     for X in cochs:
-        fired |= (infer(X, V, lam, n_iter, bias=bias) != 0).any(axis=1)
+        fired |= (infer(X, V, lam, n_iter) != 0).any(axis=1)
     kept = np.flatnonzero(fired)
-    return V[kept], np.asarray(bias)[kept], kept
+    return V[kept], kept
 
 
 class CausalFilterEncoder:
@@ -293,7 +268,7 @@ class CausalFilterEncoder:
         return int(self.V.shape[0])
 
     def encode_signal(self, signal, *, sr, n_ista=20, upsample_to_ms=False,
-                      T_out_ms=None, rms_from=None, divisive_gain=False, dn_sigma=1e-6):
+                      T_out_ms=None, rms_from=None, divisive_gain=True):
         from .cochleagram import cochleagram
 
         cp = self.coch_params
@@ -314,7 +289,7 @@ class CausalFilterEncoder:
             # causal_meansub removed.
             recon = np.linalg.norm(acts.T @ self.V.reshape(self.V.shape[0], -1), axis=1)
             mu = (X - Xc).mean(axis=0)
-            acts = acts * (mu / (dn_sigma + recon))[None, :]
+            acts = acts * (mu / (1e-6 + recon))[None, :]
 
         if upsample_to_ms:
             acts = np.repeat(acts, 1000 // cp["frame_rate"], axis=1)

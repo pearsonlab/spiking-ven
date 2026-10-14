@@ -62,18 +62,3 @@ def test_peak_rate_is_derived_not_hardcoded():
     """Changing the kernel width must carry the peak rate with it."""
     assert constants.PEAK_RATE_HZ == pytest.approx(
         150.0 * 20.0 / constants.KERNEL_WIDTH_MS)
-
-
-@pytest.mark.parametrize("n", [5, 7, 64])
-def test_encoder_exposes_its_width(n):
-    """n_channels is a stable name for the output width, whatever it is.
-
-    Parametrised away from 64 on purpose: callers once used a hardcoded fallback of 64,
-    which would have mis-sized arrays for any other width.
-    """
-    import numpy as _np
-
-    from spiking_ven import CausalFilterEncoder
-
-    enc = CausalFilterEncoder(_np.zeros((n, 8, 4)), _np.zeros(n), 0.1, {})
-    assert enc.n_channels == n

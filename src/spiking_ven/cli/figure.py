@@ -8,8 +8,7 @@ The result is in the excitatory row: near-silent on the trained song, active on 
 three. The network has learned to cancel the response to the song it hears every
 rendition, while responses to novel or perturbed sound survive as an error signal.
 
-``--view rates`` renders the supplementary population-rate view instead (3 columns,
-Auditory over Error, both on fixed 0-90 Hz axes). It does not supersede the raster figure.
+``--view psth`` renders the DAF response time course against the Fig. 8E reading.
 
 Requires the ``plots`` extra (matplotlib).
 """
@@ -36,9 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "rates", "filters", "psth"],
-                   help="raster (the publication figure), rates (supplementary), "
-                        "filters (causal filter bank diagnostics; needs no VEN model), or "
+    p.add_argument("--view", default="raster", choices=["raster", "psth"],
+                   help="raster (the publication figure) or "
                         "psth (DAF response time course against the Fig. 8E reading)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
@@ -61,20 +59,6 @@ def main(argv: list[str] | None = None) -> None:
     # The original script assumed outputs/ already existed, having been created at
     # import time by whichever training script ran first. Do not rely on that.
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-    if args.view == "filters":
-        # The filter diagnostics describe the encoder alone, so this branch loads no VEN
-        # model and no corpus -- asking for one would make the figure undrawable before
-        # stage 2 has ever run.
-        from ..causal_filters import CausalFilterEncoder
-        from ..figures.causal_filters import make_filter_figures
-
-        enc_path = args.encoder or str(encoder_npz())
-        print(f"Loading encoder: {enc_path}")
-        cenc = CausalFilterEncoder.load(enc_path)
-        for path in make_filter_figures(cenc, out_dir, sr=args.sr):
-            print(f"  wrote {path}")
-        return
 
     print("Loading model and data ...")
     print(f"  model: {model_path}")
@@ -121,16 +105,9 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  wrote {path}")
         return
 
-    if args.view == "raster":
-        from ..figures.encoding_comparison import make_figure
+    from ..figures.encoding_comparison import make_figure
 
-        # n_kernels sizes the raster's auditory row; the rate view has no raster.
-        make_figure(ven, enc, sig_train, T_song, tag,
-                    n_kernels=enc.n_channels, **common)
-    else:
-        from ..figures.encoding_rates import make_rate_figure
-
-        make_rate_figure(ven, enc, sig_train, T_song, tag, **common)
+    make_figure(ven, enc, sig_train, T_song, tag, n_kernels=enc.n_channels, **common)
 
 
 if __name__ == "__main__":  # pragma: no cover

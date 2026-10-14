@@ -28,7 +28,7 @@ from spiking_ven.cli import figure as cli_figure
 from spiking_ven.cli import prep_data as cli_prep
 from spiking_ven.cli import train_encoder as cli_train_encoder
 from spiking_ven.cli import train_ven as cli_train_ven
-from spiking_ven import operating_point as op
+from spiking_ven import constants as C
 from spiking_ven.constants import (
     AUD_DELAY_MS,
     AUD_MEAN_RATE_HZ,
@@ -146,15 +146,15 @@ def test_train_encoder_choices_and_rejection():
 
 def test_train_encoder_causal_defaults_come_from_the_operating_point():
     a = cli_train_encoder.build_parser().parse_args([])
-    assert a.causal_lambda == op.CAUSAL_LAMBDA
-    assert a.causal_mp_strength == op.CAUSAL_MP_STRENGTH
-    assert a.causal_lr == op.CAUSAL_LR
-    assert a.causal_l1 == op.CAUSAL_L1
-    assert a.causal_smooth == op.CAUSAL_SMOOTH
-    assert a.causal_lr_bias == op.CAUSAL_LR_BIAS
-    assert a.causal_target_usage == op.CAUSAL_TARGET_USAGE
-    assert a.causal_epochs == op.CAUSAL_EPOCHS
-    assert a.causal_n_ista == op.CAUSAL_N_ISTA
+    assert a.causal_lambda == C.CAUSAL_LAMBDA
+    assert a.causal_mp_strength == C.CAUSAL_MP_STRENGTH
+    assert a.causal_lr == C.CAUSAL_LR
+    assert a.causal_l1 == C.CAUSAL_L1
+    assert a.causal_smooth == C.CAUSAL_SMOOTH
+    assert a.causal_lr_bias == C.CAUSAL_LR_BIAS
+    assert a.causal_target_usage == C.CAUSAL_TARGET_USAGE
+    assert a.causal_epochs == C.CAUSAL_EPOCHS
+    assert a.causal_n_ista == C.CAUSAL_N_ISTA
     assert a.causal_no_prune is False, "silent filters are pruned by default"
 
 
@@ -186,7 +186,7 @@ def test_train_encoder_patch_path_still_parses():
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):
-    assert getattr(cli_train_ven.build_parser().parse_args([]), dest) == getattr(op, const)
+    assert getattr(cli_train_ven.build_parser().parse_args([]), dest) == getattr(C, const)
 
 
 def test_train_ven_a_jie_is_derived_not_stored():
@@ -195,15 +195,15 @@ def test_train_ven_a_jie_is_derived_not_stored():
     point is a module and not a data file -- a stored value would desynchronise the
     learning rule the first time the window changed."""
     assert cli_train_ven.build_parser().parse_args([]).a_jie is None
-    assert op.a_jie_for(op.TAU_STDP) == pytest.approx(op.a_jie_for(2 * op.TAU_STDP) * 2)
-    assert op.a_jie_for(0.0, tau_s=op.TAU_S) == op.a_jie_for(op.TAU_S)
+    assert C.a_jie_for(C.TAU_STDP) == pytest.approx(C.a_jie_for(2 * C.TAU_STDP) * 2)
+    assert C.a_jie_for(0.0, tau_s=C.TAU_S) == C.a_jie_for(C.TAU_S)
 
 
 def test_adaptation_timescale_is_shorter_than_the_burst():
     """A constraint, not a copy of the value: at 100 ms the adaptation current integrates
     over the motif and acts as a tonic gain change instead of truncating the response."""
     burst_ms = (DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000.0
-    assert op.TAU_SFA < burst_ms
+    assert C.TAU_SFA < burst_ms
 
 
 def test_train_ven_delays_track_the_constants():
@@ -226,15 +226,15 @@ def test_train_ven_takes_either_encoder_flag():
 
 def test_evaluate_shares_the_operating_point():
     a = cli_evaluate.build_parser().parse_args([])
-    assert (a.n_hvc, a.n_ista) == (op.N_HVC, op.N_ISTA)
-    assert (a.t_post, a.t_burn, a.r_e_target) == (op.T_POST, op.T_BURN, op.R_E_TARGET)
+    assert (a.n_hvc, a.n_ista) == (C.N_HVC, C.N_ISTA)
+    assert (a.t_post, a.t_burn, a.r_e_target) == (C.T_POST, C.T_BURN, C.R_E_TARGET)
     assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True
 
 
 def test_figure_shares_the_operating_point():
-    assert cli_figure.build_parser().parse_args([]).t_post == op.T_POST
+    assert cli_figure.build_parser().parse_args([]).t_post == C.T_POST
 
 
 # -------------------------------------------------------------------------- figure

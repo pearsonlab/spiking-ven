@@ -21,10 +21,11 @@ import argparse
 
 import numpy as np
 
-from ..constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, SR
-from ..operating_point import (
+from ..constants import (
     ALPHA_THETA,
     A_SFA,
+    AUD_DELAY_MS,
+    AUD_MEAN_RATE_HZ,
     B_HVC_SCALE,
     B_SCALE,
     C_B,
@@ -32,6 +33,7 @@ from ..operating_point import (
     C_JIE,
     DRIVE_E,
     DRIVE_I,
+    HVC_DELAY_MS,
     J_MAX_IE,
     N_E,
     N_HVC,
@@ -40,6 +42,7 @@ from ..operating_point import (
     N_RENDITIONS,
     R_E_TARGET,
     R_I_TH,
+    SR,
     T_BURN,
     T_POST,
     TAU_E,
@@ -153,7 +156,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Derived rather than a constant: the per-spike STDP integral goes as
     # A_jie * tau, so the amplitude scales inversely with the kernel width. See
-    # operating_point.a_jie_for for why that formula lives with its inputs.
+    # constants.a_jie_for for why that formula lives with its inputs.
     a_jie = (args.a_jie if args.a_jie is not None
              else a_jie_for(args.tau_stdp, args.tau_s))
 

@@ -19,8 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from ..operating_point import N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST
-from ..constants import SR
+from ..constants import N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST, SR
 from ..evaluate import (
     build_stimuli,
     daf_metrics,

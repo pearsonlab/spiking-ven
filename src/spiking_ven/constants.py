@@ -1,16 +1,35 @@
-"""Calibration constants shared by the trainer, the metrics and the figures.
+"""Every shared constant: what describes the preparation, and what describes the fit.
 
-These were previously repeated across those three places, which is a drift hazard rather
+Three sections, kept apart because they change for different reasons and carry different
+authority:
+
+1. **The preparation.** Sample rate, the DAF window, conduction delays, the auditory
+   firing rate. These describe the experiment being modelled; several are measured and
+   carry citations, and changing one means claiming something different about the bird.
+2. **The network operating point.** The tuned parameters the shipped model was trained
+   with. Empirical, not measured: they are what the fit landed on.
+3. **The causal encoder operating point.** The same, for the minimum-phase filter bank.
+
+All three are here rather than restated at each use site, which is a drift hazard rather
 than a style problem: the stimulus the figure draws has to be the stimulus the network was
-trained and scored on, or the figure describes a different experiment.
+trained and scored on, or the figure describes a different experiment. A sweep once built
+the network from library defaults rather than section 2, because those values lived only
+in a scratch script, and four grid points came back identical and broken.
 
-Kept deliberately small. Anything that is genuinely a per-run choice belongs on a CLI
-flag, not here.
+Some of section 2 is DERIVED -- see :func:`a_jie_for`, which ties the STDP amplitude to
+the window width. That is why this is a module and not a data file: a formula has to live
+with its inputs or it goes stale.
+
+The CLIs read these as argparse defaults, so the tests in ``test_cli.py`` assert WIRING
+(the flag reads the constant) rather than values. Asserting a value against the constant
+it is defined by is tautological; what catches a wrong value is
+``test_reproduction_causal.py``, which runs the model.
 """
 
 from __future__ import annotations
 
 __all__ = [
+    # 1. the preparation
     "SR",
     "KERNEL_WIDTH_MS",
     "PEAK_RATE_HZ",
@@ -19,8 +38,23 @@ __all__ = [
     "AUD_DELAY_MS",
     "AUD_MEAN_RATE_HZ",
     "HVC_DELAY_MS",
+    # 2. the network operating point
+    "N_E", "N_I", "N_HVC", "N_RENDITIONS",
+    "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
+    "DRIVE_E", "DRIVE_I", "R_E_TARGET",
+    "TAU_S", "TAU_E", "TAU_STDP",
+    "C_JIE", "R_I_TH", "J_MAX_IE",
+    "ALPHA_THETA", "A_SFA", "TAU_SFA",
+    "T_POST", "T_BURN", "N_ISTA",
+    "a_jie_for",
+    # 3. the causal encoder operating point
+    "CAUSAL_EPOCHS", "CAUSAL_LAMBDA", "CAUSAL_TARGET_USAGE", "CAUSAL_LR_BIAS",
+    "CAUSAL_LR", "CAUSAL_L1", "CAUSAL_SMOOTH", "CAUSAL_N_ISTA", "CAUSAL_MP_STRENGTH",
 ]
 
+# =============================================================================
+# 1. The preparation -- what is being modelled
+# =============================================================================
 #: Corpus sample rate (Hz). The corpus is resampled to this during preprocessing.
 SR = 16000
 
@@ -77,3 +111,106 @@ AUD_DELAY_MS = 5
 #: the validated operating point: HVC drives I directly and any delay here shifts the
 #: motor prediction relative to the auditory signal it has to cancel.
 HVC_DELAY_MS = 0
+
+
+# =============================================================================
+# 2. The network operating point -- what the fit landed on
+# =============================================================================
+
+N_E = 600
+N_I = 150
+N_HVC = 60
+N_RENDITIONS = 600
+
+#: Auditory -> E. ``C_B`` is sparse enough that each E cell samples only a few encoder
+#: channels, so ``B_SCALE`` is the mean weight per surviving connection rather than a
+#: population gain.
+B_SCALE = 16.0
+C_B = 0.05
+
+#: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
+#: E -> I alone supplies 0.28 against a threshold gap of 0.37, so I is effectively an
+#: HVC-driven population. Compensating one limb without the other starves it.
+B_HVC_SCALE = 0.333
+C_HVC = 0.1
+
+#: Tonic drives. ``theta_e`` is derived from ``DRIVE_E`` inside the network, so raising
+#: the drive raises the threshold with it rather than the firing rate.
+DRIVE_E = 0.06
+DRIVE_I = 0.058
+R_E_TARGET = 16.0
+
+TAU_S = 20.0
+TAU_E = 30.0
+
+#: STDP coincidence window, pinned independently of the synaptic ``TAU_S``.
+TAU_STDP = 20.0
+
+#: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
+#: E cells ever acquire inhibition.
+C_JIE = 0.1
+R_I_TH = 6.0
+J_MAX_IE = 1.0
+
+#: Threshold homeostasis, off at the shipped point.
+ALPHA_THETA = 0.0
+
+#: Firing-rate adaptation on E. ``TAU_SFA`` must stay SHORTER than the 50 ms DAF burst it
+#: has to truncate: at 100 ms the current integrates over the whole motif and acts as a
+#: tonic gain change, cutting the baseline 59% while barely moving the peak. At 10 ms it
+#: builds and recovers within the burst. Swept at that timescale, ``A_SFA`` 1.0 is the
+#: strongest setting that keeps latency and duration inside the bird's ranges.
+A_SFA = 1.0
+TAU_SFA = 10.0
+
+T_POST = 200
+T_BURN = 500
+N_ISTA = 50
+
+
+def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
+    """STDP amplitude for a given kernel width.
+
+    Derived, not a constant: the per-spike STDP integral goes as ``A_jie * tau``, so the
+    amplitude scales inversely with the window to keep that integral fixed. Storing the
+    computed number instead would desynchronise the learning rule the first time the
+    window changed -- which is the reason this module is Python and not a data file.
+
+    ``tau_stdp <= 0`` falls back to the synaptic constant, matching the network, where an
+    unset STDP window means the synaptic one is reused.
+    """
+    tau_eff = tau_stdp if tau_stdp > 0.0 else tau_s
+    return 3e-3 * (10.0 / tau_eff)
+
+
+# =============================================================================
+# 3. The causal minimum-phase encoder operating point
+# =============================================================================
+
+
+#: Code sparsity, and with it how many filters survive: 0.3 gives ~10.7% activation and
+#: 56 of 64 filters, 0.6 gives 3.2% and 23, 1.2 collapses to one. Chosen on song
+#: cancellation, which is what the network exists to do.
+CAUSAL_LAMBDA = 0.3
+
+#: A soft pull toward minimum phase, not a projection. The hard projection has a
+#: degenerate fixed point -- minimum phase maps a white magnitude response to an impulse,
+#: so each application concentrates energy at lag 0 and whitens the spectrum further.
+#: Not tuned: 0.10 / 0.25 / 0.50 all converge to the same bank.
+CAUSAL_MP_STRENGTH = 0.25
+
+#: L1 on kernel entries and a roughness penalty over channel and lag. ``CAUSAL_L1`` has to
+#: be scaled against the gradient step, which is small: at 0.03 the soft-threshold sits
+#: 1300x above it and annihilates the dictionary.
+CAUSAL_L1 = 7e-5
+CAUSAL_SMOOTH = 1e-3
+
+#: Usage equalisation, OFF. It did not reduce redundancy -- effective rank 29/64 with it
+#: and 32/64 without -- and it pinned the code so sparse that the dictionary could not
+#: train: kernels stayed 0.67 correlated with their random initialisation.
+CAUSAL_LR_BIAS = 0.0
+CAUSAL_TARGET_USAGE = 0.03
+
+CAUSAL_LR = 10.0
+CAUSAL_EPOCHS = 80
+CAUSAL_N_ISTA = 20

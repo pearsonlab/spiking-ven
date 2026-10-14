@@ -33,9 +33,7 @@ import argparse
 import numpy as np
 
 from ..cochleagram import cochleagram
-from ..corpus import load_corpus
-from ..causal_filters import CausalFilterEncoder, causal_meansub, prune_silent
-from ..operating_point import (
+from ..constants import (
     CAUSAL_EPOCHS,
     CAUSAL_L1,
     CAUSAL_LAMBDA,
@@ -46,6 +44,8 @@ from ..operating_point import (
     CAUSAL_SMOOTH,
     CAUSAL_TARGET_USAGE,
 )
+from ..corpus import load_corpus
+from ..causal_filters import CausalFilterEncoder, causal_meansub, prune_silent
 from ..causal_filters import learn as causal_learn
 from ..olshausen_field import OlshausenFieldEncoder, coch_extract_patches, of_to_spikes
 from ..paths import ensure_parent, motifs_npz, of_encoder_npz

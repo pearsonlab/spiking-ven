@@ -22,9 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR
+from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR, T_POST
 from ..corpus import load_corpus
-from ..operating_point import T_POST
 from ..olshausen_field import OlshausenFieldEncoder
 from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2

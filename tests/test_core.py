@@ -49,27 +49,6 @@ def test_centre_frequencies_are_ordered_and_in_band():
     assert freqs.max() <= 8000.0 + 1e-6
 
 
-def test_encoder_save_load_roundtrip(tmp_path):
-    rng = np.random.default_rng(1)
-    patches = rng.standard_normal((256, 40 * 4)).astype(np.float64)
-    enc = sv.OlshausenFieldEncoder(n_bases=8, patch_len=patches.shape[1], seed=42)
-    # patches= by keyword: passed positionally it binds to audio_list instead, and the
-    # cochleagram-patch path this is meant to cover would not be exercised at all.
-    enc.fit(patches=patches, n_epochs=2)
-    path = tmp_path / "enc.npz"
-    enc.save(str(path))
-    enc2 = sv.OlshausenFieldEncoder.load(str(path))
-    np.testing.assert_array_equal(enc.A, enc2.A)
-
-
-def test_fit_rejects_a_patch_matrix_passed_positionally():
-    """fit(X) used to run the audio path on patch rows and appear to work."""
-    enc = sv.OlshausenFieldEncoder(n_bases=4, patch_len=32, seed=0)
-    patches = np.zeros((16, 32), dtype=np.float64)
-    with pytest.raises(ValueError, match="patches="):
-        enc.fit(patches, n_epochs=1)
-
-
 def test_hvc_spikes_reject_a_too_short_window():
     """Bursts past the end of T were silently dropped, leaving the drive to stop."""
     with pytest.raises(ValueError, match="too short"):
@@ -89,53 +68,11 @@ def test_hvc_spikes_are_binary_and_seed_deterministic():
     assert a.sum() > 0, "HVC population should emit spikes"
 
 
-def _toy_coch_encoder(n_bases=6, n_ch=12, k_frames=4):
-    """A small encoder wired for cochleagram mode; the dictionary need not be trained."""
-    enc = sv.OlshausenFieldEncoder(n_bases=n_bases, patch_len=n_ch * k_frames, seed=0)
-    enc.coch_params = dict(n_channels=n_ch, K_frames=k_frames, frame_rate=500,
-                           lo_hz=200.0, hi_hz=8000.0, rms_ref=0.1)
-    return enc
-
-
 def _two_levels(sr=16000, dur_s=0.2, gain=5.6, seed=0):
     """The same waveform at two levels -- the DAF manipulation in miniature."""
     rng = np.random.default_rng(seed)
     quiet = rng.standard_normal(int(sr * dur_s)) * 0.01
     return quiet, quiet * gain
-
-
-def test_coch_encode_discards_level_by_default():
-    """Each signal is scaled to the encoder's reference RMS, so loudness is dropped."""
-    enc = _toy_coch_encoder()
-    quiet, loud = _two_levels()
-    a = sv.coch_encode(quiet, enc, sr=16000, n_ista=5)
-    b = sv.coch_encode(loud, enc, sr=16000, n_ista=5)
-    np.testing.assert_allclose(a, b, rtol=1e-6, atol=1e-9)
-
-
-def test_coch_encode_rms_from_preserves_the_level_difference():
-    """With a shared reference, a louder stimulus encodes as a louder stimulus.
-
-    This is what makes an amplitude manipulation expressible: normalising every signal
-    to its own RMS divides the manipulation straight back out.
-    """
-    enc = _toy_coch_encoder()
-    quiet, loud = _two_levels()
-    a = sv.coch_encode(quiet, enc, sr=16000, n_ista=5, rms_from=quiet)
-    b = sv.coch_encode(loud, enc, sr=16000, n_ista=5, rms_from=quiet)
-    assert np.abs(b).sum() > 2.0 * np.abs(a).sum(), (
-        "the louder stimulus should drive visibly larger activations"
-    )
-
-
-def test_coch_encode_rms_from_self_is_the_default():
-    """Passing the signal itself must reproduce the default exactly."""
-    enc = _toy_coch_encoder()
-    quiet, _ = _two_levels()
-    np.testing.assert_array_equal(
-        sv.coch_encode(quiet, enc, sr=16000, n_ista=5),
-        sv.coch_encode(quiet, enc, sr=16000, n_ista=5, rms_from=quiet),
-    )
 
 
 def test_every_subpackage_is_importable():
@@ -154,7 +91,7 @@ def test_every_subpackage_is_importable():
         "spiking_ven.evaluate",
         "spiking_ven.filterbank",
         "spiking_ven.manifest",
-        "spiking_ven.olshausen_field",
+        "spiking_ven.causal_filters",
         "spiking_ven.paths",
         "spiking_ven.vocal_error_net",
         "spiking_ven.data",

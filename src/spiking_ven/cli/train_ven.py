@@ -58,8 +58,7 @@ from ..evaluate import (
     format_metrics,
     format_responders,
 )
-from ..olshausen_field import OlshausenFieldEncoder
-from ..paths import ensure_parent, motifs_npz, of_encoder_npz, ven_model_npz
+from ..paths import encoder_npz, ensure_parent, motifs_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
 
 # Renditions at which progress is logged.
@@ -69,9 +68,8 @@ LOG_AT = {1, 5, 10, 20, 30, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600}
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--encoder", default=None, help="trained OF encoder .npz")
-    p.add_argument("--causal-encoder", default=None,
-                   help="causal minimum-phase filter bank .npz (instead of --encoder)")
+    p.add_argument("--encoder", default=None,
+                   help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output model .npz")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
@@ -148,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    enc_path = args.encoder or str(of_encoder_npz())
+    enc_path = args.encoder or str(encoder_npz())
     motifs_path = args.motifs or str(motifs_npz())
     out_path = str(ensure_parent(args.out or ven_model_npz()))
     traces_path = str(ensure_parent(args.traces)) if args.traces else out_path.replace(
@@ -160,16 +158,11 @@ def main(argv: list[str] | None = None) -> None:
     a_jie = (args.a_jie if args.a_jie is not None
              else a_jie_for(args.tau_stdp, args.tau_s))
 
-    if args.causal_encoder:
-        from ..causal_filters import CausalFilterEncoder
+    from ..causal_filters import CausalFilterEncoder
 
-        print("Loading causal filter bank and motifs...")
-        encoder = CausalFilterEncoder.load(args.causal_encoder)
-        n_kernels = encoder.n_channels
-    else:
-        print("Loading OF encoder and motifs...")
-        encoder = OlshausenFieldEncoder.load(enc_path)
-        n_kernels = encoder.n_bases
+    print("Loading causal filter bank and motifs...")
+    encoder = CausalFilterEncoder.load(enc_path)
+    n_kernels = encoder.n_channels
     print(f"  n_bases={n_kernels}  coch_params={encoder.coch_params}")
 
     # Stimuli are built by evaluate.build_stimuli, which the reproduction tests also

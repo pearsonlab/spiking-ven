@@ -24,8 +24,7 @@ import numpy as np
 
 from ..constants import AUD_MEAN_RATE_HZ, KERNEL_WIDTH_MS, PEAK_RATE_HZ, SR, T_POST
 from ..corpus import load_corpus
-from ..olshausen_field import OlshausenFieldEncoder
-from ..paths import motifs_npz, of_encoder_npz, output_dir, ven_model_npz
+from ..paths import encoder_npz, motifs_npz, output_dir, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
 
 
@@ -33,15 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=None, help="trained VEN .npz")
-    p.add_argument("--of-encoder", default=None, help="OF encoder .npz")
+    p.add_argument("--encoder", default=None,
+                   help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
     p.add_argument("--view", default="raster", choices=["raster", "rates", "filters", "psth"],
                    help="raster (the publication figure), rates (supplementary), "
                         "filters (causal filter bank diagnostics; needs no VEN model), or "
                         "psth (DAF response time course against the Fig. 8E reading)")
-    p.add_argument("--causal-encoder", default=None,
-                   help="causal filter bank .npz (--view filters)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=T_POST)
@@ -71,25 +69,18 @@ def main(argv: list[str] | None = None) -> None:
         from ..causal_filters import CausalFilterEncoder
         from ..figures.causal_filters import make_filter_figures
 
-        enc_path = args.causal_encoder or str(output_dir() / "causal_encoder.npz")
-        print(f"Loading causal encoder: {enc_path}")
+        enc_path = args.encoder or str(encoder_npz())
+        print(f"Loading encoder: {enc_path}")
         cenc = CausalFilterEncoder.load(enc_path)
-        patch = None
-        try:
-            patch = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
-        except (OSError, KeyError):
-            print("  (no comparable patch encoder; drawing the causal bank alone)")
-        for path in make_filter_figures(cenc, out_dir, sr=args.sr, patch_encoder=patch):
+        for path in make_filter_figures(cenc, out_dir, sr=args.sr):
             print(f"  wrote {path}")
         return
 
     print("Loading model and data ...")
     print(f"  model: {model_path}")
-    if args.causal_encoder:
-        from ..causal_filters import CausalFilterEncoder
-        enc = CausalFilterEncoder.load(args.causal_encoder)
-    else:
-        enc = OlshausenFieldEncoder.load(args.of_encoder or str(of_encoder_npz()))
+    from ..causal_filters import CausalFilterEncoder
+
+    enc = CausalFilterEncoder.load(args.encoder or str(encoder_npz()))
     # Pin the seed so the rendered figure is reproducible, not just the training.
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
 

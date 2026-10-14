@@ -19,7 +19,7 @@ What K2/K3 measure
 The response to white noise presented at ``DAF_WN_AMPLITUDE`` times the song's RMS,
 against the response to the song -- level difference included.
 
-This was not always so. ``coch_encode`` used to scale every signal to the encoder's
+This was not always so. The encode path used to scale every signal to the encoder's
 reference RMS *individually*, which divided ``DAF_WN_AMPLITUDE`` straight back out and
 left K2/K3 reporting a pure spectrotemporal mismatch at matched drive. The stimulus set
 is now normalised against one reference (the song) instead, so relative level survives
@@ -198,20 +198,13 @@ def daf_waveform(sig_train, sr: int, *, seed: int = 42,
 def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from, divisive_gain=True):
     """Waveform -> (n_channels, T) activations, dispatching on the encoder type.
 
-    Every activation in this module goes through here. The dispatch used to live only in
-    encode_stimulus, so build_stimuli's other three call sites bypassed it and a
-    non-patch encoder failed on the first one.
+    Every activation in this module goes through here, so the metrics, the responder
+    analysis and the figure cannot normalise differently from one another.
     """
-    from .olshausen_field import coch_encode
-
     sig = np.asarray(sig, dtype=np.float64)
-    if hasattr(encoder, "encode_signal"):        # causal filter bank
-        return encoder.encode_signal(sig, sr=sr, n_ista=n_ista, upsample_to_ms=True,
-                                     T_out_ms=T_out_ms, rms_from=rms_from,
-                                     divisive_gain=divisive_gain)
-    return coch_encode(sig, encoder, sr=sr, n_ista=n_ista, upsample_to_ms=True,
-                       T_out_ms=T_out_ms, rms_from=rms_from,
-                       divisive_gain=divisive_gain)
+    return encoder.encode_signal(sig, sr=sr, n_ista=n_ista, upsample_to_ms=True,
+                                 T_out_ms=T_out_ms, rms_from=rms_from,
+                                 divisive_gain=divisive_gain)
 
 
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
@@ -224,11 +217,11 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     from the song: the waveform scaling from ``rms_from``, the spike rate from
     ``acts_train``.
     """
-    from .olshausen_field import of_to_spikes
+    from .common import acts_to_spikes
 
     acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista, T_out_ms=T_out_ms,
                        rms_from=rms_from)
-    return of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
+    return acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
                         calibrate_on=acts_train).astype(np.float32)
 
 
@@ -503,7 +496,7 @@ def build_stimuli(
 
     from .common import generate_hvc_spikes
     from .corpus import load_corpus
-    from .olshausen_field import of_to_spikes
+    from .common import acts_to_spikes
 
     corpus = load_corpus(motifs_path)
     n_motifs = corpus.n_motifs
@@ -516,7 +509,7 @@ def build_stimuli(
 
     # The encoder path normalises TWICE, and both have to share one reference or the
     # level difference does not reach the network:
-    #   coch_encode   scales the waveform  -> rms_from=sig_train
+    #   encode_signal scales the waveform  -> rms_from=sig_train
     #   of_to_spikes  scales the spike rate -> calibrate_on=acts_train
     # Fixing only the first restores level in the activations and then flattens it again
     # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
@@ -528,7 +521,7 @@ def build_stimuli(
         if acts is None:
             acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
                                T_out_ms=T_rend, rms_from=sig_train)
-        spk = of_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
+        spk = acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
                            t_refr_ms=t_refr_ms,
                            seed=seed + seed_offset, calibrate_on=acts_train)
         return spk.astype(np.float32)

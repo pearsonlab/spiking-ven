@@ -14,9 +14,8 @@ Two figures, because they answer different questions:
 
 Public API
 ----------
-make_filter_figures(encoder, out_dir, *, tag="", sr=16000, patch_encoder=None)
-    Render both. ``patch_encoder`` is optional; when given, the summary overlays the
-    Olshausen-Field atoms' lag profile for comparison.
+make_filter_figures(encoder, out_dir, *, tag="", sr=16000)
+    Render both.
 """
 
 from pathlib import Path
@@ -87,7 +86,7 @@ def _kernel_figure(V, cf_hz, dt_ms, out_dir, tag):
     return _save(fig, out_dir, f"causal_filters_kernels{tag}")
 
 
-def _summary_figure(V, cf_hz, dt_ms, out_dir, tag, patch_A=None):
+def _summary_figure(V, cf_hz, dt_ms, out_dir, tag):
     K, C, L = V.shape
     E = _lag_energy(V)
     lags = (np.arange(L) - L) * dt_ms + dt_ms      # most recent frame at 0
@@ -97,12 +96,6 @@ def _summary_figure(V, cf_hz, dt_ms, out_dir, tag, patch_A=None):
     ax = axes[0]
     ax.plot(lags, E.T, color="0.75", lw=0.5, alpha=0.6)
     ax.plot(lags, E.mean(axis=0), color="C0", lw=2.2, label="causal (min-phase)")
-    if patch_A is not None:
-        Ep = _lag_energy(patch_A)
-        ax.plot(lags, Ep.mean(axis=0), color="C3", lw=2.2, ls="--",
-                label="Olshausen-Field patches")
-        ax.axvline(lags[int(round((Ep * np.arange(L)).sum(axis=1).mean()))],
-                   color="C3", lw=0.8, ls=":")
     ax.axvline(lags[int(round((E * np.arange(L)).sum(axis=1).mean()))],
                color="C0", lw=0.8, ls=":")
     ax.set_xlabel("lag from present (ms)")
@@ -141,7 +134,7 @@ def _summary_figure(V, cf_hz, dt_ms, out_dir, tag, patch_A=None):
     return _save(fig, out_dir, f"causal_filters_summary{tag}")
 
 
-def make_filter_figures(encoder, out_dir, *, tag="", sr=16000, patch_encoder=None):
+def make_filter_figures(encoder, out_dir, *, tag="", sr=16000):
     """Render both diagnostic figures for a :class:`CausalFilterEncoder`."""
     V = np.asarray(encoder.V, dtype=np.float64)
     K, C, L = V.shape
@@ -150,13 +143,6 @@ def make_filter_figures(encoder, out_dir, *, tag="", sr=16000, patch_encoder=Non
     cf_hz = centre_frequencies(sr, C, float(cp["lo_hz"]), float(cp["hi_hz"]))
     cf_hz = np.sort(np.asarray(cf_hz, dtype=float))
 
-    patch_A = None
-    if patch_encoder is not None:
-        # The patch dictionary is stored flat; it is only comparable at the same shape.
-        A = np.asarray(patch_encoder.A, dtype=np.float64)
-        if A.shape[1] == C * L:
-            patch_A = A.reshape(A.shape[0], C, L)
-
     paths = _kernel_figure(V, cf_hz, dt_ms, out_dir, tag)
-    paths += _summary_figure(V, cf_hz, dt_ms, out_dir, tag, patch_A=patch_A)
+    paths += _summary_figure(V, cf_hz, dt_ms, out_dir, tag)
     return paths

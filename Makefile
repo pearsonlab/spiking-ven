@@ -11,27 +11,31 @@ all: figure
 $(OUT)/motifs.npz:
 	uv run --extra data sven-prep-data --data-dir $(DATA) --out $@
 
-## 2. Sparse encoder -> outputs/of_encoder.npz
-$(OUT)/of_encoder.npz: $(OUT)/motifs.npz
+## 2. Causal minimum-phase encoder -> outputs/causal_encoder.npz
+$(OUT)/causal_encoder.npz: $(OUT)/motifs.npz
 	uv run sven-train-encoder --motifs $< --out $@ --seed $(SEED)
 
-## 3. Vocal error network -> outputs/of_ven_model_k4max.npz
-##    Flags are spelled out even though they are the defaults, so the recipe is
-##    self-documenting: this is the tuned operating point.
-$(OUT)/of_ven_model_k4max.npz: $(OUT)/of_encoder.npz $(OUT)/motifs.npz
-	uv run sven-train-ven --encoder $(OUT)/of_encoder.npz --motifs $(OUT)/motifs.npz \
-		--out $@ --seed $(SEED) \
-		--drive-e 0.06 --b-scale 16 --tau-s 20 --alpha-theta 0 --n-rend 600
+## 3. Vocal error network -> outputs/of_ven_model_default.npz
+##    No tuning flags: the operating point is the default, and lives in constants.py.
+$(OUT)/of_ven_model_default.npz: $(OUT)/causal_encoder.npz $(OUT)/motifs.npz
+	uv run sven-train-ven --encoder $(OUT)/causal_encoder.npz --motifs $(OUT)/motifs.npz \
+		--out $@ --seed $(SEED)
 
 ## 4. The cancellation figure (runs the whole chain if needed).
-figure: $(OUT)/of_ven_model_k4max.npz
-	uv run --extra plots sven-figure --model $< --of-encoder $(OUT)/of_encoder.npz \
+figure: $(OUT)/of_ven_model_default.npz
+	uv run --extra plots sven-figure --model $< --encoder $(OUT)/causal_encoder.npz \
+		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
+
+## The DAF response time course, against the Fig 8E reading.
+psth: $(OUT)/of_ven_model_default.npz
+	uv run --extra plots sven-figure --view psth --model $< \
+		--encoder $(OUT)/causal_encoder.npz \
 		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
 
 ## Supplementary population-rate view.
-rates: $(OUT)/of_ven_model_k4max.npz
+rates: $(OUT)/of_ven_model_default.npz
 	uv run --extra plots sven-figure --view rates --model $< \
-		--of-encoder $(OUT)/of_encoder.npz \
+		--encoder $(OUT)/causal_encoder.npz \
 		--motifs $(OUT)/motifs.npz --out-dir $(OUT)
 
 ## Verify the generated artifacts against the recorded checksums.
@@ -57,5 +61,5 @@ smoke: $(OUT)/motifs.npz
 		--out $(OUT)/smoke_ven.npz --n-rend 3 --seed $(SEED)
 
 clean-artifacts:
-	rm -f $(OUT)/of_encoder.npz $(OUT)/of_ven_model_k4max.npz \
+	rm -f $(OUT)/causal_encoder.npz $(OUT)/of_ven_model_default.npz \
 		$(OUT)/encoding_comparison*.png $(OUT)/encoding_comparison*.pdf

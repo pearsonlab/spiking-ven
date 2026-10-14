@@ -19,7 +19,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from ..constants import N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST, SR
+from ..causal_filters import CausalFilterEncoder
+from ..constants import SR, N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST
 from ..evaluate import (
     build_stimuli,
     daf_metrics,
@@ -27,8 +28,7 @@ from ..evaluate import (
     format_metrics,
     format_responders,
 )
-from ..olshausen_field import OlshausenFieldEncoder
-from ..paths import motifs_npz, of_encoder_npz, ven_model_npz
+from ..paths import encoder_npz, motifs_npz, ven_model_npz
 from ..vocal_error_net import VocalErrorNetV2
 
 
@@ -56,14 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     model_path = args.model or str(ven_model_npz())
-    enc_path = args.encoder or str(of_encoder_npz())
+    enc_path = args.encoder or str(encoder_npz())
     motifs_path = args.motifs or str(motifs_npz())
 
     if not args.json:
         print(f"model:   {model_path}")
         print(f"encoder: {enc_path}")
 
-    encoder = OlshausenFieldEncoder.load(enc_path)
+    encoder = CausalFilterEncoder.load(enc_path)
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post,

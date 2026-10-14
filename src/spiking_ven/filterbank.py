@@ -4,7 +4,7 @@ Turns a waveform into a cochleagram-style time-frequency energy array using
 Patterson-Holdsworth gammatone filters on an ERB frequency scale. This is stage 0 of
 the encoder: :mod:`spiking_ven.cochleagram` calls :func:`gammatone_spectrogram`, whose
 output is then patch-extracted and sparse-coded by
-:mod:`spiking_ven.olshausen_field`.
+:mod:`spiking_ven.causal_filters`.
 
 Provenance and licensing
 ------------------------

@@ -30,8 +30,7 @@ make figure      # data -> encoder -> VEN -> figure   (~10 min, CPU)
 make verify      # check artifact checksums against MANIFEST.sha256
 make test        # fast unit tests (no artifacts needed)
 make test-repro  # the reproduction assertions below, against outputs/
-sven-figure --view psth --model outputs/of_ven_model_default.npz \
-            --causal-encoder outputs/causal_encoder.npz  # DAF time course
+sven-figure --view psth   # DAF time course; raster/rates/filters also available
 make rates       # the supplementary population-rate view
 ```
 
@@ -40,9 +39,9 @@ make rates       # the supplementary population-rate view
 | Stage | Command | Output |
 |---|---|---|
 | 1. Song corpus | `sven-prep-data` | `outputs/motifs.npz` (38 motifs @ 16 kHz) |
-| 2. Sparse encoder | `sven-train-encoder` | `outputs/of_encoder.npz` (64 bases, 300 epochs) |
-| 3. Train the VEN | `sven-train-ven` | `outputs/of_ven_model_k4max.npz` (600 renditions) |
-| 4. Figure | `sven-figure` | `outputs/encoding_comparison_k4max.pdf` |
+| 2. Causal encoder | `sven-train-encoder` | `outputs/causal_encoder.npz` (64 filters, 80 epochs, pruned to those that fire) |
+| 3. Train the VEN | `sven-train-ven` | `outputs/of_ven_model_default.npz` (600 renditions) |
+| 4. Figures | `sven-figure` | `outputs/encoding_comparison_default.pdf`, `daf_psth_default.pdf` |
 
 `sven-evaluate` recomputes the metrics below for an existing model without retraining
 (`--json` for machine-readable output) -- useful for checking a model you were handed.

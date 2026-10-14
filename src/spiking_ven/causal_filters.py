@@ -275,10 +275,9 @@ def prune_silent(V, bias, cochs, lam, n_iter=20):
 class CausalFilterEncoder:
     """Adapter so the VEN pipeline can consume a causal filter bank.
 
-    Mirrors the surface of :class:`~spiking_ven.olshausen_field.OlshausenFieldEncoder`
-    that ``evaluate.encode_acts`` actually uses -- ``n_channels`` and an encode call with
-    the same normalisation contract -- so the two encoders are swappable and the
-    downstream stimulus construction, spike conversion and VEN training are untouched.
+    ``evaluate.encode_acts`` uses ``n_channels`` and ``encode_signal``; those two are the
+    whole contract, which is what let this replace the Olshausen-Field patch encoder
+    without touching stimulus construction, spike conversion or VEN training.
     """
 
     def __init__(self, V, bias, lam, coch_params):

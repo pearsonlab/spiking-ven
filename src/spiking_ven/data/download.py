@@ -13,7 +13,7 @@ Sources
 Koch 2024, adult zebra finch R469 -- WAV + Evsonganaly ``.not.mat`` annotations.
     https://doi.org/10.18738/T8/SAWMUN  (TDL Dataverse, file id 650237)
 
-Duarte Ortiz et al. 2025 -- ``adult_songs/data.npz``.
+Gong et al. 2025 -- ``adult_songs/data.npz``.
     https://research.repository.duke.edu/record/438
     OPTIONAL: those are spectrogram features for the paper's rate-based Wilson-Cowan
     models, and are not used by this spiking pipeline. The endpoint is also flaky (it has

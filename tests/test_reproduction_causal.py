@@ -58,9 +58,7 @@ def setup():
 @pytest.fixture(scope="module")
 def daf(setup):
     enc, st, ven = setup
-    return daf_response(ven, enc, sig_train=st["sig_train"], hvc_on=st["hvc_on"],
-                        acts_train=st["acts_train"], sr=16000, T_out_ms=st["T_rend"],
-                        n_ista=50, n_trials=20, seed=SEED)
+    return daf_response(ven, enc, st, n_trials=20, seed=SEED)
 
 
 def test_encoder_is_the_pruned_causal_bank(setup):

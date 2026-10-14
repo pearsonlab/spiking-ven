@@ -107,7 +107,7 @@ def test_figures_subpackage_is_importable():
 
     for name in (
         "spiking_ven.figures",
-        "spiking_ven.figures.encoding_comparison",
+        "spiking_ven.figures.cancellation",
         "spiking_ven.figures.daf_psth",
     ):
         importlib.import_module(name)
@@ -118,7 +118,7 @@ def test_importing_the_figures_does_not_create_directories(tmp_path):
     pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
     out = subprocess.run(
         [sys.executable, "-c",
-         "import os, spiking_ven.figures.encoding_comparison, "
+         "import os, spiking_ven.figures.cancellation, "
          "spiking_ven.figures.daf_psth; print(os.path.exists('outputs'))"],
         cwd=tmp_path, capture_output=True, text=True, check=True,
     )

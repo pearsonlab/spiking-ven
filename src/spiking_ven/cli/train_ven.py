@@ -235,9 +235,7 @@ def main(argv: list[str] | None = None) -> None:
                     aud_daf=st["aud_daf"], aud_reversed=aud_reversed)
     print()
     print(format_metrics(m))
-    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=hvc_on,
-                     acts_train=st["acts_train"], sr=args.sr, T_out_ms=st["T_rend"],
-                     n_trials=20, seed=args.seed)
+    r = daf_response(ven, encoder, st, n_trials=20, seed=args.seed)
     print()
     print(format_responders(r))
 

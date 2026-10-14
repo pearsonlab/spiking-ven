@@ -76,9 +76,7 @@ def main(argv: list[str] | None = None) -> None:
     # The DAF number that means something: a windowed, per-neuron responder measurement
     # rather than an excitatory rate averaged over a whole rendition, which cannot see a
     # 50 ms burst.
-    r = daf_response(ven, encoder, sig_train=st["sig_train"], hvc_on=st["hvc_on"],
-                     acts_train=st["acts_train"], sr=st["sr"], T_out_ms=st["T_rend"],
-                     n_trials=args.n_trials, seed=args.seed)
+    r = daf_response(ven, encoder, st, n_trials=args.n_trials, seed=args.seed)
 
     if args.json:
         print(json.dumps({**m, "daf_response": r, "fwd_rev_corr": st["fwd_rev_corr"],

@@ -49,6 +49,8 @@ __all__ = [
     "daf_waveform",
     "encode_acts",
     "encode_stimulus",
+    "daf_trials",
+    "daf_responders",
     "daf_response",
     "format_responders",
     "daf_metrics",
@@ -214,42 +216,61 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
                         calibrate_on=acts_train).astype(np.float32)
 
 
-def daf_response(ven, encoder, *, sig_train, hvc_on, acts_train, sr, T_out_ms,
-                 n_trials: int = 20, window_ms: int = 150, alpha: float = 0.02,
-                 seed: int = 42, mean_rate_hz: float = AUD_MEAN_RATE_HZ, n_ista: int = 50) -> dict:
+def daf_trials(ven, encoder, st: dict, *, n_trials: int = 20, seed: int = 42):
+    """E spikes for ``n_trials`` DAF renditions: ``(n_trials, n_e, T_rend)`` float32.
+
+    Trials are renditions with independent noise draws; the song and the HVC drive are
+    fixed, as in the experiment. ``st`` is :func:`build_stimuli`'s output, so the trials
+    are encoded exactly like every other stimulus.
+    """
+    out = np.zeros((n_trials, int(ven.n_e), st["T_rend"]), dtype=np.float32)
+    for t in range(n_trials):
+        aud = encode_stimulus(
+            daf_waveform(st["sig_train"], st["sr"], seed=seed + 1000 + t), encoder,
+            sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
+            rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
+            n_ista=st["n_ista"], seed=seed + 2000 + t,
+        )
+        out[t] = ven.transform(st["hvc_on"], aud)
+    return out
+
+
+def daf_responders(trials, *, window_ms: int = 150, alpha: float = 0.02):
+    """Per-neuron responders by the paper's criterion. Returns ``(resp, pre, post)``.
+
+    Spike counts in a ``window_ms`` window before and after burst onset, compared per
+    neuron with a paired t-test across trials; a unit responds at ``p < alpha`` with an
+    increase. ``pre``/``post`` are the ``(n_trials, n_e)`` counts.
+    """
+    from scipy import stats
+
+    onset = int(DAF_WINDOW_S[0] * 1000)
+    W = int(window_ms)
+    pre = trials[:, :, onset - W:onset].sum(axis=2).astype(np.float64)
+    post = trials[:, :, onset:onset + W].sum(axis=2).astype(np.float64)
+    tval, pval = stats.ttest_rel(post, pre, axis=0)
+    return (pval < alpha) & (tval > 0), pre, post
+
+
+def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int = 150,
+                 alpha: float = 0.02, seed: int = 42) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Replaces averaging the excitatory rate over a whole rendition, which cannot see a
     50 ms burst: diluted ~20:1 in a 1048 ms rendition, that number is dominated by the
     cancelled song and lands on top of the reversed-song rate.
 
-    Follows Mandelblat-Cerf et al. 2014: spike counts in a ``window_ms`` window before
-    and after burst onset, compared per neuron with a paired t-test across trials, and
-    a unit counts as a responder at ``p < alpha`` with an increase. Trials are
-    renditions with independent noise draws; the song and the HVC drive are fixed, as
-    in the experiment.
+    Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
+    :func:`daf_responders`.
     """
     from scipy import stats
 
     onset = int(DAF_WINDOW_S[0] * 1000)
     W = int(window_ms)
+    trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed)
     n_e = int(ven.n_e)
-    pre = np.zeros((n_trials, n_e))
-    post = np.zeros((n_trials, n_e))
-    psth = np.zeros((n_trials, n_e, 2 * W), dtype=np.float32)
-    for t in range(n_trials):
-        aud = encode_stimulus(
-            daf_waveform(sig_train, sr, seed=seed + 1000 + t), encoder,
-            sr=sr, T_out_ms=T_out_ms, acts_train=acts_train, rms_from=sig_train,
-            mean_rate_hz=mean_rate_hz, n_ista=n_ista, seed=seed + 2000 + t,
-        )
-        sE = ven.transform(hvc_on, aud)
-        pre[t] = sE[:, onset - W:onset].sum(axis=1)
-        post[t] = sE[:, onset:onset + W].sum(axis=1)
-        psth[t] = sE[:, onset - W:onset + W] * 1000
-
-    tval, pval = stats.ttest_rel(post, pre, axis=0)
-    resp = (pval < alpha) & (tval > 0)
+    resp, pre, post = daf_responders(trials, window_ms=W, alpha=alpha)
+    psth = trials[:, :, onset - W:onset + W] * 1000
     base = pre.mean(axis=0) * (1000.0 / W)
     nan = float("nan")
 
@@ -457,10 +478,12 @@ def build_stimuli(
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
 
-    Returns a dict with the auditory spike arrays (``aud_correct``, ``aud_reversed``,
-    ``aud_daf``, plus the full ``correct_pool``), the HVC inputs (``hvc_on``,
-    ``hvc_off``, ``hvc_burn`` and its padded ``aud_burn``), and the bookkeeping the
-    caller needs (``T_song``, ``T_rend``, ``train_idx``, ``fwd_rev_corr``, ``n_kernels``).
+    Returns a dict with the waveforms (``sig_train``, ``sig_reversed``, ``sig_daf``),
+    their auditory spike arrays (``aud_correct``, ``aud_reversed``, ``aud_daf``, plus the
+    full ``correct_pool``), the HVC inputs (``hvc_on``, ``hvc_off``, ``hvc_burn`` and its
+    padded ``aud_burn``), and the bookkeeping the caller needs (``T_song``, ``T_rend``,
+    ``train_idx``, ``fwd_rev_corr``, ``n_kernels``, and the encoding settings
+    ``mean_rate_hz``/``n_ista`` so later encodes match).
     """
     corpus = load_corpus(motifs_path)
     n_motifs = corpus.n_motifs
@@ -481,20 +504,17 @@ def build_stimuli(
     acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=n_ista,
                              T_out_ms=T_rend, rms_from=sig_train)
 
-    def sig_to_aud(sig, seed_offset: int, acts=None):
-        if acts is None:
-            acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista,
-                               T_out_ms=T_rend, rms_from=sig_train)
-        spk = acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000,
-                             seed=seed + seed_offset, calibrate_on=acts_train)
-        return spk.astype(np.float32)
+    def sig_to_aud(sig, seed_offset: int):
+        return encode_stimulus(sig, encoder, sr=sr, T_out_ms=T_rend, acts_train=acts_train,
+                               rms_from=sig_train, mean_rate_hz=mean_rate_hz,
+                               n_ista=n_ista, seed=seed + seed_offset)
 
     if verbose:
         print(f"T_song={T_song} ms  T_rend={T_rend} ms  train_motif={train_idx}  "
               f"rms={rms_train:.4f}")
         print(f"Building correct training pool ({n_motifs} motifs)...")
 
-    aud_correct = sig_to_aud(sig_train, 10, acts=acts_train)
+    aud_correct = sig_to_aud(sig_train, 10)
     correct_pool = [aud_correct]                 # index 0 is the template motif
     for ci in range(n_motifs):
         if ci == train_idx:
@@ -514,10 +534,9 @@ def build_stimuli(
                     if fv.std() > 0 and rv.std() > 0 else float("nan"))
     del acts_rev, fv, rv
 
-    # Song with noise mixed into one window -- the same construction the figure draws,
-    # from the same function. seed + 2 matches the figure's stream, so the two describe
-    # the identical stimulus rather than two draws of a similar one.
-    aud_daf = sig_to_aud(daf_waveform(sig_train, sr, seed=seed + 2), 20)
+    # Song with noise mixed into one window. The figure draws these same arrays.
+    sig_daf = daf_waveform(sig_train, sr, seed=seed + 2)
+    aud_daf = sig_to_aud(sig_daf, 20)
 
     if verbose:
         for label, arr in (("training motif", aud_correct), ("reversed motif", aud_reversed),
@@ -555,7 +574,11 @@ def build_stimuli(
         "train_idx": train_idx,
         "acts_train": acts_train,
         "sig_train": sig_train,
+        "sig_reversed": sig_rev,
+        "sig_daf": sig_daf,
         "sr": sr,
+        "mean_rate_hz": mean_rate_hz,
+        "n_ista": n_ista,
         "fwd_rev_corr": fwd_rev_corr,
         "n_kernels": n_kernels,
         "n_motifs": n_motifs,

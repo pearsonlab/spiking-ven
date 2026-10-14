@@ -9,7 +9,7 @@ definition) moved these by 2x or more, and only a recorded reference makes that 
 Marked ``slow`` -- each test re-runs VEN inference over several stimuli -- and skipped
 when the artifacts are absent so a bare checkout still gets a green suite. Regenerate with
 
-    sven-train-ven --causal-encoder outputs/causal_encoder.npz \
+    sven-train-ven --encoder outputs/causal_encoder.npz \
                    --out outputs/of_ven_model_default.npz
 
 The model is deterministic (test_determinism.py), so these are tight: the tolerances

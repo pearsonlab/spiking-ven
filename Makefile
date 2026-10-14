@@ -3,7 +3,7 @@ OUT  ?= outputs
 DATA ?= data
 SEED ?= 42
 
-.PHONY: all figure rates verify manifest test smoke clean-artifacts
+.PHONY: all figure psth rates verify manifest test test-repro smoke clean-artifacts
 
 all: figure
 
@@ -53,13 +53,14 @@ test:
 test-repro:
 	uv run --extra dev --extra plots pytest -m slow -v
 
-## Fast end-to-end smoke run (tiny encoder, few renditions) -- what CI runs.
+## Fast end-to-end smoke run (tiny encoder, few renditions).
 smoke: $(OUT)/motifs.npz
 	uv run sven-train-encoder --motifs $(OUT)/motifs.npz --out $(OUT)/smoke_encoder.npz \
-		--n-bases 16 --n-epochs 5 --seed $(SEED)
+		--n-bases 16 --causal-epochs 5 --seed $(SEED)
 	uv run sven-train-ven --encoder $(OUT)/smoke_encoder.npz --motifs $(OUT)/motifs.npz \
 		--out $(OUT)/smoke_ven.npz --n-rend 3 --seed $(SEED)
 
 clean-artifacts:
 	rm -f $(OUT)/causal_encoder.npz $(OUT)/of_ven_model_default.npz \
+		$(OUT)/of_ven_model_default_traces.npz $(OUT)/daf_psth*.p* \
 		$(OUT)/encoding_comparison*.png $(OUT)/encoding_comparison*.pdf

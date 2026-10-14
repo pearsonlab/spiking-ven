@@ -45,9 +45,9 @@ def encoder_npz() -> Path:
     return output_dir() / "causal_encoder.npz"
 
 
-def ven_model_npz(tag: str = "k4max") -> Path:
+def ven_model_npz() -> Path:
     """Trained vocal error network produced by ``sven-train-ven``."""
-    return output_dir() / f"of_ven_model_{tag}.npz"
+    return output_dir() / "of_ven_model_default.npz"
 
 
 def ensure_parent(path: str | os.PathLike) -> Path:

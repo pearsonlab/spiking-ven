@@ -13,7 +13,7 @@ authoritative reproduction check. This manifest's real job is catching a *swappe
 truncated* artifact.
 
 Only artifacts that are genuinely byte-reproducible belong here. The corpus, the trained
-encoder and the trained network all qualify: the encoder's dictionary learning and the
+encoder and the trained network all qualify: the encoder's filter learning and the
 network's simulation are both fully seeded (see ``tests/test_determinism.py``). Rendered
 figures do **not** -- matplotlib embeds timestamps and font state, so a PNG can differ
 byte-wise while being pixel-identical.
@@ -35,8 +35,8 @@ __all__ = ["sha256_file", "DEFAULT_ARTIFACTS", "write_manifest", "verify_manifes
 # Relative to the repo root. Order is the pipeline order.
 DEFAULT_ARTIFACTS = (
     "outputs/motifs.npz",
-    "outputs/of_encoder.npz",
-    "outputs/of_ven_model_k4max.npz",
+    "outputs/causal_encoder.npz",
+    "outputs/of_ven_model_default.npz",
 )
 
 _CHUNK = 1 << 20

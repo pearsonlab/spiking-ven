@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spiking-ven"
-version = "0.4.0"
+dynamic = ["version"]   # read from src/spiking_ven/__init__.py; see [tool.hatch.version]
 description = "Spiking sparse auditory encoder and vocal error network for the zebra finch song system"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -45,6 +45,9 @@ sven-train-encoder = "spiking_ven.cli.train_encoder:main"
 sven-train-ven = "spiking_ven.cli.train_ven:main"
 sven-evaluate = "spiking_ven.cli.evaluate:main"
 sven-figure = "spiking_ven.cli.figure:main"
+
+[tool.hatch.version]
+path = "src/spiking_ven/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spiking_ven"]

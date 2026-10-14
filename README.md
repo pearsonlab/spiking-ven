@@ -15,7 +15,7 @@ It is used standalone for the analyses here, and imported by the full song-circu
 
 ```bash
 uv sync                       # core: numpy + scipy only
-uv sync --extra brian2        # + Brian2 runtime glue
+uv sync --extra brian2        # + Brian2 runtime (run a trained network in a Brian2 circuit)
 uv sync --all-extras          # + data prep (soundfile) and plotting (matplotlib)
 ```
 
@@ -26,12 +26,10 @@ numpy and scipy alone. No PyTorch, numba, seaborn or scikit-learn.
 ## Reproduce the cancellation figure
 
 ```bash
-make figure      # data -> encoder -> VEN -> figure   (~10 min, CPU)
+make figure      # data -> encoder -> VEN -> figures   (~15 min, CPU)
 make verify      # check artifact checksums against MANIFEST.sha256
 make test        # fast unit tests (no artifacts needed)
 make test-repro  # the reproduction assertions below, against outputs/
-sven-figure --view psth   # DAF time course; raster/rates/filters also available
-make rates       # the supplementary population-rate view
 ```
 
 `make figure` runs four stages, each cached and skipped if its output exists:
@@ -40,8 +38,8 @@ make rates       # the supplementary population-rate view
 |---|---|---|
 | 1. Song corpus | `sven-prep-data` | `outputs/motifs.npz` (38 motifs @ 16 kHz) |
 | 2. Causal encoder | `sven-train-encoder` | `outputs/causal_encoder.npz` (64 filters, 80 epochs, pruned to those that fire) |
-| 3. Train the VEN | `sven-train-ven` | `outputs/of_ven_model_default.npz` (600 renditions) |
-| 4. Figures | `sven-figure` | `outputs/encoding_comparison_default.pdf`, `daf_psth_default.pdf` |
+| 3. Train the VEN | `sven-train-ven` | `outputs/ven_model.npz` (600 renditions) |
+| 4. Figures | `sven-figure` | `outputs/cancellation.pdf`, `outputs/daf_psth.pdf` (`--view psth`) |
 
 `sven-evaluate` recomputes the metrics below for an existing model without retraining
 (`--json` for machine-readable output) -- useful for checking a model you were handed.
@@ -61,13 +59,16 @@ releases. Please still cite it.
 
 ## What the figure shows
 
-Five rows (waveform / spectrogram / auditory neurons / inhibitory interneurons / excitatory
-projection neurons) by four stimulus columns (training song / time-reversed motif /
-white noise / distorted auditory feedback).
+Six rows (waveform / spectrogram / auditory neurons / inhibitory interneurons / excitatory
+projection neurons / E population rate) by three stimulus columns (training song /
+time-reversed motif / distorted auditory feedback, i.e. the song with a 50 ms noise
+burst).
 
-The result is in the excitatory row: **~7 Hz on the trained song versus ~18, ~21 and ~19 Hz**
-on the other three. The network has learned to cancel the response to the song it hears every
-rendition, while responses to novel or perturbed sound survive as an error signal.
+The result is in the excitatory rows: the trained song is cancelled (~2 Hz, flat), while
+the time-reversed motif and the DAF burst still drive the E population -- the burst as a
+sharp transient. The network has learned to cancel the response to the song it hears every
+rendition, while responses to novel or perturbed sound survive as an error signal. The
+figure draws exactly the stimuli the metrics below are computed on.
 
 ## Expected numbers (asserted in the test suite)
 
@@ -89,53 +90,28 @@ against the shipped model; `make test-repro` runs it.
 | time to peak | 48 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.021 | < 0.15 — a transient, not a step (Fig. 8E) |
 
-**The open problem is response magnitude: the model is ~1.8–2.3x too strong.** Everything
+**The open problem is response magnitude: the model is ~1.8–2.2x too strong.** Everything
 else is inside the bird's range. Stated in spikes rather than Hz because a count needs no
 assumption about binning: the bird's responder adds about one spike on hearing the
-distortion, on a baseline under one spike in the same window.
-
-Converting the paper's ~20 Hz peak over a 90 ± 43 ms duration into a count does need an
-assumed shape, since none is reported. Rectangular gives 1.80 but is not physical — Fig.
-8E rises to a peak and decays, never sitting at its peak for 90 ms. Triangular gives 0.90;
-a rise to +50 ms then an exponential decay (τ 30–50 ms) gives 0.94–1.05. Best of all,
-assume no shape: this model's PSTH timing matches the panel, so scaling its measured shape
-to a 20 Hz peak gives 0.70 spikes. Integration is linear in amplitude, so on that estimate
-the spike ratio equals the peak ratio exactly — both 4.8x.
+distortion, on a baseline under one spike in the same window. (Converting the paper's
+~20 Hz peak over a 90 ± 43 ms duration into a count needs an assumed shape, since none is
+reported; triangular and rise-then-exponential shapes both give ~0.9–1.05 spikes.)
 
 `baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
 by a paired t-test for post > pre, which preferentially picks neurons quiet in the
-pre-window, so their baseline is biased low by the selection (0.63 Hz here against the
-population's 3.20 Hz). The paper applies the same criterion, so responder-vs-responder
+pre-window, so their baseline is biased low by the selection (~0.6 Hz against the
+population's ~2.2 Hz). The paper applies the same criterion, so responder-vs-responder
 comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
-**The gap is two errors that partly cancel.** Since peak = spikes / effective width, the
-model is 4.8x too tall *and* 0.7–0.9x too narrow (effective width 34.8 ms against the
-bird's 39–50 ms). That is why the peak excess exceeds the spike excess. The width error is
-confirmed independently by the measured duration, 55 ms against 90 ± 43 ms. So a uniform
-gain reduction is the wrong shape: it would fix the peak and leave the response too narrow,
-undershooting the spike count. What is needed is ~3.7x fewer spikes *and* ~1.3x more width.
-
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
-interval of 21–64%, which 54% sits inside.
+interval of 21–64%, which 56% sits inside.
 
 **The peak is a diagnostic, not a target, and is not asserted.** It is bin-width dependent
--- measured here it runs 96.9 / 96.0 / 78.6 / 77.7 / 64.2 Hz at 1 / 2 / 5 / 10 / 20 ms
-bins -- and the paper never states how its plotted PSTHs were binned. Only the bin width
-is pinned, so changing it has to be deliberate; a real assertion would need values read
-off Fig. 8E itself, which nobody has done. 2 ms is the only binning it gives (for the
-latency and duration z-tests) and is what we use; no smoothing is described anywhere in the
-paper, though the published trace looks smoother than 2 ms binning alone would give. So any
-ratio against ~20 Hz carries an unknown mismatch. The spike count does not: it is invariant
-to binning, and is the quantity the paper's own bootstrap used ("the maximal spike count
-over 150 ms").
-
-A previous version of this table reported K1–K4 against a "DAF" column that was pure white
-noise at 5.6x RMS, with each stimulus normalised to itself, and quoted targets of 7.7 ± 8.7
-Hz for singing and ~28 Hz for responders. None of those targets are numbers the paper
-states -- Fig. 8E plots a *change* in rate peaking near 20 Hz, not an absolute rate -- and
-the 2.1x/3.6x ratios were quotients computed from them rather than reported. The DAF
-stimulus is now song with a burst mixed into a window of it, both normalisation stages
-share the song as their reference, and the superseded assertions have been retired.
+and the paper never states how its plotted PSTHs were binned; 2 ms is the only binning it
+gives (for the latency and duration z-tests) and is what we use. So any ratio against
+~20 Hz carries an unknown mismatch. The spike count does not: it is invariant to binning,
+and is the quantity the paper's own bootstrap used ("the maximal spike count over
+150 ms").
 
 ## Citing
 

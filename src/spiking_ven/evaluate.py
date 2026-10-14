@@ -1,34 +1,17 @@
 """Error-signal metrics for a trained vocal error network.
 
-The K1-K4 family from Mandelblat-Cerf et al. 2014 (Fig. 7/8), which is how "did the
-network learn to cancel the bird's own song?" gets turned into numbers:
+How "did the network learn to cancel the bird's own song?" is turned into numbers,
+against Mandelblat-Cerf et al. 2014 (eLife 3:e02152, Figs. 7/8):
 
-===== ============================================ ==========================
-K1     correct song + HVC, mean E rate              target mean 7.7 Hz, SD 8.7
-K2     white noise at DAF amplitude + HVC           pop. avg ~16 Hz; responders ~28 Hz
-K3     K2 / K1                                      pop. avg ~2.1x; responders ~3.6x
-K4     (time-reversed motif + HVC) / K1             > 1x
-===== ============================================ ==========================
+- :func:`daf_metrics` -- E rate per rendition: K1 (trained song + HVC), K4 (time-reversed
+  motif + HVC, as a ratio to K1, target > 1x), and the DAF stimulus without HVC.
+- :func:`daf_response` -- the DAF response as the experiment measures it: responders by a
+  per-neuron paired t-test, their peak, onset latency, duration and extra spikes.
 
-The model is a **responder-only** population -- every excitatory unit receives identical
-auditory drive, so there is no non-responder subpopulation to average in. The
-responder-only targets are therefore the relevant ones.
-
-What K2/K3 measure
-------------------
-The response to white noise presented at ``DAF_WN_AMPLITUDE`` times the song's RMS,
-against the response to the song -- level difference included.
-
-This was not always so. The encode path used to scale every signal to the encoder's
-reference RMS *individually*, which divided ``DAF_WN_AMPLITUDE`` straight back out and
-left K2/K3 reporting a pure spectrotemporal mismatch at matched drive. The stimulus set
-is now normalised against one reference (the song) instead, so relative level survives
-into the cochleagram. ``of_to_spikes`` still rate-calibrates, but on the song window via
-``calibrate_on``, so it no longer flattens the levels either.
-
-This lives here, as a function returning a dict, rather than as a block of prints at the
-bottom of a training script, so the same numbers can be asserted in tests and recomputed
-for a saved model without retraining.
+Every stimulus is built by :func:`build_stimuli`, normalised against one reference (the
+song) at both the waveform and the spike-rate stage, so relative level -- the DAF noise is
+5.6x the song's RMS -- reaches the network. The trainer, the CLI, the tests and the
+figures all use it, so they cannot drift apart.
 """
 
 from __future__ import annotations
@@ -75,8 +58,8 @@ BIOLOGICAL_TARGETS = {
     #: Compare ``baseline_hz_all`` against this, NEVER ``baseline_hz_responders``.
     #: Responders are selected by a paired t-test for post > pre, which preferentially
     #: picks neurons that happened to be quiet in the pre-window, so their baseline is
-    #: biased low by the selection itself -- measured here 0.63 Hz against the
-    #: population's 3.20 Hz, a factor of 5. The paper applies the same criterion, so the
+    #: biased low by the selection itself -- measured here ~0.6 Hz against the
+    #: population's ~2.2 Hz. The paper applies the same criterion, so the
     #: bias is shared and the responder-vs-responder comparisons stay fair; it just means
     #: the responder baseline is not an estimate of anything's firing rate.
     "singing_rate_hz": (1.0, 10.0),
@@ -92,8 +75,7 @@ BIOLOGICAL_TARGETS = {
     #: for the latency/duration z-tests, the figure legends say only "averaged PSTH", and
     #: no smoothing is described anywhere in the paper (no Gaussian, kernel or
     #: convolution appears in the text) although the published trace looks smoother than
-    #: 2 ms binning would give. Measured on this model the peak falls 87 -> 81 -> 67 -> 57
-    #: Hz going from 1 to 2 to 10 to 20 ms bins, so any ratio against 20 Hz carries an
+    #: 2 ms binning would give. The model's peak falls steadily as the bins widen, so any ratio against 20 Hz carries an
     #: unknown binning mismatch. Compare ``extra_spikes_responders`` instead: a spike
     #: count is invariant to binning, and the paper's own bootstrap used one ("the maximal
     #: spike count over 150 ms").
@@ -128,51 +110,13 @@ BIOLOGICAL_TARGETS = {
     "aud_song_rate_hz": (2.4, 2.7),
 }
 
-# The magnitude gap is TWO errors, not one, and they partly cancel.
-#
-# peak = extra spikes / effective width, so decomposing: the model is 4.8x too TALL
-# (96 vs ~20 Hz) and 0.7-0.9x too NARROW (effective width 34.8 ms against the bird's
-# 39-50 ms under decaying shapes). That is why the peak excess (4.8x) exceeds the spike
-# excess (3.3-3.7x) -- they differ by exactly the width ratio.
-#
-# The width error is confirmed independently: measured response duration is 55 ms against
-# 90 +/- 43 ms, a ratio of 0.61, from the paper's own z-test criterion rather than from
-# any of this arithmetic. Two unrelated routes agreeing is what makes it credible.
-#
-# Consequence for any fix: a uniform gain reduction is the WRONG SHAPE. Scaling the
-# response down would bring the peak to ~20 Hz but leave it ~30% too narrow, landing the
-# spike count near 0.7 against a bird at ~0.9 -- overshooting into too FEW spikes. What is
-# needed is 3.7x fewer spikes AND 1.3x more width. Spacing spikes out without removing
-# them barely helps: it would move the peak only 96 -> 74 Hz and leave the count untouched.
-#
-# Already ruled out on this basis: JEI_scale and reduced auditory drive are uniform gain
-# changes; spike-frequency adaptation shortened duration further (65 -> 55 ms across its
-# sweep), buying peak reduction by making the width error worse.
-#
-# NOT a way out: lengthening the refractory period to 3-4 ms. The absolute refractory is
-# 1-2 ms (sodium h-gate recovery), and zebra finch RA projection neurons have a singing
-# ISI histogram sharply peaked at 2 ms with intra-burst rates to 455-700 Hz
-# (doi:10.1523/JNEUROSCI.3036-04.2005), which a 3-4 ms block would make impossible. 2 ms
-# is the measured value, not a conservative choice with room in it.
-
-# Superseded, and wrong: a previous table listed 7.7 +/- 8.7 Hz for singing (not a number
-# the paper states) and 28 Hz for responders citing Fig 8E (which plots a *change* in rate
-# peaking near 20 Hz, not an absolute rate). The 2.1x and 3.6x "targets" were quotients of
-# those two, computed here rather than reported by the paper. Do not reinstate them.
-
-
 def daf_waveform(sig_train, sr: int, *, seed: int = 42,
                  amplitude: float = DAF_WN_AMPLITUDE,
                  window_s: tuple[float, float] = DAF_WINDOW_S):
     """The DAF stimulus: the song, with white noise mixed into one window.
 
-    Defined once, here, and used by both the metrics and the figure. They used to
-    build different stimuli under the same name -- the metrics scored *pure* white
-    noise for the whole rendition, with no song in it at all, while the figure drew
-    song plus a noise burst. Only the latter is the DAF paradigm the biological
-    numbers come from: the bird sings, and noise is played back during singing.
-
-    Returns the waveform; the caller encodes it.
+    This is the paradigm the biological numbers come from: the bird sings, and noise is
+    played back during singing. Returns the waveform; the caller encodes it.
     """
     sig = np.asarray(sig_train, dtype=np.float64)
     rms = float(np.sqrt(np.mean(sig ** 2)))

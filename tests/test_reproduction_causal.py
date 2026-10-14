@@ -10,7 +10,7 @@ Marked ``slow`` -- each test re-runs VEN inference over several stimuli -- and s
 when the artifacts are absent so a bare checkout still gets a green suite. Regenerate with
 
     sven-train-ven --encoder outputs/causal_encoder.npz \
-                   --out outputs/of_ven_model_default.npz
+                   --out outputs/ven_model.npz
 
 The model is deterministic (test_determinism.py), so these are tight: the tolerances
 allow for platform differences in floating-point reductions, not run-to-run noise.
@@ -33,7 +33,7 @@ from spiking_ven.vocal_error_net import VocalErrorNetV2
 OUT = Path("outputs")
 MOTIFS = OUT / "motifs.npz"
 ENCODER = OUT / "causal_encoder.npz"
-MODEL = OUT / "of_ven_model_default.npz"
+MODEL = OUT / "ven_model.npz"
 
 pytestmark = [
     pytest.mark.slow,

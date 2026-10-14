@@ -1,18 +1,12 @@
 """``sven-train-ven`` -- train the vocal error network on the song corpus.
 
-Stage 2. Each rendition presents one motif from the corpus together with HVC premotor
-input and lets the plastic I->E weights (JIE) learn; interleaved "novel" presentations of
-the time-reversed motif drive threshold homeostasis without driving STDP. Over renditions
-the excitatory response to the trained song is cancelled while responses to novel or
+Stage 3. Each rendition presents one motif from the corpus together with HVC premotor
+input, and the plastic I->E weights (JIE) learn by causal STDP. Over renditions the
+excitatory response to the trained song is cancelled while responses to novel or
 perturbed sound survive.
 
-Defaults are the tuned operating point (drive_e=0.06, B_scale=16, tau_s=20,
-alpha_theta=0, 600 renditions), which reaches K1 ~7.8 Hz and K4 ~2.1x. Note these differ
-from the bare defaults of the original experiment script: at B_scale=1.0 the auditory
-drive is negligible against the tonic drive, JIE fills in non-selectively, and the
-network cancels nothing in particular.
-
-Only JIE is plastic. B (aud->E) and W_hvc (HVC->I) are fixed.
+Defaults are the tuned operating point in :mod:`spiking_ven.constants`. Only JIE is
+plastic; B (aud->E), B_hvc (HVC->I) and JEI (E->I) are fixed.
 """
 
 from __future__ import annotations

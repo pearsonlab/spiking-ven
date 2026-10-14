@@ -1,17 +1,13 @@
-"""``sven-evaluate`` -- recompute the K1-K4 error metrics for a saved model.
+"""``sven-evaluate`` -- recompute the error metrics for a saved model.
 
-Loads a trained network and re-derives the Mandelblat-Cerf metrics without retraining,
-which is what you want when checking a model you were handed, or after changing the
-stimulus construction.
+Loads a trained network and re-derives the Mandelblat-Cerf metrics (K1, K4 and the DAF
+response) without retraining. Fully seeded: the same model file and seed give the same
+numbers every time.
 
-Because the network is fully seeded, this is reproducible: the same model file and seed
-give the same numbers every time.
-
-Expect these to differ slightly (well inside the test tolerances) from the metrics printed
-at the end of training. Nothing has changed about the model: training-time metrics are
+Expect them to differ slightly from the metrics printed at the end of training: those are
 computed with the simulation noise stream already advanced by hundreds of renditions,
-whereas a freshly loaded model starts that stream at position zero. Same distribution,
-different draw.
+whereas a freshly loaded model starts that stream at zero. Same distribution, different
+draw.
 """
 
 from __future__ import annotations

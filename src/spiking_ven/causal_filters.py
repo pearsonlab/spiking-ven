@@ -11,22 +11,11 @@ nothing at or after t.
 
 The kernels are constrained to be **minimum phase** (:func:`min_phase`). That is what
 makes the code prompt. An unconstrained kernel drifts toward near-linear phase, whose
-group delay is ~L/2; the patch encoder's atoms sat at an energy centroid of 7.5 of 16
-frames, which is exactly that, and it cost ~30 ms of encoder latency. Minimum phase
-places the energy as early as the magnitude response allows -- it constrains *when* a
-filter responds without constraining *what* it is tuned to. Measured: centroid 7.5 ->
-10.9 of 16, energy in the newest 4 frames 0.26 -> 0.50, coder latency 30 ms -> 2 ms,
-with no loss of forward/reversed selectivity.
-
-Historical note, because the idea is tempting and does not work as stated: these kernels
-used to carry an extra "prediction" column V[k][:, L] trained on one-step-ahead error,
-the intent being to reward kernels informative about what comes next. It was inert.
-``infer`` reads only the analysis columns, the learning gradient is elementwise in the
-lag index so prediction error never reached them, and :func:`min_phase` did not mix it
-in either -- verified bit-identical codes under perturbation of that column alone. Every
-bit of the latency improvement came from minimum phase. Making the bank genuinely
-predictive would mean training the analysis kernels so their code predicts the next
-frame, not bolting a readout onto a reconstruction-trained code.
+group delay is ~L/2 -- an energy centroid of ~7.5 of 16 frames, costing ~30 ms of encoder
+latency. Minimum phase places the energy as early as the magnitude response allows -- it
+constrains *when* a filter responds without constraining *what* it is tuned to.
+Measured: centroid 7.5 -> 10.9 of 16, energy in the newest 4 frames 0.26 -> 0.50, coder
+latency 30 ms -> 2 ms, with no loss of forward/reversed selectivity.
 """
 
 import numpy as np
@@ -35,9 +24,9 @@ __all__ = ["causal_meansub", "infer", "learn", "min_phase", "prune_silent"]
 
 
 def causal_meansub(X, w):
-    """Subtract the mean over the trailing w frames. Causal, and matches the patch
-    encoder's per-window DC removal -- without it the code is level-dominated and goes
-    direction-blind (measured forward/reversed correlation 0.998)."""
+    """Subtract the mean over the trailing w frames (causal per-window DC removal).
+    Without it the code is level-dominated and goes direction-blind (measured
+    forward/reversed correlation 0.998)."""
     C, T = X.shape
     cs = np.cumsum(np.concatenate([np.zeros((C, 1)), X], axis=1), axis=1)
     idx = np.arange(T)
@@ -248,11 +237,10 @@ def prune_silent(V, cochs, lam, n_iter=20):
 
 
 class CausalFilterEncoder:
-    """Adapter so the VEN pipeline can consume a causal filter bank.
+    """A trained causal filter bank: waveform in, sparse activations out.
 
-    ``evaluate.encode_acts`` uses ``n_channels`` and ``encode_signal``; those two are the
-    whole contract, which is what let this replace the Olshausen-Field patch encoder
-    without touching stimulus construction, spike conversion or VEN training.
+    ``n_channels`` and ``encode_signal`` are the whole contract the rest of the pipeline
+    relies on (see ``evaluate.encode_acts``).
     """
 
     def __init__(self, V, bias, lam, coch_params):
@@ -264,7 +252,7 @@ class CausalFilterEncoder:
 
     @property
     def n_channels(self) -> int:
-        """Output width: one activation per filter, matching the patch encoder's n_bases."""
+        """Output width: one activation per filter."""
         return int(self.V.shape[0])
 
     def encode_signal(self, signal, *, sr, n_ista=20, upsample_to_ms=False,
@@ -283,10 +271,9 @@ class CausalFilterEncoder:
         acts = infer(Xc, self.V, self.lam, n_iter=n_ista, bias=self.bias)
 
         if divisive_gain:
-            # Same two corrections as the patch path, with the causal analogues: divide by
-            # the norm of the reconstructed past window so magnitude stops reporting how
-            # well the filters matched, then restore level with the window mean that
-            # causal_meansub removed.
+            # Divide by the norm of the reconstructed past window so magnitude stops
+            # reporting how well the filters matched, then restore level with the window
+            # mean that causal_meansub removed.
             recon = np.linalg.norm(acts.T @ self.V.reshape(self.V.shape[0], -1), axis=1)
             mu = (X - Xc).mean(axis=0)
             acts = acts * (mu / (1e-6 + recon))[None, :]

@@ -36,7 +36,7 @@ __all__ = ["sha256_file", "DEFAULT_ARTIFACTS", "write_manifest", "verify_manifes
 DEFAULT_ARTIFACTS = (
     "outputs/motifs.npz",
     "outputs/causal_encoder.npz",
-    "outputs/of_ven_model_default.npz",
+    "outputs/ven_model.npz",
 )
 
 _CHUNK = 1 << 20

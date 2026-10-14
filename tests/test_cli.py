@@ -137,14 +137,14 @@ def test_encoder_flag_is_a_path_everywhere():
 
 def test_train_encoder_causal_defaults_come_from_the_operating_point():
     a = cli_train_encoder.build_parser().parse_args([])
-    assert a.causal_lambda == C.CAUSAL_LAMBDA
-    assert a.causal_mp_strength == C.CAUSAL_MP_STRENGTH
-    assert a.causal_lr == C.CAUSAL_LR
-    assert a.causal_l1 == C.CAUSAL_L1
-    assert a.causal_smooth == C.CAUSAL_SMOOTH
-    assert a.causal_epochs == C.CAUSAL_EPOCHS
-    assert a.causal_n_ista == C.CAUSAL_N_ISTA
-    assert a.causal_no_prune is False, "silent filters are pruned by default"
+    assert a.lam == C.CAUSAL_LAMBDA
+    assert a.mp_strength == C.CAUSAL_MP_STRENGTH
+    assert a.lr == C.CAUSAL_LR
+    assert a.l1 == C.CAUSAL_L1
+    assert a.smooth == C.CAUSAL_SMOOTH
+    assert a.epochs == C.CAUSAL_EPOCHS
+    assert a.n_ista == C.CAUSAL_N_ISTA
+    assert a.no_prune is False, "silent filters are pruned by default"
 
 
 def test_train_encoder_front_end_is_sane():

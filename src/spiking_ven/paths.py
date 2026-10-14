@@ -47,7 +47,7 @@ def encoder_npz() -> Path:
 
 def ven_model_npz() -> Path:
     """Trained vocal error network produced by ``sven-train-ven``."""
-    return output_dir() / "of_ven_model_default.npz"
+    return output_dir() / "ven_model.npz"
 
 
 def ensure_parent(path: str | os.PathLike) -> Path:

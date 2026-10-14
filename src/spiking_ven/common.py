@@ -1,9 +1,7 @@
 """Shared helpers for the vocal error network.
 
 Spike/rate conversion, the activation-to-spike stage, synthetic HVC premotor input, and
-sparse log-normal weight initialisation. These were factored out of the original (v1) network module; the v1
-``VocalErrorNet`` class itself is not part of this package -- see the note in
-:mod:`spiking_ven.vocal_error_net`.
+sparse log-normal weight initialisation.
 """
 
 import numpy as np
@@ -47,7 +45,7 @@ def apply_refractory(spikes, t_refr_ms: float = 2.0):
 
     For the Poisson/Bernoulli input populations, which are sampled per 1 ms bin with no
     history and so can emit spikes a neuron could not produce. Two separate violations
-    are fixed here: a bin carrying more than one spike (``of_to_spikes`` returns Poisson
+    are fixed here: a bin carrying more than one spike (``acts_to_spikes`` returns Poisson
     COUNTS -- measured up to 5 per bin for song and 8 for DAF), and spikes closer together
     than ``t_refr_ms`` (measured ~40% of auditory ISIs and ~27% of HVC ISIs at 1 ms).
 
@@ -196,10 +194,3 @@ def acts_to_spikes(
     # Poisson COUNTS, so a bin can carry several spikes; apply_refractory collapses that
     # to at most one and enforces the floor. See its docstring for the measurements.
     return apply_refractory(counts, t_refr_ms)
-
-
-#: Historical name. This stage predates the causal encoder and was called
-#: ``of_to_spikes`` when the Olshausen-Field patch encoder was the only one; it never
-#: depended on that encoder, only on its activations. Kept as an alias so the rename does
-#: not break callers in the same release that removes the patch path.
-of_to_spikes = acts_to_spikes

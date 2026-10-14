@@ -53,7 +53,7 @@ The dataset is released under **CC0 1.0** (public domain dedication, no stated t
 use or access restrictions), which is why the derived `motifs.npz` can be attached to
 releases. Please still cite it.
 
-> **The download only works from a normal network.** Both dataset hosts sit behind
+> **The download only works from a normal network.** The dataset host sits behind
 > CloudFront, which returns `403 Forbidden` to datacenter IP ranges — so it fails on CI
 > runners and some cloud hosts regardless of the User-Agent the downloader sends. If you
 > are blocked, place the WAV + `.not.mat` pairs in `<data-dir>/song_wavs` yourself and

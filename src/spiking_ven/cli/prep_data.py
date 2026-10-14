@@ -31,8 +31,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--with-concat", action="store_true",
                         help="also build R469_concat.npy / R469_ann.npz "
                              "(concatenated corpus; nothing in this package reads it)")
-    parser.add_argument("--with-duke-features", action="store_true",
-                        help="also fetch the optional Duke feature archive (rate-model only)")
     args = parser.parse_args(argv)
 
     ddir = Path(args.data_dir) if args.data_dir else data_dir()
@@ -49,11 +47,9 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(f"--skip-download given but no WAVs found in {wav_dir}")
         print(f"  skipping download; using {wav_dir}")
     else:
-        from ..data.download import fetch_optional_duke_features, fetch_r469
+        from ..data.download import fetch_r469
 
         fetch_r469(ddir)
-        if args.with_duke_features:
-            fetch_optional_duke_features(ddir)
 
     # --- 2. optional concatenated corpus ----------------------------------
     print("\nStep 2/3 - concatenated corpus (optional)")

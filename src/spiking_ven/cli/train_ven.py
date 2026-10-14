@@ -170,7 +170,6 @@ def main(argv: list[str] | None = None) -> None:
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
                        mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista)
-    T_song = st["T_song"]
     aud_correct, aud_reversed, aud_daf = (st["aud_correct"], st["aud_reversed"],
                                           st["aud_daf"])
     correct_pool = st["correct_pool"]
@@ -186,8 +185,7 @@ def main(argv: list[str] | None = None) -> None:
         tau_e=args.tau_e,
         r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i, alpha_theta=args.alpha_theta,
-        r_e_target=args.r_e_target, r_e_song_target=0.0,
-        A_jei_plastic=0.0, use_mask=False,
+        r_e_target=args.r_e_target,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
         a_sfa=args.a_sfa, tau_sfa=args.tau_sfa,
@@ -231,16 +229,15 @@ def main(argv: list[str] | None = None) -> None:
         jie_trace.append(float(ven.JIE.mean()))
         theta_trace.append(float(ven.theta_e.mean()))
 
-    # Interleaved "novel" passes. At the shipped operating point (--alpha-theta 0, and
-    # A_jei_plastic fixed at 0) adapt() has no homeostasis to run and updates nothing --
+    # Interleaved "novel" passes. At the shipped operating point (--alpha-theta 0)
+    # adapt() has no homeostasis to run and updates nothing --
     # but it still simulates, and so still advances the network's noise stream. The
     # published K-numbers were produced with these passes in place, so they are kept
     # rather than skipped as dead work; --novel-ratio 0 drops them and will land on
     # slightly different numbers. Turning homeostasis on makes them load-bearing again.
     #
     # Rendition 1 carries the burn-in.
-    ven.fit(hvc_burn, aud_burn, n_renditions=1, T_song=T_song,
-            T_burn=args.t_burn, T_post=args.t_post, verbose=False)
+    ven.fit(hvc_burn, aud_burn)
     for _ in range(args.novel_ratio):
         ven.adapt(hvc_on, aud_reversed)
     record()
@@ -248,8 +245,7 @@ def main(argv: list[str] | None = None) -> None:
         log(1)
 
     for r in range(1, args.n_rend):
-        ven.fit(hvc_on, correct_pool[r % len(correct_pool)], n_renditions=1,
-                T_song=T_song, T_burn=0, T_post=args.t_post, verbose=False)
+        ven.fit(hvc_on, correct_pool[r % len(correct_pool)])
         for _ in range(args.novel_ratio):
             ven.adapt(hvc_on, aud_reversed)
         record()

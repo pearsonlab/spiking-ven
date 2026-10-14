@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from ..operating_point import N_HVC, N_ISTA, R_E_TARGET, T_BURN, T_POST
 from ..constants import SR
 from ..evaluate import (
     build_stimuli,
@@ -40,12 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
-    p.add_argument("--n-hvc", type=int, default=60)
-    p.add_argument("--t-post", type=int, default=200)
-    p.add_argument("--t-burn", type=int, default=500)
+    p.add_argument("--n-hvc", type=int, default=N_HVC)
+    p.add_argument("--t-post", type=int, default=T_POST)
+    p.add_argument("--t-burn", type=int, default=T_BURN)
     p.add_argument("--mean-rate-hz", type=float, default=2.5)
-    p.add_argument("--n-ista", type=int, default=50)
-    p.add_argument("--r-e-target", type=float, default=16.0,
+    p.add_argument("--n-ista", type=int, default=N_ISTA)
+    p.add_argument("--r-e-target", type=float, default=R_E_TARGET,
                    help="only used to annotate the no-HVC sanity line")
     p.add_argument("--n-trials", type=int, default=20,
                    help="renditions with independent noise draws for the DAF response")

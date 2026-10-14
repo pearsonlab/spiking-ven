@@ -5,14 +5,18 @@ Scope is deliberately one layer thick. These tests assert what the CLIs *parse* 
 below has its own tests, and duplicating them here would make the suite slow and would
 not catch the kind of bug this layer actually has.
 
-Two of those bugs happened during development and motivate the defaults tests below:
+The defaults tests assert WIRING, not values: that each flag reads the shared constant
+rather than restating a number. Restating the number here would be worse than redundant --
+it would make the test tautological the moment the constant moved, and it would put a
+second copy of the operating point in the repository, which is the exact failure these
+CLIs exist to prevent. A sweep once built the network from library defaults rather than
+the trained point, because the real parameters lived only in a scratch script, and four
+grid points came back identical and broken before anyone noticed.
 
-- A sweep constructed the network with library defaults instead of the trained operating
-  point, because the real parameters lived only in a scratch script. Four grid points came
-  back identical and broken. The values are now CLI defaults, and pinned here.
-- The figure entry point hardcoded the auditory rate at 15 Hz, so rendering a model
-  trained at any other rate encoded a different stimulus than the metrics beside it.
-  ``--mean-rate-hz`` exists for that reason and its default has to track the constant.
+What catches a WRONG value is not here but in test_reproduction_causal.py, which runs the
+model and checks the DAF metrics against the bird. Change B_SCALE and that fails with a
+number that means something, where an assertion here could only ever report that 16.0
+still equals 16.0.
 """
 
 import argparse
@@ -24,7 +28,14 @@ from spiking_ven.cli import figure as cli_figure
 from spiking_ven.cli import prep_data as cli_prep
 from spiking_ven.cli import train_encoder as cli_train_encoder
 from spiking_ven.cli import train_ven as cli_train_ven
-from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, SR
+from spiking_ven import operating_point as op
+from spiking_ven.constants import (
+    AUD_DELAY_MS,
+    AUD_MEAN_RATE_HZ,
+    DAF_WINDOW_S,
+    HVC_DELAY_MS,
+    SR,
+)
 
 PARSER_MODULES = [cli_train_encoder, cli_train_ven, cli_evaluate, cli_figure]
 ALL_MODULES = PARSER_MODULES + [cli_prep]
@@ -133,57 +144,73 @@ def test_train_encoder_choices_and_rejection():
         p.parse_args(["--encoder", "minimum-phase"])
 
 
-def test_train_encoder_causal_operating_point():
-    """The converged causal bank. lam sets both code sparsity and how many filters
-    survive; mp_strength is a soft pull because the hard projection collapses kernels to
-    impulses; lr_bias is 0 because usage equalisation strangled the gradient."""
+def test_train_encoder_causal_defaults_come_from_the_operating_point():
     a = cli_train_encoder.build_parser().parse_args([])
-    assert (a.causal_lambda, a.causal_mp_strength, a.causal_lr) == (0.3, 0.25, 10.0)
-    assert (a.causal_l1, a.causal_smooth) == (7e-5, 1e-3)
-    assert (a.causal_lr_bias, a.causal_epochs, a.causal_n_ista) == (0.0, 80, 20)
+    assert a.causal_lambda == op.CAUSAL_LAMBDA
+    assert a.causal_mp_strength == op.CAUSAL_MP_STRENGTH
+    assert a.causal_lr == op.CAUSAL_LR
+    assert a.causal_l1 == op.CAUSAL_L1
+    assert a.causal_smooth == op.CAUSAL_SMOOTH
+    assert a.causal_lr_bias == op.CAUSAL_LR_BIAS
+    assert a.causal_target_usage == op.CAUSAL_TARGET_USAGE
+    assert a.causal_epochs == op.CAUSAL_EPOCHS
+    assert a.causal_n_ista == op.CAUSAL_N_ISTA
     assert a.causal_no_prune is False, "silent filters are pruned by default"
 
 
-def test_train_encoder_patch_defaults_are_untouched():
-    """The causal work must not have moved the Olshausen-Field path."""
+def test_train_encoder_patch_path_still_parses():
+    """The superseded Olshausen-Field path is not part of the operating point, so its
+    defaults stay in the CLI. Only that they exist and are sane is checked here; asserting
+    each literal would reintroduce the duplication this module removed."""
     a = cli_train_encoder.build_parser().parse_args([])
-    assert (a.n_bases, a.n_epochs, a.lr, a.lambda_sparse) == (64, 300, 0.01, 0.05)
-    assert (a.target_usage, a.lr_bias, a.batch_size) == (0.10, 0.005, 128)
-    assert (a.n_coch_ch, a.k_frames, a.frame_rate) == (40, 16, 500)
-    assert (a.lo_hz, a.hi_hz, a.rms_ref, a.sr) == (200.0, 8000.0, 0.1, SR)
+    assert a.n_bases > 0 and a.n_epochs > 0 and a.batch_size > 0
+    assert 0.0 < a.lr < 1.0 and 0.0 < a.lambda_sparse < 1.0
+    assert a.lo_hz < a.hi_hz <= a.sr / 2, "cochleagram band inside Nyquist"
+    assert a.sr == SR
 
 
 # ---------------------------------------------------------------------- train_ven
 
 
-def test_train_ven_operating_point():
-    """These were hardcoded in a scratch script. A sweep that used library defaults
-    instead produced four identical broken grid points before anyone noticed."""
-    a = cli_train_ven.build_parser().parse_args([])
-    assert (a.n_e, a.n_i, a.n_hvc, a.n_rend) == (600, 150, 60, 600)
-    assert (a.b_scale, a.c_b, a.b_hvc_scale, a.c_hvc) == (16.0, 0.05, 0.333, 0.1)
-    assert (a.drive_e, a.drive_i, a.r_e_target) == (0.06, 0.058, 16.0)
-    assert (a.tau_s, a.tau_e, a.tau_stdp) == (20.0, 30.0, 20.0)
-    assert (a.c_jie, a.r_i_th, a.j_max_ie) == (0.1, 6.0, 1.0)
-    assert (a.t_post, a.t_burn, a.n_ista) == (200, 500, 50)
-    assert a.alpha_theta == 0.0, "threshold homeostasis is off at the shipped point"
-    assert a.a_jie is None, "None means auto-scale from tau_stdp"
+@pytest.mark.parametrize(
+    ("dest", "const"),
+    [
+        ("n_e", "N_E"), ("n_i", "N_I"), ("n_hvc", "N_HVC"), ("n_rend", "N_RENDITIONS"),
+        ("b_scale", "B_SCALE"), ("c_b", "C_B"),
+        ("b_hvc_scale", "B_HVC_SCALE"), ("c_hvc", "C_HVC"),
+        ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"), ("r_e_target", "R_E_TARGET"),
+        ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
+        ("c_jie", "C_JIE"), ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
+        ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
+        ("alpha_theta", "ALPHA_THETA"), ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
+    ],
+)
+def test_train_ven_defaults_come_from_the_operating_point(dest, const):
+    assert getattr(cli_train_ven.build_parser().parse_args([]), dest) == getattr(op, const)
 
 
-def test_train_ven_adaptation_defaults():
-    """tau_sfa must stay shorter than the 50 ms DAF burst: at 100 ms the current
-    integrates over the motif and acts as a tonic gain change instead."""
-    a = cli_train_ven.build_parser().parse_args([])
-    assert (a.a_sfa, a.tau_sfa) == (1.0, 10.0)
-    assert a.tau_sfa < 50.0
+def test_train_ven_a_jie_is_derived_not_stored():
+    """None means "compute it from the STDP window". The amplitude scales inversely with
+    the width so the per-spike integral stays fixed, which is the reason the operating
+    point is a module and not a data file -- a stored value would desynchronise the
+    learning rule the first time the window changed."""
+    assert cli_train_ven.build_parser().parse_args([]).a_jie is None
+    assert op.a_jie_for(op.TAU_STDP) == pytest.approx(op.a_jie_for(2 * op.TAU_STDP) * 2)
+    assert op.a_jie_for(0.0, tau_s=op.TAU_S) == op.a_jie_for(op.TAU_S)
+
+
+def test_adaptation_timescale_is_shorter_than_the_burst():
+    """A constraint, not a copy of the value: at 100 ms the adaptation current integrates
+    over the motif and acts as a tonic gain change instead of truncating the response."""
+    burst_ms = (DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000.0
+    assert op.TAU_SFA < burst_ms
 
 
 def test_train_ven_delays_track_the_constants():
-    """5/0, not 23/5. At 23 ms the conduction delay consumed the response latency the
-    model is supposed to predict, which made the comparison circular."""
+    """At 23 ms the conduction delay consumed the response latency the model is supposed
+    to predict, which made the comparison circular."""
     a = cli_train_ven.build_parser().parse_args([])
     assert (a.aud_delay_ms, a.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
-    assert (a.aud_delay_ms, a.hvc_delay_ms) == (5, 0)
 
 
 def test_train_ven_takes_either_encoder_flag():
@@ -197,12 +224,17 @@ def test_train_ven_takes_either_encoder_flag():
 # ------------------------------------------------------------------------ evaluate
 
 
-def test_evaluate_defaults():
+def test_evaluate_shares_the_operating_point():
     a = cli_evaluate.build_parser().parse_args([])
-    assert (a.n_trials, a.n_hvc, a.n_ista) == (20, 60, 50)
-    assert (a.t_post, a.t_burn, a.r_e_target) == (200, 500, 16.0)
+    assert (a.n_hvc, a.n_ista) == (op.N_HVC, op.N_ISTA)
+    assert (a.t_post, a.t_burn, a.r_e_target) == (op.T_POST, op.T_BURN, op.R_E_TARGET)
+    assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True
+
+
+def test_figure_shares_the_operating_point():
+    assert cli_figure.build_parser().parse_args([]).t_post == op.T_POST
 
 
 # -------------------------------------------------------------------------- figure

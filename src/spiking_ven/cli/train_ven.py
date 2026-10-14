@@ -22,6 +22,32 @@ import argparse
 import numpy as np
 
 from ..constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, SR
+from ..operating_point import (
+    ALPHA_THETA,
+    A_SFA,
+    B_HVC_SCALE,
+    B_SCALE,
+    C_B,
+    C_HVC,
+    C_JIE,
+    DRIVE_E,
+    DRIVE_I,
+    J_MAX_IE,
+    N_E,
+    N_HVC,
+    N_I,
+    N_ISTA,
+    N_RENDITIONS,
+    R_E_TARGET,
+    R_I_TH,
+    T_BURN,
+    T_POST,
+    TAU_E,
+    TAU_S,
+    TAU_SFA,
+    TAU_STDP,
+    a_jie_for,
+)
 from ..evaluate import (
     build_stimuli,
     daf_metrics,
@@ -49,36 +75,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     # tuned operating point
-    p.add_argument("--drive-e", type=float, default=0.06)
-    p.add_argument("--drive-i", type=float, default=0.058)
-    p.add_argument("--b-scale", type=float, default=16.0)
-    p.add_argument("--tau-s", type=float, default=20.0)
-    p.add_argument("--tau-e", type=float, default=30.0,
+    p.add_argument("--drive-e", type=float, default=DRIVE_E)
+    p.add_argument("--drive-i", type=float, default=DRIVE_I)
+    p.add_argument("--b-scale", type=float, default=B_SCALE)
+    p.add_argument("--tau-s", type=float, default=TAU_S)
+    p.add_argument("--tau-e", type=float, default=TAU_E,
                    help="E membrane time constant (ms). theta_e is derived from it, so "
                         "the tonic rate stays at target_rate as this changes.")
-    p.add_argument("--alpha-theta", type=float, default=0.0)
-    p.add_argument("--n-rend", type=int, default=600)
+    p.add_argument("--alpha-theta", type=float, default=ALPHA_THETA)
+    p.add_argument("--n-rend", type=int, default=N_RENDITIONS)
     # network
-    p.add_argument("--n-e", type=int, default=600)
-    p.add_argument("--n-i", type=int, default=150)
-    p.add_argument("--n-hvc", type=int, default=60)
-    p.add_argument("--c-b", type=float, default=0.05)
-    p.add_argument("--c-hvc", type=float, default=0.1)
-    p.add_argument("--b-hvc-scale", type=float, default=0.333)
-    p.add_argument("--c-jie", type=float, default=0.1)
-    p.add_argument("--r-i-th", type=float, default=6.0)
-    p.add_argument("--j-max-ie", type=float, default=1.0)
+    p.add_argument("--n-e", type=int, default=N_E)
+    p.add_argument("--n-i", type=int, default=N_I)
+    p.add_argument("--n-hvc", type=int, default=N_HVC)
+    p.add_argument("--c-b", type=float, default=C_B)
+    p.add_argument("--c-hvc", type=float, default=C_HVC)
+    p.add_argument("--b-hvc-scale", type=float, default=B_HVC_SCALE)
+    p.add_argument("--c-jie", type=float, default=C_JIE)
+    p.add_argument("--r-i-th", type=float, default=R_I_TH)
+    p.add_argument("--j-max-ie", type=float, default=J_MAX_IE)
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
                    help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp_eff)")
-    p.add_argument("--tau-stdp", type=float, default=20.0,
+    p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
                    help="STDP coincidence window (ms), independent of the synaptic "
                         "tau_s; 0 falls back to tau_s")
     # protocol
     p.add_argument("--novel-ratio", type=int, default=1)
-    p.add_argument("--r-e-target", type=float, default=16.0)
-    p.add_argument("--t-post", type=int, default=200)
-    p.add_argument("--t-burn", type=int, default=500)
+    p.add_argument("--r-e-target", type=float, default=R_E_TARGET)
+    p.add_argument("--t-post", type=int, default=T_POST)
+    p.add_argument("--t-burn", type=int, default=T_BURN)
     p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS,
                    help="cochlea->AIV-E (measured)")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
@@ -86,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     # encoding
     p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
                    help="auditory spike-rate calibration (Schneider & Woolley 2013)")
-    p.add_argument("--n-ista", type=int, default=50)
+    p.add_argument("--n-ista", type=int, default=N_ISTA)
     # Firing-rate adaptation on E -- the single most effective lever on response
     # magnitude, and the only one tried that is not the wrong SHAPE.
     #
@@ -112,8 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
     # over the same sweep, but duration is a z-test against pre-stimulus variability, so a
     # weaker response is detectable for less time -- some of that decline is the measure,
     # not the response.
-    p.add_argument("--a-sfa", type=float, default=1.0)
-    p.add_argument("--tau-sfa", type=float, default=10.0)
+    p.add_argument("--a-sfa", type=float, default=A_SFA)
+    p.add_argument("--tau-sfa", type=float, default=TAU_SFA)
     return p
 
 
@@ -125,10 +151,11 @@ def main(argv: list[str] | None = None) -> None:
     traces_path = str(ensure_parent(args.traces)) if args.traces else out_path.replace(
         ".npz", "_traces.npz")
 
-    # A_jie auto-scales inversely with the effective STDP kernel width so the per-spike
-    # STDP integral (~ A_jie * tau_stdp) is constant across widths.
-    tau_stdp_eff = args.tau_stdp if args.tau_stdp > 0.0 else args.tau_s
-    a_jie = args.a_jie if args.a_jie is not None else 3e-3 * (10.0 / tau_stdp_eff)
+    # Derived rather than a constant: the per-spike STDP integral goes as
+    # A_jie * tau, so the amplitude scales inversely with the kernel width. See
+    # operating_point.a_jie_for for why that formula lives with its inputs.
+    a_jie = (args.a_jie if args.a_jie is not None
+             else a_jie_for(args.tau_stdp, args.tau_s))
 
     if args.causal_encoder:
         from ..causal_filters import CausalFilterEncoder

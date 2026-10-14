@@ -71,6 +71,9 @@ def test_encoder_exposes_its_width(n):
     Parametrised away from 64 on purpose: callers once used a hardcoded fallback of 64,
     which would have mis-sized arrays for any other width.
     """
-    from spiking_ven import OlshausenFieldEncoder
+    import numpy as _np
 
-    assert OlshausenFieldEncoder(n_bases=n, patch_len=40, seed=0).n_channels == n
+    from spiking_ven import CausalFilterEncoder
+
+    enc = CausalFilterEncoder(_np.zeros((n, 8, 4)), _np.zeros(n), 0.1, {})
+    assert enc.n_channels == n

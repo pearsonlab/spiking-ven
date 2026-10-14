@@ -19,7 +19,7 @@ Public API
 ----------
 make_figure(ven, encoder, sig_train, T_song, out_tag, *, ...)
     Generate and save the figure with the current VEN state.
-    encoder: OlshausenFieldEncoder or CausalFilterEncoder.
+    encoder: CausalFilterEncoder.
     Call this from experiment scripts to snapshot learning progress.
 
 compute_encoding_columns(ven, encoder, sig_train, T_song, *, ...)
@@ -49,7 +49,7 @@ from scipy.signal import spectrogram as scipy_spectrogram
 from ..constants import AUD_MEAN_RATE_HZ, DAF_WN_AMPLITUDE, KERNEL_WIDTH_MS, PEAK_RATE_HZ
 from ..evaluate import daf_waveform
 from ..evaluate import encode_acts
-from ..olshausen_field import of_to_spikes
+from ..common import acts_to_spikes
 from ..common import generate_hvc_spikes
 
 __all__ = ["make_figure", "compute_encoding_columns", "specgram", "DRAWN_COLS"]
@@ -112,7 +112,7 @@ def compute_encoding_columns(
     # Either encoder: the patch dictionary or the causal filter bank. encode_acts is the
     # one place that dispatches on type, so this figure cannot normalise differently from
     # the metrics it is drawn beside. It used to reject anything but the patch encoder and
-    # call coch_encode directly, which is the same bypass that stopped the causal bank
+    # call the encoder directly, which is the same bypass that stopped the causal bank
     # reaching build_stimuli.
     T_rend    = T_song + T_post
     rms_train = float(np.sqrt(np.mean(sig_train ** 2)))
@@ -141,7 +141,7 @@ def compute_encoding_columns(
     def _sig_to_aud(sig: np.ndarray, seed_offset: int) -> np.ndarray:
         acts = encode_acts(sig, encoder, sr=sr, n_ista=of_n_ista,
                            T_out_ms=T_rend, rms_from=sig_train)
-        spk = of_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
+        spk = acts_to_spikes(acts, mean_rate_hz=of_mean_rate_hz, frame_rate=1000,
                            t_refr_ms=t_refr_ms,
                            sign_split=_sign_split, seed=seed + seed_offset,
                            calibrate_on=acts_train)
@@ -210,7 +210,7 @@ def make_figure(
     Parameters
     ----------
     ven         : VocalErrorNetV2 (trained or partially trained)
-    encoder     : OlshausenFieldEncoder or CausalFilterEncoder
+    encoder     : CausalFilterEncoder
     sig_train   : (N,) float64 training audio signal
     T_song      : int, song duration in ms
     out_tag     : str appended to output filenames, e.g. "_r0050"

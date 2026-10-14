@@ -9,10 +9,10 @@ Pipeline
 --------
 ``audio -> filterbank -> cochleagram -> sparse encoder -> spikes -> VocalErrorNetV2``
 
-The sparse encoder is either :class:`OlshausenFieldEncoder` (patches of a trailing
-window) or :class:`CausalFilterEncoder` (a minimum-phase filter bank, strictly causal
-and ~30 ms prompter). They are swappable: both expose ``n_channels`` and an encode call
-with the same normalisation contract.
+The sparse encoder is :class:`CausalFilterEncoder`, a strictly causal minimum-phase
+filter bank. It replaced an Olshausen-Field patch encoder, which was removed once it was
+no longer the shipped path: the patch atoms carried ~30 ms of group delay, which put the
+modelled DAF response latency at 66 ms against the bird's 23 +/- 12 ms.
 
 The public surface is deliberately split so that the model and training core import with
 numpy and scipy alone:
@@ -28,14 +28,8 @@ __version__ = "0.4.0"
 
 from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav
-from .common import generate_hvc_spikes, spike_to_rate
+from .common import acts_to_spikes, generate_hvc_spikes, of_to_spikes, spike_to_rate
 from .filterbank import centre_frequencies, gammatone_spectrogram
-from .olshausen_field import (
-    OlshausenFieldEncoder,
-    coch_encode,
-    coch_extract_patches,
-    of_to_spikes,
-)
 from .vocal_error_net import VocalErrorNetV2
 
 __all__ = [
@@ -46,10 +40,8 @@ __all__ = [
     "cochleagram",
     "load_wav",
     # stage 1: sparse encoder
-    "OlshausenFieldEncoder",
     "CausalFilterEncoder",
-    "coch_extract_patches",
-    "coch_encode",
+    "acts_to_spikes",
     "of_to_spikes",
     # stage 2: vocal error network
     "VocalErrorNetV2",

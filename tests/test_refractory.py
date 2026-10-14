@@ -3,7 +3,7 @@
 Model neurons were free to fire on consecutive 1 ms bins, so the ceiling was 1000 Hz, and
 during a DAF burst the median E inter-spike interval was exactly 1 ms with 73% of spikes
 following the previous one in the very next bin. The auditory population was worse than
-unbounded: ``of_to_spikes`` returns Poisson COUNTS, so a single bin could carry 5 spikes
+unbounded: ``acts_to_spikes`` returns Poisson COUNTS, so a single bin could carry 5 spikes
 (8 under DAF). These pin both fixes.
 """
 
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from spiking_ven.common import apply_refractory, generate_hvc_spikes
-from spiking_ven.olshausen_field import of_to_spikes
+from spiking_ven.common import acts_to_spikes
 from spiking_ven.vocal_error_net import VocalErrorNetV2
 
 
@@ -64,7 +64,7 @@ def test_apply_refractory_drops_close_spikes_and_keeps_the_first():
 def test_input_populations_respect_the_floor():
     rng = np.random.default_rng(0)
     acts = np.abs(rng.standard_normal((12, 400))) ** 3      # bursty, like the real code
-    spk = of_to_spikes(acts, mean_rate_hz=40.0, frame_rate=1000, seed=1, t_refr_ms=2.0)
+    spk = acts_to_spikes(acts, mean_rate_hz=40.0, frame_rate=1000, seed=1, t_refr_ms=2.0)
     assert spk.max() <= 1.0 and _min_isi(spk) >= 2
 
     hvc = generate_hvc_spikes(20, 600, 1, 400, 0, T_post=200, seed=3, t_refr_ms=2.0)

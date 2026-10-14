@@ -1,6 +1,6 @@
 """Convolutional sparse coding on cochleagrams -- EXPERIMENTAL.
 
-Why this exists: the patch encoder in :mod:`spiking_ven.olshausen_field` extracts
+Why this exists: the Olshausen-Field patch encoder (removed in v0.5) extracted
 overlapping trailing windows at stride 1, which makes its training set shift-invariant
 *within* the window. Nothing in the objective then distinguishes early from late, so the
 learned atoms spread their energy flat across the window -- measured effective width 13.4

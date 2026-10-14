@@ -19,7 +19,7 @@ __all__ = [
     "data_dir",
     "output_dir",
     "motifs_npz",
-    "of_encoder_npz",
+    "encoder_npz",
     "ven_model_npz",
     "ensure_parent",
 ]
@@ -40,9 +40,9 @@ def motifs_npz() -> Path:
     return output_dir() / "motifs.npz"
 
 
-def of_encoder_npz() -> Path:
-    """Trained Olshausen-Field sparse encoder produced by ``sven-train-encoder``."""
-    return output_dir() / "of_encoder.npz"
+def encoder_npz() -> Path:
+    """Trained causal minimum-phase filter bank produced by ``sven-train-encoder``."""
+    return output_dir() / "causal_encoder.npz"
 
 
 def ven_model_npz(tag: str = "k4max") -> Path:

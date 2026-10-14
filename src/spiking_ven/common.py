@@ -1,7 +1,7 @@
 """Shared helpers for the vocal error network.
 
-Spike/rate conversion, synthetic HVC premotor input, and sparse log-normal weight
-initialisation. These were factored out of the original (v1) network module; the v1
+Spike/rate conversion, the activation-to-spike stage, synthetic HVC premotor input, and
+sparse log-normal weight initialisation. These were factored out of the original (v1) network module; the v1
 ``VocalErrorNet`` class itself is not part of this package -- see the note in
 :mod:`spiking_ven.vocal_error_net`.
 """
@@ -10,6 +10,8 @@ import numpy as np
 from numpy.random import default_rng
 from scipy.signal import lfilter
 from scipy.sparse import random as sparse_random
+
+from .constants import AUD_MEAN_RATE_HZ
 
 
 def spike_to_rate(
@@ -147,3 +149,78 @@ def _lognormal_sparse(shape, c, mean, std, rng):
     W = sparse_random(n_rows, n_cols, density=c, format="csr",
                       data_rvs=data_rvs, random_state=rng.integers(2**31))
     return W.toarray().astype(np.float32)
+
+
+def acts_to_spikes(
+    activations: np.ndarray,
+    mean_rate_hz: float = AUD_MEAN_RATE_HZ,
+    frame_rate: int = 1000,
+    rng: np.random.Generator | None = None,
+    seed: int | None = None,
+    per_neuron: bool = False,
+    sign_split: bool = False,
+    calibrate_on: np.ndarray | None = None,
+    t_refr_ms: float = 2.0,
+) -> np.ndarray:
+    """Convert O&F activations to Poisson spike trains.
+
+    Parameters
+    ----------
+    activations  : (n_bases, T) float, signed ISTA coefficients
+    mean_rate_hz : target mean firing rate (Hz); applied per-neuron when
+                   per_neuron=True, else over the whole population
+    frame_rate   : temporal resolution of activations in Hz
+    per_neuron   : if True, calibrate each neuron independently to
+                   mean_rate_hz rather than using a single global scale
+    sign_split   : if True, return (2*n_bases, T) where the first n_bases
+                   rows encode positive loadings and the last n_bases rows
+                   encode negative loadings (each independently calibrated
+                   when per_neuron=True)
+    calibrate_on : activations to derive the rate scale from, instead of
+                   ``activations`` itself. Use this when ``activations`` is a
+                   sparse timeline -- e.g. one song tiled into motif windows with
+                   silence between them. Calibrating on the whole timeline would
+                   divide by a mean diluted by the silence and inflate the rate
+                   during song; pass the song-window activations here so the
+                   target rate means what it says.
+    Returns
+    -------
+    spikes : (n_bases, T) or (2*n_bases, T) float32 spike counts per bin.
+    """
+    if rng is None:
+        rng = np.random.default_rng(seed)
+
+    def _rectify(a: np.ndarray) -> np.ndarray:
+        a = a.astype(np.float64)
+        if sign_split:
+            return np.concatenate([np.maximum(a, 0.0), np.maximum(-a, 0.0)], axis=0)
+        return np.maximum(a, 0.0)
+
+    act = _rectify(activations)
+    ref = act if calibrate_on is None else _rectify(calibrate_on)
+
+    dt_s = 1.0 / frame_rate
+    if per_neuron:
+        ref_mean = ref.mean(axis=1, keepdims=True)          # (n_neurons, 1)
+        rate_scale = mean_rate_hz / np.maximum(ref_mean, 1e-12)
+    else:
+        rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
+
+    lam = act * rate_scale * dt_s
+    counts = rng.poisson(lam)
+    if t_refr_ms <= 0.0:
+        # Exactly the pre-refractory behaviour, multi-spike bins included. Not merely
+        # "no thinning": apply_refractory also collapses counts to 1, so routing through
+        # it at 0 would still change the output and a model pinned to the old dynamics
+        # would not reproduce.
+        return counts.astype(np.float32)
+    # Poisson COUNTS, so a bin can carry several spikes; apply_refractory collapses that
+    # to at most one and enforces the floor. See its docstring for the measurements.
+    return apply_refractory(counts, t_refr_ms)
+
+
+#: Historical name. This stage predates the causal encoder and was called
+#: ``of_to_spikes`` when the Olshausen-Field patch encoder was the only one; it never
+#: depended on that encoder, only on its activations. Kept as an alias so the rename does
+#: not break callers in the same release that removes the patch path.
+of_to_spikes = acts_to_spikes

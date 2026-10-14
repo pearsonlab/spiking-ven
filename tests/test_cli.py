@@ -106,9 +106,9 @@ def test_mean_rate_tracks_the_constant(mod):
     ("mod", "path_dests"),
     [
         (cli_train_encoder, ("motifs", "out")),
-        (cli_train_ven, ("encoder", "causal_encoder", "motifs", "out", "traces")),
+        (cli_train_ven, ("encoder", "motifs", "out", "traces")),
         (cli_evaluate, ("model", "encoder", "motifs")),
-        (cli_figure, ("model", "of_encoder", "causal_encoder", "motifs", "out_dir")),
+        (cli_figure, ("model", "encoder", "motifs", "out_dir")),
     ],
     ids=lambda v: v.__name__.rsplit(".", 1)[-1] if hasattr(v, "__name__") else "",
 )
@@ -116,32 +116,24 @@ def test_paths_default_to_none_so_the_paths_module_decides(mod, path_dests):
     """None means "ask paths.py", not "no value". Defaulting to a literal here would put
     a second copy of the output layout in every CLI.
 
-    Listed per module rather than scanned, because ``--encoder`` is not a path everywhere:
-    in train_encoder it selects the encoder TYPE (patch/causal) and defaults to "patch",
-    while in train_ven and evaluate it is a path to an encoder file. Same flag name, two
-    meanings. Pinned as-is here rather than reconciled -- renaming a flag is a public
-    interface change."""
+    Listed per module rather than scanned, so a new flag has to be classified deliberately
+    rather than swept in."""
     args = mod.build_parser().parse_args([])
     for dest in path_dests:
         assert getattr(args, dest) is None, dest
 
 
-def test_encoder_flag_means_different_things_in_different_clis():
-    """Documents the collision above so a future reader meets it deliberately."""
-    assert cli_train_encoder.build_parser().parse_args([]).encoder == "patch"
-    assert cli_train_ven.build_parser().parse_args([]).encoder is None
-    assert cli_evaluate.build_parser().parse_args([]).encoder is None
+def test_encoder_flag_means_one_thing_everywhere():
+    """It used to mean two: a TYPE in train_encoder (patch/causal) and a PATH elsewhere.
+    With one encoder left it is a path in all three consumers, and train_encoder has no
+    such flag at all."""
+    assert "encoder" not in vars(cli_train_encoder.build_parser().parse_args([]))
+    for mod in (cli_train_ven, cli_evaluate, cli_figure):
+        assert mod.build_parser().parse_args([]).encoder is None
+        assert mod.build_parser().parse_args(["--encoder", "x.npz"]).encoder == "x.npz"
 
 
 # ------------------------------------------------------------------ train_encoder
-
-
-def test_train_encoder_choices_and_rejection():
-    p = cli_train_encoder.build_parser()
-    assert p.parse_args([]).encoder == "patch"
-    assert p.parse_args(["--encoder", "causal"]).encoder == "causal"
-    with pytest.raises(SystemExit):
-        p.parse_args(["--encoder", "minimum-phase"])
 
 
 def test_train_encoder_causal_defaults_come_from_the_operating_point():
@@ -158,13 +150,11 @@ def test_train_encoder_causal_defaults_come_from_the_operating_point():
     assert a.causal_no_prune is False, "silent filters are pruned by default"
 
 
-def test_train_encoder_patch_path_still_parses():
-    """The superseded Olshausen-Field path is not part of the operating point, so its
-    defaults stay in the CLI. Only that they exist and are sane is checked here; asserting
-    each literal would reintroduce the duplication this module removed."""
+def test_train_encoder_front_end_is_sane():
+    """The cochleagram front end is shared with nothing else, so its invariants are
+    checked here rather than its literals."""
     a = cli_train_encoder.build_parser().parse_args([])
-    assert a.n_bases > 0 and a.n_epochs > 0 and a.batch_size > 0
-    assert 0.0 < a.lr < 1.0 and 0.0 < a.lambda_sparse < 1.0
+    assert a.n_bases > 0 and a.k_frames > 0
     assert a.lo_hz < a.hi_hz <= a.sr / 2, "cochleagram band inside Nyquist"
     assert a.sr == SR
 
@@ -213,12 +203,10 @@ def test_train_ven_delays_track_the_constants():
     assert (a.aud_delay_ms, a.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
 
 
-def test_train_ven_takes_either_encoder_flag():
+def test_train_ven_encoder_path_is_optional():
     p = cli_train_ven.build_parser()
-    assert p.parse_args(["--causal-encoder", "e.npz"]).causal_encoder == "e.npz"
-    assert p.parse_args(["--encoder", "of.npz"]).encoder == "of.npz"
-    both = p.parse_args(["--encoder", "a", "--causal-encoder", "b"])
-    assert (both.encoder, both.causal_encoder) == ("a", "b")
+    assert p.parse_args([]).encoder is None, "None falls back to paths.encoder_npz()"
+    assert p.parse_args(["--encoder", "e.npz"]).encoder == "e.npz"
 
 
 # ------------------------------------------------------------------------ evaluate
@@ -281,7 +269,7 @@ def test_figure_filters_view_needs_no_ven_model(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_figure, "VocalErrorNetV2", _Exploding("VocalErrorNetV2"))
     monkeypatch.setattr(cli_figure, "load_corpus", _exploding("load_corpus"))
 
-    cli_figure.main(["--view", "filters", "--causal-encoder", "enc.npz",
+    cli_figure.main(["--view", "filters", "--encoder", "enc.npz",
                      "--out-dir", str(tmp_path)])
     assert seen["encoder"] == "enc.npz"
     assert seen["sr"] == SR

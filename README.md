@@ -30,6 +30,7 @@ make figure      # data -> encoder -> VEN -> figures   (~15 min, CPU)
 make verify      # check artifact checksums against MANIFEST.sha256
 make test        # fast unit tests (no artifacts needed)
 make test-repro  # the reproduction assertions below, against outputs/
+sven-figure --view filters  # the encoder's kernels (STRFs) and a timing/tuning summary
 ```
 
 `make figure` runs four stages, each cached and skipped if its output exists:

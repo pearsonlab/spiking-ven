@@ -117,6 +117,7 @@ def test_figures_subpackage_is_importable():
         "spiking_ven.figures",
         "spiking_ven.figures.cancellation",
         "spiking_ven.figures.daf_psth",
+        "spiking_ven.figures.causal_filters",
     ):
         importlib.import_module(name)
 

@@ -8,7 +8,10 @@ The result is in the excitatory rows: near-silent on the trained song, active on
 other two. The network has learned to cancel the response to the song it hears every
 rendition, while responses to novel or perturbed sound survive as an error signal.
 
-``--view psth`` renders the DAF response time course against the Fig. 8E reading instead.
+``--view psth`` renders the DAF response time course against the Fig. 8E reading instead,
+and ``--view filters`` the encoder's kernels as spectrotemporal images (its STRFs) plus a
+summary of their timing, frequency tuning and redundancy. ``filters`` needs only the
+encoder, so it can be drawn before a network has been trained.
 
 Requires the ``plots`` extra (matplotlib).
 """
@@ -34,9 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "psth"],
-                   help="raster (the publication figure) or "
-                        "psth (DAF response time course against the Fig. 8E reading)")
+    p.add_argument("--view", default="raster", choices=["raster", "psth", "filters"],
+                   help="raster (the publication figure), "
+                        "psth (DAF response time course against the Fig. 8E reading), or "
+                        "filters (the encoder's kernels; needs no VEN model)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=T_POST)
@@ -53,9 +57,16 @@ def main(argv: list[str] | None = None) -> None:
     motifs_path = args.motifs or str(motifs_npz())
     out_dir = args.out_dir or str(output_dir())
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    enc = CausalFilterEncoder.load(args.encoder or str(encoder_npz()))
+
+    if args.view == "filters":
+        from ..figures.causal_filters import make_filter_figures
+
+        for path in make_filter_figures(enc, out_dir, sr=args.sr):
+            print(f"  wrote {path}")
+        return
 
     print(f"Loading model: {model_path}")
-    enc = CausalFilterEncoder.load(args.encoder or str(encoder_npz()))
     # Pin the seed so the rendered figure is reproducible, not just the training.
     ven = VocalErrorNetV2.load(model_path, seed=args.seed)
     st = build_stimuli(enc, motifs_path, sr=args.sr, seed=args.seed, t_post=args.t_post,

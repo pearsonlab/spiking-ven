@@ -222,7 +222,7 @@ def test_figure_shares_the_operating_point():
 def test_figure_views():
     p = cli_figure.build_parser()
     assert p.parse_args([]).view == "raster"
-    for view in ("raster", "psth"):
+    for view in ("raster", "psth", "filters"):
         assert p.parse_args(["--view", view]).view == view
     with pytest.raises(SystemExit):
         p.parse_args(["--view", "psth-plot"])
@@ -233,3 +233,24 @@ def test_figure_type_coercion():
         ["--seed", "7", "--sr", "22050", "--t-post", "0", "--mean-rate-hz", "3.5"])
     assert (a.seed, a.sr, a.t_post) == (7, 22050, 0)
     assert isinstance(a.mean_rate_hz, float) and a.mean_rate_hz == 3.5
+
+
+def test_figure_filters_view_renders_without_a_ven_model(tmp_path):
+    """The filter figures describe the encoder alone, so they must render before any
+    network exists: no model file is created here, and loading one would fail."""
+    pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
+    import numpy as np
+
+    from spiking_ven.causal_filters import CausalFilterEncoder
+
+    K, C, L = 6, 8, 5
+    V = np.random.default_rng(0).standard_normal((K, C, L))
+    cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
+          "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
+    enc_path = tmp_path / "enc.npz"
+    CausalFilterEncoder(V, np.zeros(K), 0.1, cp).save(enc_path)
+
+    cli_figure.main(["--view", "filters", "--encoder", str(enc_path),
+                     "--model", str(tmp_path / "absent.npz"), "--out-dir", str(tmp_path)])
+    for name in ("causal_filters_kernels", "causal_filters_summary"):
+        assert (tmp_path / f"{name}.png").exists(), name

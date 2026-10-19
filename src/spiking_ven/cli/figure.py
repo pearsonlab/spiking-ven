@@ -10,8 +10,9 @@ rendition, while responses to novel or perturbed sound survive as an error signa
 
 ``--view psth`` renders the DAF response time course against the Fig. 8E reading instead,
 and ``--view filters`` the encoder's kernels as spectrotemporal images (its STRFs) plus a
-summary of their timing, frequency tuning and redundancy. ``filters`` needs only the
-encoder, so it can be drawn before a network has been trained.
+summary of their timing, frequency tuning and redundancy. ``--view units`` puts a few
+example units' kernels over their spikes to every motif in the corpus. ``filters`` and
+``units`` need only the encoder, so they can be drawn before a network has been trained.
 
 Requires the ``plots`` extra (matplotlib).
 """
@@ -37,10 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "psth", "filters"],
+    p.add_argument("--view", default="raster", choices=["raster", "psth", "filters", "units"],
                    help="raster (the publication figure), "
                         "psth (DAF response time course against the Fig. 8E reading), or "
-                        "filters (the encoder's kernels; needs no VEN model)")
+                        "filters (the encoder's kernels; needs no VEN model), or "
+                        "units (example kernels over multi-motif rasters; no VEN model)")
+    p.add_argument("--units", type=int, nargs="+", default=None,
+                   help="unit indices for --view units (default: the most reliable unit "
+                        "in each third of the peak-frequency range)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--t-post", type=int, default=T_POST)
@@ -63,6 +68,17 @@ def main(argv: list[str] | None = None) -> None:
         from ..figures.causal_filters import make_filter_figures
 
         for path in make_filter_figures(enc, out_dir, sr=args.sr):
+            print(f"  wrote {path}")
+        return
+
+    if args.view == "units":
+        from ..figures.unit_strfs import make_unit_figure
+
+        paths, units = make_unit_figure(enc, motifs_path, out_dir, units=args.units,
+                                        sr=args.sr, seed=args.seed, t_post=args.t_post,
+                                        mean_rate_hz=args.mean_rate_hz)
+        print(f"  units {units}")
+        for path in paths:
             print(f"  wrote {path}")
         return
 

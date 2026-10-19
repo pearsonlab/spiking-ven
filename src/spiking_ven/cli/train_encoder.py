@@ -44,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output encoder .npz")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--train-on", choices=("all", "template"), default="all",
+                   help="learn from every motif (default) or only the template rendition; "
+                        "'template' multiplies --epochs by the motif count so both see the "
+                        "same number of gradient steps")
     # cochleagram front-end
     p.add_argument("--sr", type=int, default=SR)
     p.add_argument("--n-coch-ch", type=int, default=40, help="cochleagram frequency channels")
@@ -91,9 +95,18 @@ def main(argv: list[str] | None = None) -> None:
     corpus = load_corpus(motifs_path)
     print(f"  {corpus.n_motifs} motifs  T_song={corpus.T_song} ms")
 
+    if args.train_on == "template":
+        sig_t, t_idx = corpus.template()
+        signals = [sig_t]
+        epochs = args.epochs * corpus.n_motifs
+        print(f"  training on template motif {t_idx} only ({epochs} epochs)")
+    else:
+        signals = list(corpus.signals())
+        epochs = args.epochs
+
     print("\nComputing cochleagrams...")
     all_cochs = []
-    for sig in corpus.signals():
+    for sig in signals:
         sig = sig / max(float(np.sqrt(np.mean(sig**2))), 1e-12) * args.rms_ref
         all_cochs.append(cochleagram(sig, args.sr, n_channels=args.n_coch_ch,
                                      frame_rate=args.frame_rate,
@@ -103,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
           f"({args.n_bases} filters x {args.n_coch_ch} ch x {args.k_frames} frames)...")
     cochs = [causal_meansub(cg.astype(np.float64), args.k_frames) for cg in all_cochs]
     V = causal_learn(cochs, K=args.n_bases, L=args.k_frames,
-                     lam=args.lam, n_epochs=args.epochs,
+                     lam=args.lam, n_epochs=epochs,
                      n_iter=args.n_ista, lr=args.lr, seed=args.seed,
                      mp_strength=args.mp_strength,
                      l1_V=args.l1, smooth_V=args.smooth)

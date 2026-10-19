@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="input motifs .npz")
     p.add_argument("--out", default=None, help="output model .npz")
+    p.add_argument("--train-on", choices=("all", "template"), default="all",
+                   help="cycle renditions through every motif (default) or present only "
+                        "the template rendition")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--sr", type=int, default=SR)
@@ -158,7 +161,8 @@ def main(argv: list[str] | None = None) -> None:
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
                        mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista)
     aud_correct, aud_reversed = st["aud_correct"], st["aud_reversed"]
-    correct_pool = st["correct_pool"]
+    # Index 0 of the pool is the template motif.
+    correct_pool = st["correct_pool"] if args.train_on == "all" else st["correct_pool"][:1]
     hvc_on, hvc_off, hvc_burn, aud_burn = (st["hvc_on"], st["hvc_off"], st["hvc_burn"],
                                            st["aud_burn"])
     corr, train_idx, n_motifs = st["fwd_rev_corr"], st["train_idx"], st["n_motifs"]
@@ -185,7 +189,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  drive_e={args.drive_e}  B_scale={args.b_scale}  "
           f"theta_e_init={ven.theta_e[0]:.4f}")
     print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
-          f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
+          f"correct_pool={len(correct_pool)}/{n_motifs} motifs  {args.n_rend} renditions")
     print(f"{'=' * 65}")
 
     # --- training loop ----------------------------------------------------

@@ -6,7 +6,8 @@ One row, four panels, following the signal through the encoder:
 2. Magnitude response of the five lowest-frequency gammatone filters.
 3. Cochleagram of the same rendition -- the gammatone bank's output, computed with the
    encoder's own parameters and RMS normalisation.
-4. The encoder's spike output on that rendition, filters sorted by best frequency.
+4. The encoder's spike output on that rendition, one row per unit, ordered by the
+   kernel's peak channel.
 
 The rendition is the template (:attr:`spiking_ven.corpus.Corpus.template_index`), the one
 the network trains on, and the spikes go through :func:`spiking_ven.evaluate.encode_stimulus`
@@ -125,24 +126,21 @@ def _frequency_axis(ax, cf_hz, T_ms):
 
 
 def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
-    # Each filter sits in the band of its peak channel -- the statistic the kernel figure
-    # sorts and labels by. Filters sharing a channel split its band into equal slots and
-    # sit at the slot centres. Ticks are a constant height, so where many filters share a
-    # narrow band they overlap rather than shrink.
+    # One equal row per unit. The units are spectrotemporal kernels, not frequency bands,
+    # so the axis is ordinal; they are ordered by peak channel -- as the kernel figure
+    # orders them -- which gives a loose tonotopy without claiming a frequency for each.
+    K = spikes.shape[0]
     bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
-    edges = _band_edges(cf_hz)
-    y = np.empty(len(bf))
-    for ch in np.unique(bf):
-        same = np.flatnonzero(bf == ch)
-        slot = (edges[ch + 1] - edges[ch]) / len(same)
-        y[same] = edges[ch] + slot * (np.arange(len(same)) + 0.5)
-    rows, cols = np.nonzero(spikes)
-    ax.scatter(cols, y[rows], s=40, marker="|", color=_INK, linewidths=1.8)
-    _frequency_axis(ax, cf_hz, T_ms)
-    # Same limits as the cochleagram beside it, so the axis itself is redundant.
+    row = np.empty(K)
+    row[np.argsort(bf, kind="stable")] = np.arange(K)
+    units, t = np.nonzero(spikes)
+    ax.vlines(t, row[units] - 0.4, row[units] + 0.4, color=_INK, linewidth=1.8)
+    ax.set_xlim(0, T_ms)
+    ax.set_ylim(-0.5, K - 0.5)
     ax.spines["left"].set_visible(False)
     ax.set_yticks([])
-    ax.set_ylabel("")
+    ax.set_xlabel("time (ms)")
+    ax.set_ylabel("encoder unit")
     ax.set_title("Spiking encoder")
 
 
@@ -166,10 +164,9 @@ def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,
     with plt.rc_context(_STYLE):
         fig = plt.figure(figsize=(22, 5.2))
         # Narrow spacer columns, so the cochleagram's y-label clears the panel to its left.
-        # The raster has no y-axis and shares the cochleagram's, so the pair sit in their
-        # own tighter grid.
+        # The raster has only a y-label, no axis, so the pair sit in their own tighter grid.
         gs = fig.add_gridspec(1, 5, width_ratios=[1.1, 0.02, 1, 0.04, 2.35], wspace=0.2)
-        pair = gs[0, 4].subgridspec(1, 2, wspace=0.12)
+        pair = gs[0, 4].subgridspec(1, 2, wspace=0.17)
         ax_spec, ax_filt = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 2])
         ax_coch, ax_spk = fig.add_subplot(pair[0, 0]), fig.add_subplot(pair[0, 1])
         _spectrogram(ax_spec, sig, sr, T_ms)

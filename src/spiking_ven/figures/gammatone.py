@@ -97,38 +97,49 @@ def _cochleagram(ax, sig, sr, cp, cf_hz, T_ms):
     x = sig / max(float(np.sqrt(np.mean(sig ** 2))), 1e-12) * cp["rms_ref"]
     X = cochleagram(x, sr, n_channels=len(cf_hz), frame_rate=cp["frame_rate"],
                     lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"])
-    C = X.shape[0]
     dt_ms = 1000.0 / float(cp["frame_rate"])
-    ax.imshow(X, aspect="auto", origin="lower", cmap="Blues", interpolation="nearest",
-              extent=[0, X.shape[1] * dt_ms, -0.5, C - 0.5])
-    _channel_axis(ax, cf_hz, T_ms)
+    t_edges = np.arange(X.shape[1] + 1) * dt_ms
+    ax.pcolormesh(t_edges, _band_edges(cf_hz), X, cmap="Blues", shading="flat",
+                  rasterized=True)
+    _frequency_axis(ax, cf_hz, T_ms)
     ax.set_title("Cochleagram")
 
 
-def _channel_axis(ax, cf_hz, T_ms):
-    """The cochleagram's channel axis, shared by the raster so the two line up."""
-    C = len(cf_hz)
-    ticks = np.linspace(0, C - 1, 5).astype(int)
-    ax.set_ylim(-0.5, C - 0.5)
-    ax.set_yticks(ticks)
-    ax.set_yticklabels([f"{cf_hz[t]:.0f}" for t in ticks])
+def _band_edges(cf_hz):
+    """Edges of each channel's band on a linear axis: midway between centre frequencies,
+    with the outer two bands mirrored about their centres."""
+    mid = 0.5 * (cf_hz[1:] + cf_hz[:-1])
+    return np.concatenate([[2 * cf_hz[0] - mid[0]], mid, [2 * cf_hz[-1] - mid[-1]]])
+
+
+def _frequency_axis(ax, cf_hz, T_ms):
+    """Linear centre-frequency axis, shared by the cochleagram and the raster. Linear
+    rather than per-channel: the ERB channels widen with frequency, so the high channels
+    where the filters concentrate get the room and the quiet low ones are compressed."""
+    edges = _band_edges(cf_hz)
+    ax.set_ylim(edges[0], edges[-1])
+    ax.set_yticks([1000, 3000, 5000, 7000])
     ax.set_ylabel("center frequency (Hz)")
     ax.set_xlim(0, T_ms)
     ax.set_xlabel("time (ms)")
 
 
 def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
-    # Each filter sits at its peak channel -- the statistic the kernel figure sorts and
-    # labels by -- on the cochleagram's axis. Filters sharing a peak channel are spread
-    # across that channel's row rather than drawn on top of one another.
+    # Each filter sits in the band of its peak channel -- the statistic the kernel figure
+    # sorts and labels by. Filters sharing a channel split its band into equal slots, and
+    # each tick spans 80% of its slot in data units, so it can never cross into a
+    # neighbouring filter's slot or channel.
     bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
-    y = bf.astype(float)
+    edges = _band_edges(cf_hz)
+    lo, hi = np.empty(len(bf)), np.empty(len(bf))
     for ch in np.unique(bf):
         same = np.flatnonzero(bf == ch)
-        y[same] += np.linspace(-0.35, 0.35, len(same) + 2)[1:-1]
+        slot = (edges[ch + 1] - edges[ch]) / len(same)
+        lo[same] = edges[ch] + slot * (np.arange(len(same)) + 0.1)
+        hi[same] = lo[same] + 0.8 * slot
     rows, cols = np.nonzero(spikes)
-    ax.scatter(cols, y[rows], s=40, marker="|", color=_INK, linewidths=1.8)
-    _channel_axis(ax, cf_hz, T_ms)
+    ax.vlines(cols, lo[rows], hi[rows], color=_INK, linewidth=1.8)
+    _frequency_axis(ax, cf_hz, T_ms)
     ax.set_title("Spiking encoder")
 
 

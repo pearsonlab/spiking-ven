@@ -128,9 +128,9 @@ def _sim_loop_v2(
             # Causal STDP: I-then-E order (I precedes E → potentiate JIE).
             # Update at the moment of each audio-gated E spike using the current
             # I trace — captures recent I firing before this E spike occurred.
-            # xi_th debiases x_i above the tonic I baseline. The I trace decays with
-            # alpha_stdp (tau_stdp), the coincidence window, independently of the
-            # synaptic time constant tau_s.
+            # xi_th is the trace one I spike leaves after ltp_window_ms, so I cells that
+            # spiked within the window potentiate and the rest depress. The I trace
+            # decays with alpha_stdp (tau_stdp), independently of the synaptic tau_s.
             audio_gate_e = (audio_drive_e > 0.0).astype(np.float64)
             gate_sE = sE * audio_gate_e
             x_i = alpha_stdp * x_i + sI
@@ -175,9 +175,11 @@ class VocalErrorNetV2:
     c_hvc        : HVC→I connection probability
     B_hvc_scale  : mean weight scale for HVC→I (tune so HVC burst drives I reliably)
     c_JEI        : E→I connection probability (fixed throughout)
-    r_i_th       : I baseline rate threshold for STDP (Hz); x_i below this → LTD on JIE.
-                   Set to mean I rate during song so rule is zero-mean for uncorrelated activity.
-    tau_stdp     : STDP coincidence window (ms) for the I trace; 0 falls back to tau_s
+    ltp_window_ms: causal LTP window (ms) for JIE. An audio-gated E spike potentiates
+                   JIE from I cells that spiked within this many ms before it and
+                   depresses it from the rest. A tuned parameter. ``inf`` (the default)
+                   disables LTD, leaving pure potentiation.
+    tau_stdp     : decay constant (ms) of the I trace; 0 falls back to tau_s
     drive_e      : tonic E drive
     drive_i      : tonic I drive
     noise_e      : std of additive Gaussian noise on E input
@@ -206,7 +208,7 @@ class VocalErrorNetV2:
         t_refr_ms: float = 2.0,
         a_sfa: float = 0.0,
         tau_sfa: float = 100.0,
-        r_i_th: float = 0.0,
+        ltp_window_ms: float = np.inf,
         drive_e: float = 0.155,
         drive_i: float = 0.058,
         noise_e: float = 0.1,
@@ -245,7 +247,7 @@ class VocalErrorNetV2:
         #: 0.01 means ~4 spikes in quick succession suffice to silence a cell.
         self.a_sfa         = float(a_sfa)
         self.tau_sfa       = float(tau_sfa)
-        self.r_i_th        = r_i_th
+        self.ltp_window_ms = float(ltp_window_ms)
         self.drive_e       = drive_e
         self.drive_i       = drive_i
         self.noise_e       = noise_e
@@ -329,7 +331,7 @@ class VocalErrorNetV2:
             A_jie=self.A_jie, J_max_ie=self.J_max_ie,
             c_B=self.c_B, B_scale=self.B_scale,
             c_hvc=self.c_hvc, B_hvc_scale=self.B_hvc_scale,
-            c_JEI=self.c_JEI, r_i_th=self.r_i_th,
+            c_JEI=self.c_JEI, ltp_window_ms=self.ltp_window_ms,
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
             t_refr_ms=self.t_refr_ms, a_sfa=self.a_sfa, tau_sfa=self.tau_sfa,
@@ -348,7 +350,7 @@ class VocalErrorNetV2:
             setattr(obj, k, int(d[k]))
         scalar_keys = (
             "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
-            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
+            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI",
             "drive_e", "drive_i", "noise_e", "noise_i",
             "target_rate", "target_rate_i",
             "tau_stdp", "theta_i", "t_refr_ms", "a_sfa", "tau_sfa",
@@ -360,6 +362,15 @@ class VocalErrorNetV2:
         # rather than silently acquiring the new constructor default.
         for k in scalar_keys:
             setattr(obj, k, float(d[k]) if k in d else 0.0)
+        # Models saved before the window replaced the rate carry r_i_th, whose trace
+        # threshold r * tau * 1e-3 is the trace one I spike leaves after
+        # tau * ln(1 / (r * tau * 1e-3)) ms. A rate of 0 meant no LTD: an infinite window.
+        if "ltp_window_ms" in d:
+            obj.ltp_window_ms = float(d["ltp_window_ms"])
+        else:
+            tau = obj.tau_stdp if obj.tau_stdp > 0.0 else obj.tau_s
+            xi_th = float(d["r_i_th"]) * tau * 1e-3 if "r_i_th" in d else 0.0
+            obj.ltp_window_ms = -tau * float(np.log(xi_th)) if xi_th > 0.0 else np.inf
         obj.aud_delay_ms  = int(d["aud_delay_ms"]) if "aud_delay_ms" in d else 0
         obj.hvc_delay_ms  = int(d["hvc_delay_ms"]) if "hvc_delay_ms" in d else 0
         raw_theta = d["theta_e"] if "theta_e" in d else np.array(0.0)
@@ -419,11 +430,11 @@ class VocalErrorNetV2:
         dt      = 1.0
         decay_e = float(np.exp(-dt / self.tau_e))
         decay_i = float(np.exp(-dt / self.tau_i))
-        # The STDP trace decays at tau_stdp; xi_th is calibrated to the same constant so
-        # the I-baseline debiasing stays correct whatever the window.
+        # The STDP trace decays at tau_stdp; xi_th is where one I spike's trace has decayed
+        # to after ltp_window_ms, so the window holds whatever the trace constant.
         tau_stdp_eff = self.tau_stdp if self.tau_stdp > 0.0 else self.tau_s
         alpha_stdp   = float(np.exp(-dt / tau_stdp_eff))
-        xi_th        = float(self.r_i_th * tau_stdp_eff * 1e-3)
+        xi_th        = float(np.exp(-self.ltp_window_ms / tau_stdp_eff))
 
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)

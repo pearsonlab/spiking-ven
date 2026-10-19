@@ -147,3 +147,34 @@ def test_console_script_entry_points_resolve():
         module, _, func = ep.value.partition(":")
         mod = importlib.import_module(module)
         assert callable(getattr(mod, func)), f"{ep.name} -> {ep.value} is not callable"
+
+
+def test_ltp_window_reproduces_the_legacy_rate_threshold():
+    """LTP_WINDOW_MS replaced a 6 Hz rate, R_I_TH, whose trace threshold 6 * 20 * 1e-3
+    was set to debias a tonic I rate that the network does not have. One I spike k ms
+    earlier potentiates iff its trace alpha**k exceeds the threshold, so the window must
+    admit the same whole-ms delays the rate did: 0-42 ms."""
+    from spiking_ven.constants import LTP_WINDOW_MS, TAU_STDP
+
+    alpha = np.exp(-1.0 / TAU_STDP)
+    k = np.arange(100)
+    legacy = alpha**k > 6.0 * TAU_STDP * 1e-3
+    window = alpha**k > np.exp(-LTP_WINDOW_MS / TAU_STDP)
+    np.testing.assert_array_equal(window, legacy)
+    assert k[window].max() == 42
+
+
+@pytest.mark.parametrize(("r_i_th", "expected"), [(6.0, 20.0 * np.log(1 / 0.12)),
+                                                  (0.0, np.inf)])
+def test_models_saved_with_a_rate_threshold_load_as_a_window(tmp_path, r_i_th, expected):
+    """Old .npz files carry r_i_th instead of ltp_window_ms. They must reload with the
+    trace threshold they were trained under -- 0 Hz meant no LTD, an infinite window."""
+    from spiking_ven.vocal_error_net import VocalErrorNetV2
+
+    ven = VocalErrorNetV2(n_e=8, n_i=4, n_hvc=3, n_aud=5, tau_stdp=20.0, seed=0)
+    path = tmp_path / "ven.npz"
+    ven.save(str(path))
+    d = dict(np.load(path))
+    del d["ltp_window_ms"]
+    np.savez(path, **d, r_i_th=r_i_th)
+    assert VocalErrorNetV2.load(str(path)).ltp_window_ms == pytest.approx(expected)

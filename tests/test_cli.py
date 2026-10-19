@@ -167,7 +167,7 @@ def test_train_encoder_front_end_is_sane():
         ("b_hvc_scale", "B_HVC_SCALE"), ("c_hvc", "C_HVC"),
         ("drive_e", "DRIVE_E"), ("drive_i", "DRIVE_I"),
         ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
-        ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
+        ("ltp_window_ms", "LTP_WINDOW_MS"), ("j_max_ie", "J_MAX_IE"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
         ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
     ],

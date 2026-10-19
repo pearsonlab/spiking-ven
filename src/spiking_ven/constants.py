@@ -43,7 +43,7 @@ __all__ = [
     "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
     "DRIVE_E", "DRIVE_I",
     "TAU_S", "TAU_E", "TAU_STDP",
-    "R_I_TH", "J_MAX_IE",
+    "LTP_WINDOW_MS", "J_MAX_IE",
     "A_SFA", "TAU_SFA",
     "T_POST", "T_BURN", "N_ISTA",
     "a_jie_for",
@@ -147,7 +147,14 @@ TAU_STDP = 20.0
 
 #: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
 #: E cells ever acquire inhibition.
-R_I_TH = 6.0
+#:
+#: ``LTP_WINDOW_MS`` is the causal window of the JIE rule: an audio-gated E spike
+#: potentiates its weight from an I cell that spiked within this many ms before it, and
+#: depresses it otherwise. A tuned parameter, not a measured one. It replaces a 6 Hz
+#: "I baseline rate" (R_I_TH) that the rule was said to debias -- but I has no tonic rate
+#: here (theta_i >> drive_i, so I is silent without HVC), and what 6 Hz x 20 ms actually
+#: set was this window. 42.4 ms gives the same whole-ms window (I spikes 0-42 ms earlier).
+LTP_WINDOW_MS = 42.4
 J_MAX_IE = 1.0
 
 #: Firing-rate adaptation on E. ``TAU_SFA`` must stay SHORTER than the 50 ms DAF burst it

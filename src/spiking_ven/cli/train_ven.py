@@ -27,12 +27,12 @@ from ..constants import (
     DRIVE_I,
     HVC_DELAY_MS,
     J_MAX_IE,
+    LTP_WINDOW_MS,
     N_E,
     N_HVC,
     N_I,
     N_ISTA,
     N_RENDITIONS,
-    R_I_TH,
     SR,
     T_BURN,
     T_POST,
@@ -82,7 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--c-b", type=float, default=C_B)
     p.add_argument("--c-hvc", type=float, default=C_HVC)
     p.add_argument("--b-hvc-scale", type=float, default=B_HVC_SCALE)
-    p.add_argument("--r-i-th", type=float, default=R_I_TH)
+    p.add_argument("--ltp-window-ms", type=float, default=LTP_WINDOW_MS,
+                   help="causal STDP window (ms): an I spike this recent potentiates I->E")
     p.add_argument("--j-max-ie", type=float, default=J_MAX_IE)
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
@@ -169,7 +170,7 @@ def main(argv: list[str] | None = None) -> None:
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, tau_s=args.tau_s,
         tau_e=args.tau_e,
-        r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
+        ltp_window_ms=args.ltp_window_ms, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
@@ -184,7 +185,7 @@ def main(argv: list[str] | None = None) -> None:
                                       if args.tau_stdp > 0 else ""))
     print(f"  drive_e={args.drive_e}  B_scale={args.b_scale}  "
           f"theta_e_init={ven.theta_e[0]:.4f}")
-    print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
+    print(f"  n_hvc={args.n_hvc}  ltp_window={args.ltp_window_ms} ms  "
           f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
     print(f"{'=' * 65}")
 

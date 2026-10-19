@@ -31,6 +31,7 @@ make verify      # check artifact checksums against MANIFEST.sha256
 make test        # fast unit tests (no artifacts needed)
 make test-repro  # the reproduction assertions below, against outputs/
 sven-figure --view filters  # the encoder's kernels (STRFs) and a timing/tuning summary
+sven-figure --view gammatone  # spectrogram, gammatone filters, cochleagram, encoder spikes
 ```
 
 `make figure` runs four stages, each cached and skipped if its output exists:

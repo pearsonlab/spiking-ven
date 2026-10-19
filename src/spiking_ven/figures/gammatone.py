@@ -126,19 +126,18 @@ def _frequency_axis(ax, cf_hz, T_ms):
 
 def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
     # Each filter sits in the band of its peak channel -- the statistic the kernel figure
-    # sorts and labels by. Filters sharing a channel split its band into equal slots, and
-    # each tick spans 80% of its slot in data units, so it can never cross into a
-    # neighbouring filter's slot or channel.
+    # sorts and labels by. Filters sharing a channel split its band into equal slots and
+    # sit at the slot centres. Ticks are a constant height, so where many filters share a
+    # narrow band they overlap rather than shrink.
     bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
     edges = _band_edges(cf_hz)
-    lo, hi = np.empty(len(bf)), np.empty(len(bf))
+    y = np.empty(len(bf))
     for ch in np.unique(bf):
         same = np.flatnonzero(bf == ch)
         slot = (edges[ch + 1] - edges[ch]) / len(same)
-        lo[same] = edges[ch] + slot * (np.arange(len(same)) + 0.1)
-        hi[same] = lo[same] + 0.8 * slot
+        y[same] = edges[ch] + slot * (np.arange(len(same)) + 0.5)
     rows, cols = np.nonzero(spikes)
-    ax.vlines(cols, lo[rows], hi[rows], color=_INK, linewidth=1.8)
+    ax.scatter(cols, y[rows], s=40, marker="|", color=_INK, linewidths=1.8)
     _frequency_axis(ax, cf_hz, T_ms)
     ax.set_title("Spiking encoder")
 

@@ -38,10 +38,9 @@ __all__ = ["make_gammatone_figure"]
 
 _INK, _INK2 = "#1f1f1e", "#5f5e58"
 _BLUES5 = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # light -> dark
-# Sized like seaborn's "talk" context, with bold type, so it reads on a slide.
+# Sized like seaborn's "talk" context, so it reads on a slide.
 _STYLE = {
-    "font.size": 15, "font.weight": "bold", "axes.labelsize": 16, "axes.labelweight": "bold",
-    "axes.titlesize": 17, "axes.titleweight": "bold", "xtick.labelsize": 14,
+    "font.size": 15, "axes.labelsize": 16, "axes.titlesize": 17, "xtick.labelsize": 14,
     "ytick.labelsize": 14, "axes.linewidth": 1.9, "xtick.major.width": 1.9,
     "ytick.major.width": 1.9, "xtick.major.size": 7, "ytick.major.size": 7,
     "xtick.minor.width": 1.4, "xtick.minor.size": 4,
@@ -102,30 +101,35 @@ def _cochleagram(ax, sig, sr, cp, cf_hz, T_ms):
     dt_ms = 1000.0 / float(cp["frame_rate"])
     ax.imshow(X, aspect="auto", origin="lower", cmap="Blues", interpolation="nearest",
               extent=[0, X.shape[1] * dt_ms, -0.5, C - 0.5])
-    ticks = np.linspace(0, C - 1, 5).astype(int)
-    ax.set_yticks(ticks)
-    ax.set_yticklabels([f"{cf_hz[t]:.0f}" for t in ticks])
-    ax.set_xlim(0, T_ms)
-    ax.set_xlabel("time (ms)")
-    ax.set_ylabel("channel centre freq. (Hz)")
+    _channel_axis(ax, cf_hz, T_ms)
     ax.set_title("Cochleagram")
 
 
-def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
-    K = spikes.shape[0]
-    # Peak channel, the statistic the kernel figure sorts and labels by.
-    bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
-    order = np.argsort(bf, kind="stable")
-    rows, cols = np.nonzero(spikes[order])
-    ax.scatter(cols, rows, s=40, marker="|", color=_INK, linewidths=1.8)
-    ax.set_xlim(0, T_ms)
-    ax.set_ylim(-0.5, K - 0.5)
-    yt = np.linspace(0, K - 1, 5).astype(int)
-    ax.set_yticks(yt)
-    ax.set_yticklabels([f"{cf_hz[bf[order[i]]]:.0f}" for i in yt])
-    ax.set_xlabel("time (ms)")
+def _channel_axis(ax, cf_hz, T_ms):
+    """The cochleagram's channel axis, shared by the raster so the two line up."""
+    C = len(cf_hz)
+    ticks = np.linspace(0, C - 1, 5).astype(int)
+    ax.set_ylim(-0.5, C - 0.5)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels([f"{cf_hz[t]:.0f}" for t in ticks])
     ax.set_ylabel("center frequency (Hz)")
-    ax.set_title(f"Encoder spikes ({K} filters)")
+    ax.set_xlim(0, T_ms)
+    ax.set_xlabel("time (ms)")
+
+
+def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
+    # Each filter sits at its peak channel -- the statistic the kernel figure sorts and
+    # labels by -- on the cochleagram's axis. Filters sharing a peak channel are spread
+    # across that channel's row rather than drawn on top of one another.
+    bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
+    y = bf.astype(float)
+    for ch in np.unique(bf):
+        same = np.flatnonzero(bf == ch)
+        y[same] += np.linspace(-0.35, 0.35, len(same) + 2)[1:-1]
+    rows, cols = np.nonzero(spikes)
+    ax.scatter(cols, y[rows], s=40, marker="|", color=_INK, linewidths=1.8)
+    _channel_axis(ax, cf_hz, T_ms)
+    ax.set_title("Spiking encoder")
 
 
 def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,
@@ -149,8 +153,8 @@ def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,
         fig = plt.figure(figsize=(22, 5.2))
         # Narrow spacer columns, so the y-labels of the cochleagram and raster clear the
         # panels to their left.
-        gs = fig.add_gridspec(1, 7, width_ratios=[1.1, 0.014, 1, 0.014, 1.1, 0.056, 1.1],
-                              wspace=0.245)
+        gs = fig.add_gridspec(1, 7, width_ratios=[1.1, 0.02, 1, 0.10, 1.1, 0.08, 1.1],
+                              wspace=0.35)
         ax_spec, ax_filt, ax_coch, ax_spk = (fig.add_subplot(gs[0, i]) for i in (0, 2, 4, 6))
         _spectrogram(ax_spec, sig, sr, T_ms)
         _filter_responses(ax_filt, cf_hz, sr)

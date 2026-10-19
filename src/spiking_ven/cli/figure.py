@@ -11,8 +11,10 @@ rendition, while responses to novel or perturbed sound survive as an error signa
 ``--view psth`` renders the DAF response time course against the Fig. 8E reading instead,
 and ``--view filters`` the encoder's kernels as spectrotemporal images (its STRFs) plus a
 summary of their timing, frequency tuning and redundancy. ``--view units`` puts a few
-example units' kernels over their spikes to every motif in the corpus. ``filters`` and
-``units`` need only the encoder, so they can be drawn before a network has been trained.
+example units' kernels over their spikes to every motif in the corpus, and
+``--view gammatone`` follows the training motif through the encoder's front end:
+spectrogram, gammatone filters, cochleagram and spike output. ``filters``, ``units`` and
+``gammatone`` need no VEN model, so they can be drawn before a network has been trained.
 
 Requires the ``plots`` extra (matplotlib).
 """
@@ -38,11 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trained causal filter bank .npz (default: outputs/causal_encoder.npz)")
     p.add_argument("--motifs", default=None, help="motifs .npz")
     p.add_argument("--out-dir", default=None, help="directory for the rendered figure")
-    p.add_argument("--view", default="raster", choices=["raster", "psth", "filters", "units"],
+    p.add_argument("--view", default="raster",
+                   choices=["raster", "psth", "filters", "units", "gammatone"],
                    help="raster (the publication figure), "
-                        "psth (DAF response time course against the Fig. 8E reading), or "
-                        "filters (the encoder's kernels; needs no VEN model), or "
-                        "units (example kernels over multi-motif rasters; no VEN model)")
+                        "psth (DAF response time course against the Fig. 8E reading), "
+                        "filters (the encoder's kernels; needs no VEN model), "
+                        "units (example kernels over multi-motif rasters; no VEN model), or "
+                        "gammatone (the encoder's front end on the training motif; "
+                        "no VEN model)")
     p.add_argument("--units", type=int, nargs="+", default=None,
                    help="unit indices for --view units (default: the most reliable unit "
                         "in each third of the peak-frequency range)")
@@ -79,6 +84,15 @@ def main(argv: list[str] | None = None) -> None:
                                         mean_rate_hz=args.mean_rate_hz)
         print(f"  units {units}")
         for path in paths:
+            print(f"  wrote {path}")
+        return
+
+    if args.view == "gammatone":
+        from ..corpus import load_corpus
+        from ..figures.gammatone import make_gammatone_figure
+
+        for path in make_gammatone_figure(enc, load_corpus(motifs_path), out_dir,
+                                          seed=args.seed, mean_rate_hz=args.mean_rate_hz):
             print(f"  wrote {path}")
         return
 

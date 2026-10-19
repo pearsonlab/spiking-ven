@@ -222,7 +222,7 @@ def test_figure_shares_the_operating_point():
 def test_figure_views():
     p = cli_figure.build_parser()
     assert p.parse_args([]).view == "raster"
-    for view in ("raster", "psth", "filters", "units"):
+    for view in ("raster", "psth", "filters", "units", "gammatone"):
         assert p.parse_args(["--view", view]).view == view
     with pytest.raises(SystemExit):
         p.parse_args(["--view", "psth-plot"])
@@ -278,3 +278,29 @@ def test_figure_units_view_renders_without_a_ven_model(tmp_path):
                      "--motifs", str(motifs), "--model", str(tmp_path / "absent.npz"),
                      "--out-dir", str(tmp_path), "--t-post", "0"])
     assert (tmp_path / "unit_strfs.png").exists()
+
+
+def test_figure_gammatone_view_renders_without_a_ven_model(tmp_path):
+    """The front-end figure needs the encoder and the corpus, never a network."""
+    pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
+    import numpy as np
+
+    from spiking_ven.causal_filters import CausalFilterEncoder
+
+    K, C, L = 6, 8, 5
+    V = np.random.default_rng(0).standard_normal((K, C, L))
+    cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
+          "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
+    enc_path = tmp_path / "enc.npz"
+    CausalFilterEncoder(V, np.zeros(K), 0.1, cp).save(enc_path)
+    n = SR // 5                                        # two 200 ms renditions of noise
+    audio = np.random.default_rng(1).standard_normal((2, n)) * [[0.1], [0.2]]
+    motifs_path = tmp_path / "motifs.npz"
+    np.savez(motifs_path, audio=audio, lengths=np.array([n, n]),
+             song_Ts=np.array([200.0, 200.0]), sr=SR)
+
+    cli_figure.main(["--view", "gammatone", "--encoder", str(enc_path),
+                     "--motifs", str(motifs_path),
+                     "--model", str(tmp_path / "absent.npz"), "--out-dir", str(tmp_path)])
+    for ext in ("png", "pdf"):
+        assert (tmp_path / f"gammatone_filterbank.{ext}").exists(), ext

@@ -118,7 +118,7 @@ def pick_units(spikes, encoder, T_song, *, n=3, min_rate_hz=1.0, sr=SR):
 def make_unit_figure(encoder, motifs_path, out_dir, *, units=None, sr=SR, seed=42,
                      t_post=T_POST, mean_rate_hz=AUD_MEAN_RATE_HZ, n_ista=N_ISTA, tag=""):
     """Kernel over multi-motif raster for each of ``units`` (default :func:`pick_units`)."""
-    spikes, T_song, train_idx = motif_spikes(encoder, motifs_path, sr=sr, seed=seed,
+    spikes, T_song, _ = motif_spikes(encoder, motifs_path, sr=sr, seed=seed,
                                              t_post=t_post, mean_rate_hz=mean_rate_hz,
                                              n_ista=n_ista)
     if units is None:
@@ -157,7 +157,7 @@ def make_unit_figure(encoder, motifs_path, out_dir, *, units=None, sr=SR, seed=4
         ax = axes[1, j]
         for i in range(n_motifs):
             t = np.flatnonzero(spikes[i, k, :T_song])
-            ax.vlines(t, i - 0.4, i + 0.4, color="C3" if i == train_idx else "0.3", lw=1.5)
+            ax.vlines(t, i - 0.4, i + 0.4, color="0.3", lw=1.5)
         ax.set_xlim(0, T_song)
         ax.set_ylim(-1, n_motifs)
         ax.set_yticks(range(0, n_motifs, 9))

@@ -141,7 +141,7 @@ def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
     ax.set_yticks([])
     ax.set_xlabel("time (ms)")
     ax.set_ylabel("encoder unit")
-    ax.set_title("Spiking encoder")
+    ax.set_title("Spiking feature encoding")
 
 
 def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,

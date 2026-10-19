@@ -38,11 +38,16 @@ __all__ = ["make_gammatone_figure"]
 
 _INK, _INK2 = "#1f1f1e", "#5f5e58"
 _BLUES5 = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]   # light -> dark
+# Sized like seaborn's "talk" context, with bold type, so it reads on a slide.
 _STYLE = {
-    "font.size": 8, "axes.edgecolor": _INK2, "axes.labelcolor": _INK,
-    "xtick.color": _INK2, "ytick.color": _INK2, "axes.spines.top": False,
-    "axes.spines.right": False, "axes.titlesize": 9, "axes.titlecolor": _INK,
-    "pdf.fonttype": 42,
+    "font.size": 15, "font.weight": "bold", "axes.labelsize": 16, "axes.labelweight": "bold",
+    "axes.titlesize": 17, "axes.titleweight": "bold", "xtick.labelsize": 14,
+    "ytick.labelsize": 14, "axes.linewidth": 1.9, "xtick.major.width": 1.9,
+    "ytick.major.width": 1.9, "xtick.major.size": 7, "ytick.major.size": 7,
+    "xtick.minor.width": 1.4, "xtick.minor.size": 4,
+    "axes.edgecolor": _INK, "axes.labelcolor": _INK, "xtick.color": _INK,
+    "ytick.color": _INK, "axes.spines.top": False, "axes.spines.right": False,
+    "axes.titlecolor": _INK, "pdf.fonttype": 42,
 }
 
 
@@ -77,7 +82,7 @@ def _filter_responses(ax, cf_hz, sr, n=5):
     fr = np.fft.rfftfreq(len(imp), 1.0 / sr)
     H = 20 * np.log10(np.abs(np.fft.rfft(h, axis=1)) + 1e-12)
     for k in range(n):
-        ax.plot(fr, H[k], color=_BLUES5[k], lw=2)
+        ax.plot(fr, H[k], color=_BLUES5[k], lw=3)
     ax.set_xscale("log")
     ax.set_xlim(100, 800)
     ax.set_ylim(-50, 5)
@@ -112,7 +117,7 @@ def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
     bf = (np.asarray(encoder.V) ** 2).sum(axis=2).argmax(axis=1)
     order = np.argsort(bf, kind="stable")
     rows, cols = np.nonzero(spikes[order])
-    ax.scatter(cols, rows, s=14, marker="|", color=_INK, linewidths=1.0)
+    ax.scatter(cols, rows, s=40, marker="|", color=_INK, linewidths=1.8)
     ax.set_xlim(0, T_ms)
     ax.set_ylim(-0.5, K - 0.5)
     yt = np.linspace(0, K - 1, 5).astype(int)
@@ -141,11 +146,11 @@ def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,
                              seed=seed)
 
     with plt.rc_context(_STYLE):
-        fig = plt.figure(figsize=(17, 3.6))
+        fig = plt.figure(figsize=(22, 5.2))
         # Narrow spacer columns, so the y-labels of the cochleagram and raster clear the
         # panels to their left.
-        gs = fig.add_gridspec(1, 7, width_ratios=[1.1, 0.02, 1, 0.02, 1.1, 0.08, 1.1],
-                              wspace=0.35)
+        gs = fig.add_gridspec(1, 7, width_ratios=[1.1, 0.014, 1, 0.014, 1.1, 0.056, 1.1],
+                              wspace=0.245)
         ax_spec, ax_filt, ax_coch, ax_spk = (fig.add_subplot(gs[0, i]) for i in (0, 2, 4, 6))
         _spectrogram(ax_spec, sig, sr, T_ms)
         _filter_responses(ax_filt, cf_hz, sr)

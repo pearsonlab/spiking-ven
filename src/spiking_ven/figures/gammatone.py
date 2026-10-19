@@ -139,6 +139,10 @@ def _spike_raster(ax, encoder, spikes, cf_hz, T_ms):
     rows, cols = np.nonzero(spikes)
     ax.scatter(cols, y[rows], s=40, marker="|", color=_INK, linewidths=1.8)
     _frequency_axis(ax, cf_hz, T_ms)
+    # Same limits as the cochleagram beside it, so the axis itself is redundant.
+    ax.spines["left"].set_visible(False)
+    ax.set_yticks([])
+    ax.set_ylabel("")
     ax.set_title("Spiking encoder")
 
 
@@ -161,11 +165,13 @@ def make_gammatone_figure(encoder, corpus, out_dir, *, seed=42,
 
     with plt.rc_context(_STYLE):
         fig = plt.figure(figsize=(22, 5.2))
-        # Narrow spacer columns, so the y-labels of the cochleagram and raster clear the
-        # panels to their left.
-        gs = fig.add_gridspec(1, 7, width_ratios=[1.1, 0.02, 1, 0.10, 1.1, 0.08, 1.1],
-                              wspace=0.35)
-        ax_spec, ax_filt, ax_coch, ax_spk = (fig.add_subplot(gs[0, i]) for i in (0, 2, 4, 6))
+        # Narrow spacer columns, so the cochleagram's y-label clears the panel to its left.
+        # The raster has no y-axis and shares the cochleagram's, so the pair sit in their
+        # own tighter grid.
+        gs = fig.add_gridspec(1, 5, width_ratios=[1.1, 0.02, 1, 0.04, 2.35], wspace=0.2)
+        pair = gs[0, 4].subgridspec(1, 2, wspace=0.12)
+        ax_spec, ax_filt = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 2])
+        ax_coch, ax_spk = fig.add_subplot(pair[0, 0]), fig.add_subplot(pair[0, 1])
         _spectrogram(ax_spec, sig, sr, T_ms)
         _filter_responses(ax_filt, cf_hz, sr)
         _cochleagram(ax_coch, sig, sr, cp, cf_hz, T_ms)

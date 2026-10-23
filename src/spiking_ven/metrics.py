@@ -75,12 +75,17 @@ def daf_responders(trials, *, onset_ms: int, window_ms: int = 150, alpha: float 
 
 
 def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int = 150,
-                 alpha: float = 0.02, seed: int = 42) -> dict:
+                 alpha: float = 0.02, seed: int = 42,
+                 duration_window_ms: int = 300) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Per neuron, in windows either side of noise onset (from ``st["daf_window_s"]``),
     because an E rate averaged over a whole rendition dilutes a brief burst (~20:1 for
     50 ms) and cannot see it.
+
+    ``window_ms`` sets the responder test and the onset search. The end of a response is
+    searched for over ``duration_window_ms`` after onset (capped at the end of the motif),
+    so that a response outlasting ``window_ms`` is timed rather than lost.
 
     Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
     :func:`daf_responders`.
@@ -121,29 +126,37 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
 
     late_over_peak = _late_over_peak(resp)
 
-    # Response onset latency and duration, per responder: 2 ms bins, each significant at
-    # p < 0.05 against the pre-onset distribution. Latency is the first of five
-    # consecutive significant bins; duration runs from there to the start of the first
-    # run of ten non-significant bins. This is an onset, which is what the paper's
-    # 23 +/- 12 ms is -- the PSTH peak (peak_latency_ms) comes ~25 ms later.
+    # Response onset latency and duration, per responder: trial-averaged rate in 2 ms
+    # bins, each significant at p < 0.05 against that neuron's pre-onset bins. Latency is
+    # the first of five consecutive significant bins, searched within ``window_ms``; it is
+    # an onset, which is what the paper's 23 +/- 12 ms is -- the PSTH peak
+    # (peak_latency_ms) comes ~25 ms later. Duration runs from there to the start of the
+    # first run of ten non-significant bins. A response with no such run before the end
+    # of the duration window is counted at the length it reached ("censored").
     BIN = 2
-    nb = (2 * W) // BIN
-    half = nb // 2
-    rate = psth.reshape(n_trials, n_e, nb, BIN).mean(axis=3).mean(axis=0)
-    lats, durs = [], []
+    dur_W = min(int(duration_window_ms), st.get("T_song", trials.shape[2]) - onset,
+                trials.shape[2] - onset)
+    dur_W -= dur_W % BIN
+    pre_b = (trials[:, :, onset - W:onset].mean(axis=0) * 1000
+             ).reshape(n_e, W // BIN, BIN).mean(axis=2)
+    post_b = (trials[:, :, onset:onset + dur_W].mean(axis=0) * 1000
+              ).reshape(n_e, dur_W // BIN, BIN).mean(axis=2)
+    n_onset_bins = W // BIN
+    lats, durs, n_censored = [], [], 0
     for u in np.flatnonzero(resp):
-        rr = rate[u]
-        mu, sd = rr[:half].mean(), rr[:half].std()
+        mu, sd = pre_b[u].mean(), pre_b[u].std()
         if sd == 0:
             continue
-        sig = (1.0 - stats.norm.cdf((rr[half:] - mu) / sd)) < 0.05
-        la = next((i for i in range(len(sig) - 5) if sig[i:i + 5].all()), None)
+        sig = (1.0 - stats.norm.cdf((post_b[u] - mu) / sd)) < 0.05
+        la = next((i for i in range(n_onset_bins - 4) if sig[i:i + 5].all()), None)
         if la is None:
             continue
         lats.append(la * BIN)
-        en = next((j for j in range(la, len(sig) - 10) if not sig[j:j + 10].any()), None)
-        if en is not None:
-            durs.append((en - la) * BIN)
+        en = next((j for j in range(la, len(sig) - 9) if not sig[j:j + 10].any()), None)
+        if en is None:
+            n_censored += 1
+            en = len(sig)
+        durs.append((en - la) * BIN)
     return {
         "n_trials": int(n_trials),
         "n_units": n_e,
@@ -168,6 +181,11 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
         "late_over_peak": late_over_peak,
         "latency_ms": float(np.mean(lats)) if lats else nan,
         "duration_ms": float(np.mean(durs)) if durs else nan,
+        #: Responders with a detectable onset (the latency/duration sample), and how many
+        #: of them were still responding at the end of the duration window.
+        "n_timed": len(lats),
+        "duration_censored": n_censored,
+        "duration_window_ms": dur_W,
         "window_ms": W,
         "burst_ms": burst_ms,
     }
@@ -198,7 +216,8 @@ def format_responders(r: dict) -> str:
         f"  latency, responders       {r['latency_ms']:7.1f} ms      "
         f"paper {lat:.0f} +/- {lat_sd:.0f} ms  (onset: first of 5 consecutive 2 ms bins)",
         f"  duration, responders      {r['duration_ms']:7.1f} ms      "
-        f"paper {dur_m:.0f} +/- {dur_sd:.0f} ms",
+        f"paper {dur_m:.0f} +/- {dur_sd:.0f} ms  ({r['n_timed']} with a detectable onset, "
+        f"{r['duration_censored']} still responding at +{r['duration_window_ms']} ms)",
         f"  peak latency, responders  {r['peak_latency_ms']:+7d} ms      "
         f"paper ~{pl_lo:.0f}-{pl_hi:.0f} ms (Fig 8E, read off the panel)",
         f"  late (100-150ms) / peak   {r['late_over_peak']:7.3f}         "

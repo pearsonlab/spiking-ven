@@ -11,6 +11,10 @@ This is the spiking counterpart to the rate-based Wilson-Cowan model in
 It is used standalone for the analyses here, and imported by the full song-circuit model
 (finchsim) to drive the AIV → VTA/VP error pathway.
 
+New to the model? [`docs/MODEL.md`](docs/MODEL.md) gives the equations, units and a
+glossary; [`docs/design-notes.md`](docs/design-notes.md) records why the parameters and
+choices are what they are.
+
 ## Install
 
 ```bash
@@ -46,6 +50,12 @@ sven-figure --view gammatone  # spectrogram, gammatone filters, cochleagram, enc
 
 `sven-evaluate` recomputes the metrics below for an existing model without retraining
 (`--json` for machine-readable output) -- useful for checking a model you were handed.
+A trained model records how its stimuli were built (sample rate, seed, protocol timing,
+rate calibration, DAF window, and checksums of the encoder and corpus it was trained on),
+so `sven-evaluate` and `sven-figure` rebuild the same stimuli by default. Their stimulus
+flags (`--mean-rate-hz`, `--n-ista`, `--t-post`, `--t-burn`, `--daf-window-s`,
+`--stimulus-seed`) override that, with a warning when they disagree with the model's
+record.
 
 Raw song data is downloaded, never vendored: "Labeled Zebra Finch Songs" (Koch, Therese),
 adult zebra finch R469, [DOI 10.18738/T8/SAWMUN](https://doi.org/10.18738/T8/SAWMUN).
@@ -84,17 +94,20 @@ against the shipped model; `make test-repro` runs it.
 | Metric | Model | Bird |
 |---|---|---|
 | auditory input rate, per rendition (2.66 Hz during the song itself) | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
-| baseline, all units | 2.53 Hz | 1–10 Hz (Fig. 7C) |
+| baseline, all units | 2.52 Hz | 1–10 Hz (Fig. 7C) |
 | responders | 52% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 29.6 ms | 23 ± 12 ms |
-| response duration | 47.4 ms | 90 ± 43 ms |
-| **extra spikes per responder per burst** | **1.75** | **~0.8–1.0** |
-| peak change, responders | 44.4 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| response onset latency | 30.5 ms | 23 ± 12 ms |
+| response duration | 47.5 ms | 90 ± 43 ms — at the lower edge; see below |
+| **extra spikes per responder per burst** | **1.74** | **~0.8–1.0** |
+| peak change, responders | 44.6 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
 | time to peak | 54 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.039 | < 0.15 — a transient, not a step (Fig. 8E) |
 
-**The open problem is response magnitude: the model is ~1.8–2.2x too strong.** Everything
-else is inside the bird's range. Stated in spikes rather than Hz because a count needs no
+**The open problem is response magnitude: the model is ~1.7–2.2x too strong.** Everything
+else is inside the bird's range, duration only just: 47.5 ms against a lower bound of
+47 (46.0 ± 1.2 ms over five evaluation seeds). Duration follows the paper's rule -- the
+response ends at the first run of ten non-significant 2 ms bins -- searched up to 300 ms
+after onset, so long responses are timed rather than dropped. Stated in spikes rather than Hz because a count needs no
 assumption about binning: the bird's responder adds about one spike on hearing the
 distortion, on a baseline under one spike in the same window. (Converting the paper's
 ~20 Hz peak over a 90 ± 43 ms duration into a count needs an assumed shape, since none is

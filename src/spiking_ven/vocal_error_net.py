@@ -616,7 +616,8 @@ class VocalErrorNetV2(VocalErrorNet):
 
     Identical dynamics, save and load; only the defaults differ -- these are the values
     the class had before the operating point became its default (no adaptation, no
-    conduction delay, ``n_aud=256``). Kept so code written against it keeps behaving
+    conduction delay, no NMDA, ``n_aud=256``). Features added to the operating point
+    later stay off here. Kept so code written against it keeps behaving
     as before. Prefer :class:`VocalErrorNet`.
     """
 
@@ -659,4 +660,5 @@ class VocalErrorNetV2(VocalErrorNet):
             drive_i=drive_i, noise_e=noise_e, noise_i=noise_i, target_rate=target_rate,
             target_rate_i=target_rate_i, aud_delay_ms=aud_delay_ms,
             hvc_delay_ms=hvc_delay_ms, tau_stdp=tau_stdp, seed=seed,
+            g_nmda=0.0,
         )

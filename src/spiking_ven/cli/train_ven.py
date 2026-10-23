@@ -29,6 +29,7 @@ from ..constants import (
     C_HVC,
     DRIVE_E,
     DRIVE_I,
+    G_NMDA,
     HVC_DELAY_MS,
     J_MAX_IE,
     N_E,
@@ -111,6 +112,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="adaptation increment per E spike (units of theta_e)")
     p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
                    help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
+    p.add_argument("--g-nmda", type=float, default=G_NMDA,
+                   help="NMDA conductance of the aud->E synapse, relative to the fast "
+                        "weights (0 disables it); kinetics and Mg2+ block in constants")
     return p
 
 
@@ -156,7 +160,7 @@ def main(argv: list[str] | None = None) -> None:
         drive_e=args.drive_e, drive_i=args.drive_i,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
-        a_sfa=args.a_sfa, tau_sfa=args.tau_sfa,
+        a_sfa=args.a_sfa, tau_sfa=args.tau_sfa, g_nmda=args.g_nmda,
     )
     if args.theta_e_init > 0.0:
         ven.theta_e[:] = args.theta_e_init

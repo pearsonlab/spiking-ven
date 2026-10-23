@@ -97,7 +97,10 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
     # before the feature existed reloads with the dynamics it was trained with.
     expected = {
         "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0, "stimulus_json": {},
+        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0,
+        "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
+        "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
+        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {},
     }
     assert VocalErrorNet.OPTIONAL_KEY_DEFAULTS == expected
 
@@ -351,3 +354,61 @@ def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     after_trained, after_novel = response(trained), response(novel)
     assert after_trained < 0.9 * after_novel, (after_trained, after_novel)
     assert after_trained < 0.7 * before_trained, (after_trained, before_trained)
+
+
+# ------------------------------------------------------------------------------ NMDA
+
+
+def test_nmda_gating_is_bounded_saturates_and_decays_with_tau_decay():
+    from spiking_ven.vocal_error_net import nmda_gating
+
+    aud = np.zeros((2, 1500), dtype=np.float32)
+    aud[0, 100] = 1.0                       # one spike
+    aud[1, 100:300] = 1.0                   # 1 kHz for 200 ms
+    s = nmda_gating(aud, tau_rise=2.0, tau_decay=100.0, alpha=0.5)
+    assert s.min() >= 0.0 and s.max() <= 1.0
+    assert s[0, :100].max() == 0.0          # causal
+    assert s[1, 299] > 0.95                 # saturated, far above a single spike's peak
+    assert s[0].max() < 0.7
+    t0 = 100 + 20                           # well past the 2 ms rise
+    assert s[0, t0 + 100] / s[0, t0] == pytest.approx(np.exp(-1.0), rel=0.02)
+
+
+def test_mg_block_follows_jahr_stevens():
+    from spiking_ven.vocal_error_net import mg_block
+
+    v = np.array([-70.0, -50.0, 0.0])
+    np.testing.assert_allclose(mg_block(v, 1.0), 1.0 / (1.0 + np.exp(-0.062 * v) / 3.57))
+    assert mg_block(-70.0) < mg_block(-50.0) < mg_block(0.0)
+    assert mg_block(-70.0) < 0.06 and mg_block(0.0) > 0.75
+
+
+def _burst_response(g_nmda):
+    net = VocalErrorNet(n_e=40, n_i=10, n_hvc=3, n_aud=4, seed=0, noise_e=0.0,
+                        a_sfa=0.0, drive_e=0.0, aud_delay_ms=0, g_nmda=g_nmda)
+    net.theta_e = np.full(net.n_e, 0.03)
+    aud = np.zeros((4, 400), dtype=np.float32)
+    aud[:, 50:100:4] = 1.0                  # a 50 ms burst at 250 Hz per channel
+    sE = net.transform(np.zeros((3, 400), dtype=np.float32), aud)
+    return sE[:, 50:100].sum(), sE[:, 150:350].sum()
+
+
+def test_nmda_sustains_firing_after_the_input_ends():
+    during0, after0 = _burst_response(0.0)
+    during, after = _burst_response(20.0)
+    assert after > after0 + 5, (after0, after)
+    assert during >= during0
+
+
+def test_nmda_parameters_round_trip_and_the_brian2_port_refuses_them(tmp_path):
+    net = VocalErrorNet(n_e=8, n_i=4, n_hvc=3, n_aud=5, seed=0, g_nmda=12.0,
+                        nmda_tau_decay=80.0)
+    path = tmp_path / "nmda.npz"
+    net.save(str(path))
+    back = VocalErrorNet.load(str(path))
+    assert (back.g_nmda, back.nmda_tau_decay) == (12.0, 80.0)
+    w = back.to_brian_weights()
+    assert w["g_nmda"] == 12.0
+    brian2_runtime = pytest.importorskip("spiking_ven.brian2_runtime")
+    with pytest.raises(NotImplementedError, match="NMDA"):
+        brian2_runtime.build_ven_groups(w)

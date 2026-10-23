@@ -92,20 +92,17 @@ AUD_MEAN_RATE_HZ = 2.5
 #: measures (peak 118 ms in at 200 ms, against 88 ms at 50 ms).
 DAF_WINDOW_S = (0.400, 0.450)
 
-#: Cochlea -> AIV-E conduction delay (ms).
+#: Cochlea -> AIV-E conduction delay (ms), on top of the encoder's own processing time.
 #:
-#: NOT a measured conduction delay. Mandelblat-Cerf et al. 2014 report 23 +/- 12 ms as the
-#: AIV *response latency* -- noise onset to the first 2 ms bin followed by five
-#: significant bins -- which is the end-to-end observable this model should PREDICT, not
-#: consume. Using it as the conduction delay double-counts: the network then integrates
-#: for a further ~43 ms, putting the modelled latency at ~66 ms, and makes the 23 ms
-#: comparison circular.
+#: Not measured: a plausible synaptic value. It must not be set to the 23 +/- 12 ms of
+#: Mandelblat-Cerf et al. 2014, which is the AIV *response latency* -- the end-to-end
+#: observable the model predicts (~30 ms here), not an input to it.
 #:
-#: Now 5 ms, a plausible synaptic value, which is what every validated run uses. The
-#: latency is therefore PREDICTED, not consumed: the model lands at 27-34 ms against the
-#: bird's 23 +/- 12, with the residual being genuine network integration time. At 23 ms it
-#: was double-counted and the comparison was circular.
-AUD_DELAY_MS = 5
+#: The encoder adds delay of its own: a cochleagram frame is 2 ms and its analysis
+#: window 4 ms, and the code at t uses only frames that end by t. Changing the encoder's
+#: frame timing therefore moves the predicted latency, and this value is what keeps the
+#: total in place.
+AUD_DELAY_MS = 2
 
 #: HVC -> AIV-I conduction delay (ms). Estimated -- no direct measurement exists. Zero in
 #: the validated operating point: HVC drives I directly and any delay here shifts the
@@ -184,7 +181,7 @@ def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
 
 
 #: Code sparsity, and with it how many filters survive: 0.3 gives ~10.7% activation and
-#: 56 of 64 filters, 0.6 gives 3.2% and 23, 1.2 collapses to one. Chosen on song
+#: 54 of 64 filters, 0.6 gives 3.2% and 23, 1.2 collapses to one. Chosen on song
 #: cancellation, which is what the network exists to do.
 CAUSAL_LAMBDA = 0.3
 

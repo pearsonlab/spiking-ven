@@ -3,9 +3,12 @@
 Pipeline:
     raw waveform
         → gammatone filterbank (ERB-spaced)
-        → per-band energy (non-negative)
-        → sqrt compression (approximates ~40 dB dynamic range compression)
+        → per-band RMS amplitude in 2-frame windows (non-negative)
+        → sqrt compression, so the output scales as amplitude ** 0.5
         → (n_channels, n_frames) at frame_rate Hz
+
+Frame ``t`` covers frames ``[t - 1, t + 1)``; see
+:func:`spiking_ven.filterbank.gammatone_spectrogram` for why that keeps the encoder causal.
 """
 
 import numpy as np
@@ -33,10 +36,9 @@ def cochleagram(
 
     Returns
     -------
-    gram : (n_channels, n_frames) float32 array, sqrt-compressed filter
-           energies.  Values are proportional to signal amplitude; no
-           per-signal normalisation is applied so that amplitude information
-           is preserved across calls (suitable for streaming / causal use).
+    gram : (n_channels, n_frames) float32 array, sqrt-compressed per-band RMS
+           amplitude, so doubling the input scales it by sqrt(2). No per-signal
+           normalisation is applied, so level is preserved across calls.
     """
     signal = np.asarray(signal, dtype=np.float64)
     if signal.ndim != 1:

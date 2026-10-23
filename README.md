@@ -83,15 +83,15 @@ against the shipped model; `make test-repro` runs it.
 
 | Metric | Model | Bird |
 |---|---|---|
-| auditory input rate during song | 2.15 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
-| baseline, all units | 2.21 Hz | 1–10 Hz (Fig. 7C) |
-| responders | 56% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 33.6 ms | 23 ± 12 ms |
-| response duration | 49.4 ms | 90 ± 43 ms |
-| **extra spikes per responder per burst** | **1.79** | **~0.8–1.0** |
-| peak change, responders | 59.8 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
-| time to peak | 48 ms | ~40–60 ms (Fig. 8E, read off the panel) |
-| late (100–150 ms) / peak | 0.021 | < 0.15 — a transient, not a step (Fig. 8E) |
+| auditory input rate during song | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
+| baseline, all units | 2.53 Hz | 1–10 Hz (Fig. 7C) |
+| responders | 52% | 41% = 7/17, 95% CI 21–64% |
+| response onset latency | 29.6 ms | 23 ± 12 ms |
+| response duration | 47.4 ms | 90 ± 43 ms |
+| **extra spikes per responder per burst** | **1.75** | **~0.8–1.0** |
+| peak change, responders | 44.4 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| time to peak | 54 ms | ~40–60 ms (Fig. 8E, read off the panel) |
+| late (100–150 ms) / peak | 0.039 | < 0.15 — a transient, not a step (Fig. 8E) |
 
 **The open problem is response magnitude: the model is ~1.8–2.2x too strong.** Everything
 else is inside the bird's range. Stated in spikes rather than Hz because a count needs no
@@ -102,12 +102,12 @@ reported; triangular and rise-then-exponential shapes both give ~0.9–1.05 spik
 
 `baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
 by a paired t-test for post > pre, which preferentially picks neurons quiet in the
-pre-window, so their baseline is biased low by the selection (~0.6 Hz against the
-population's ~2.2 Hz). The paper applies the same criterion, so responder-vs-responder
+pre-window, so their baseline is biased low by the selection (~0.5 Hz against the
+population's ~2.5 Hz). The paper applies the same criterion, so responder-vs-responder
 comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
-interval of 21–64%, which 56% sits inside.
+interval of 21–64%, which 52% sits inside.
 
 **The peak is a diagnostic, not a target, and is not asserted.** It is bin-width dependent
 and the paper never states how its plotted PSTHs were binned; 2 ms is the only binning it

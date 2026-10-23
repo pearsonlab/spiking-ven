@@ -333,12 +333,18 @@ def centre_frequencies(sr: int, n_channels: int, lo_hz: float, hi_hz: float) -> 
 def gammatone_spectrogram(signal: np.ndarray, sr: int, n_channels: int = 64,
                           frame_rate: int = 1000, lo_hz: float = 100.0,
                           hi_hz: float = 8000.0) -> np.ndarray:
-    """Gammatone spectrogram via energy integration.
+    """Gammatone spectrogram: per-band RMS amplitude in overlapping windows.
 
-    Returns (n_channels, n_frames) array of per-band energy, non-negative.
-    window_time = 2 / frame_rate gives a mild overlap; hop_time = 1 / frame_rate.
+    Returns a non-negative (n_channels, n_frames) array. Each window is two frames long
+    and advances one frame (``hop = 1 / frame_rate``), and frame ``t`` holds the window
+    spanning frames ``[t - 1, t + 1)``. :func:`spiking_ven.causal_filters.infer` reads
+    only frames before ``t`` when coding frame ``t``, and those end by the start of
+    frame ``t`` -- so the code at ``t`` depends on no audio at or after ``t``.
+
+    Upstream ``gtgram`` labels each window by its first frame; the leading zero frame
+    added here shifts every window one frame later to give the convention above.
     """
     hop_time = 1.0 / frame_rate
     window_time = 2.0 * hop_time
     gram = gtgram(signal, sr, window_time, hop_time, n_channels, lo_hz, hi_hz)
-    return gram  # shape: (n_channels, n_frames)
+    return np.concatenate([np.zeros((gram.shape[0], 1)), gram], axis=1)

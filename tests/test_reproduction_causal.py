@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from spiking_ven.causal_filters import CausalFilterEncoder
-from spiking_ven.constants import AUD_MEAN_RATE_HZ
+from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS
 from spiking_ven.evaluate import (
     BIOLOGICAL_TARGETS,
     PEAK_BIN_MS,
@@ -63,7 +63,7 @@ def daf(setup):
 
 def test_encoder_is_the_pruned_causal_bank(setup):
     enc, _, _ = setup
-    assert enc.n_channels == 56          # 64 trained, silent ones pruned
+    assert enc.n_channels == 54          # 64 trained, silent ones pruned
     assert enc.L == 16
     assert enc.lam == pytest.approx(0.3)
 
@@ -72,7 +72,7 @@ def test_auditory_input_matches_schneider_woolley(setup):
     """The encoder's realised rate, against the broad-spiking population it models."""
     _, st, _ = setup
     rate = float(st["aud_correct"].mean() * 1000)
-    assert rate == pytest.approx(2.15, abs=0.15)
+    assert rate == pytest.approx(2.16, abs=0.15)
     # The SD is larger than the mean, so only the mean is worth asserting.
     mean, sd = BIOLOGICAL_TARGETS["aud_song_rate_hz"]
     assert abs(rate - mean) < sd
@@ -83,7 +83,7 @@ def test_model_carries_the_operating_point(setup):
     assert ven.t_refr_ms == pytest.approx(2.0)
     assert ven.a_sfa == pytest.approx(1.0)
     assert ven.tau_sfa == pytest.approx(10.0)
-    assert ven.aud_delay_ms == 5 and ven.hvc_delay_ms == 0
+    assert (ven.aud_delay_ms, ven.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
     assert AUD_MEAN_RATE_HZ == pytest.approx(2.5)
     # The peak is bin-width dependent, so the bin width is part of the metric's
     # definition. 2 ms is the only binning Mandelblat-Cerf state. Pinned so that changing
@@ -93,20 +93,20 @@ def test_model_carries_the_operating_point(setup):
 
 
 def test_daf_response_matches_the_recorded_run(daf):
-    assert daf["responder_fraction"] == pytest.approx(0.557, abs=0.03)
-    assert daf["baseline_hz_all"] == pytest.approx(2.21, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(59.8, rel=0.10)
-    assert daf["latency_ms"] == pytest.approx(33.6, abs=2.5)
-    assert daf["duration_ms"] == pytest.approx(49.4, abs=4.0)
-    assert daf["extra_spikes_responders"] == pytest.approx(1.79, rel=0.10)
+    assert daf["responder_fraction"] == pytest.approx(0.520, abs=0.03)
+    assert daf["baseline_hz_all"] == pytest.approx(2.53, rel=0.08)
+    assert daf["peak_change_hz"] == pytest.approx(44.4, rel=0.10)
+    assert daf["latency_ms"] == pytest.approx(29.6, abs=2.5)
+    assert daf["duration_ms"] == pytest.approx(47.4, abs=4.0)
+    assert daf["extra_spikes_responders"] == pytest.approx(1.75, rel=0.10)
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation, and the mean alone hid that distinction across two sweeps."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.85, rel=0.12)
-    assert daf["extra_spikes_max"] == pytest.approx(10.2, rel=0.15)
-    assert daf["extra_spikes_sd"] == pytest.approx(1.54, rel=0.12)
+    assert daf["extra_spikes_p90"] == pytest.approx(3.65, rel=0.12)
+    assert daf["extra_spikes_max"] == pytest.approx(9.05, rel=0.15)
+    assert daf["extra_spikes_sd"] == pytest.approx(1.37, rel=0.12)
 
 
 def test_biological_targets_that_are_met(daf):

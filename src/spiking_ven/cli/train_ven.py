@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--t-post", type=int, default=T_POST)
     p.add_argument("--t-burn", type=int, default=T_BURN)
     p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS,
-                   help="cochlea->AIV-E (measured)")
+                   help="cochlea->AIV-E conduction delay (estimated)")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding

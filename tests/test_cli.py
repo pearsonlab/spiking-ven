@@ -194,8 +194,8 @@ def test_adaptation_timescale_is_shorter_than_the_burst():
 
 
 def test_train_ven_delays_track_the_constants():
-    """At 23 ms the conduction delay consumed the response latency the model is supposed
-    to predict, which made the comparison circular."""
+    """The delay is an input; the 23 ms response latency is what the model predicts, so
+    the two must stay separate constants rather than one being set to the other."""
     a = cli_train_ven.build_parser().parse_args([])
     assert (a.aud_delay_ms, a.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
 

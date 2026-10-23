@@ -91,9 +91,9 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
   `w_sfa` that decays with `tau_sfa`. The shipped `a_sfa = 1.0` is about 23x `theta_e`, so a spike
   holds a cell quiet for several `tau_sfa` unless its auditory drive is strong.
 
-### Optional NMDA component (off in the shipped model)
+### NMDA component
 
-With `g_nmda > 0`, the auditory synapses onto E also carry an NMDA conductance, following Wang
+The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 60`), following Wang
 (2002). Each auditory channel `j` has a gating variable, computed before the loop
 (`nmda_gating`):
 
@@ -116,7 +116,8 @@ where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous 
 `e_l_mv` (-70 mV) and each cell's threshold to `v_th_mv` (-50 mV), so the Mg2+ block and the
 driving force act on a physiological voltage scale. NMDA uses the same connections as `B`;
 `g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.055 of
-the fast component's charge per isolated spike. The STDP audio gate stays on the fast drive
+the fast component's charge per isolated spike, so the shipped 60 carries ~3.3x the fast
+charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio gate stays on the fast drive
 `a_e`, so NMDA changes learning only through the E spikes it causes.
 
 ### I neurons
@@ -199,7 +200,7 @@ All three are drawn from `default_rng(seed)`, in the order below, and stored as 
 
 | Matrix | Connection probability | Mean weight per connection | Std |
 |---|---|---|---|
-| `B` | `c_B` (0.05) | `B_scale / n_aud` (16 / 54 = 0.30) | half the mean |
+| `B` | `c_B` (0.05) | `B_scale / n_aud` (10 / 54 = 0.19) | half the mean |
 | `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.333), not divided by `n_hvc` | half the mean |
 | `JEI` | `c_JEI` (0.5) | `0.17 / sqrt(n_e * c_JEI)` (0.0098) | 10% of the mean |
 | `JIE` | -- | 0 (all zero) | -- |

@@ -400,7 +400,7 @@ def test_nmda_sustains_firing_after_the_input_ends():
     assert during >= during0
 
 
-def test_nmda_parameters_round_trip_and_the_brian2_port_refuses_them(tmp_path):
+def test_nmda_parameters_round_trip(tmp_path):
     net = VocalErrorNet(n_e=8, n_i=4, n_hvc=3, n_aud=5, seed=0, g_nmda=12.0,
                         nmda_tau_decay=80.0)
     path = tmp_path / "nmda.npz"
@@ -408,10 +408,7 @@ def test_nmda_parameters_round_trip_and_the_brian2_port_refuses_them(tmp_path):
     back = VocalErrorNet.load(str(path))
     assert (back.g_nmda, back.nmda_tau_decay) == (12.0, 80.0)
     w = back.to_brian_weights()
-    assert w["g_nmda"] == 12.0
-    brian2_runtime = pytest.importorskip("spiking_ven.brian2_runtime")
-    with pytest.raises(NotImplementedError, match="NMDA"):
-        brian2_runtime.build_ven_groups(w)
+    assert w["g_nmda"] == 12.0 and w["nmda_tau_decay"] == 80.0
 
 
 

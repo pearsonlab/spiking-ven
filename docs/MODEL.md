@@ -14,8 +14,9 @@ gammatone channels (200-8000 Hz), per-band RMS in 4 ms windows advancing every 2
 compressed. A bank of causal spectro-temporal filters, each spanning the 16 frames (32 ms) strictly
 before now, sparse-codes that cochleagram frame by frame with ISTA, so the code at time `t` depends
 on no audio at or after `t`. The rectified code is upsampled to 1 ms and converted to Poisson spike
-trains, one *auditory channel* per surviving filter (`n_aud` = the encoder's `n_channels`), at a
-population mean of 2.5 Hz. Separately, a synthetic HVC population supplies the premotor signal: each
+trains, one *auditory channel* per surviving filter (`n_aud` = the encoder's `n_channels`),
+calibrated to a population mean of 2.5 Hz (2.16 Hz realised over a rendition, 2.66 Hz during the
+song, after refractory thinning). Separately, a synthetic HVC population supplies the premotor signal: each
 HVC neuron bursts once per motif, at its own time. The auditory spikes drive excitatory (E) neurons,
 the HVC spikes drive inhibitory (I) neurons, E drives I, and I inhibits E through the plastic
 weights `JIE`. During training (`fit`), STDP strengthens I->E synapses where I firing predicts
@@ -89,6 +90,34 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 - Spike-frequency adaptation (`a_sfa > 0`): each spike adds `a_sfa` to a hyperpolarising current
   `w_sfa` that decays with `tau_sfa`. The shipped `a_sfa = 1.0` is about 23x `theta_e`, so a spike
   holds a cell quiet for several `tau_sfa` unless its auditory drive is strong.
+
+### Optional NMDA component (off in the shipped model)
+
+With `g_nmda > 0`, the auditory synapses onto E also carry an NMDA conductance, following Wang
+(2002). Each auditory channel `j` has a gating variable, computed before the loop
+(`nmda_gating`):
+
+```
+x_j[t] = exp(-1 / nmda_tau_rise) * x_j[t-1] + spikes_j[t]
+s_j[t] = d * s_j[t-1] + (1 - d * s_j[t-1]) * (1 - exp(-nmda_alpha * x_j[t]))     d = exp(-1 / nmda_tau_decay)
+```
+
+a step of `ds/dt = -s / tau_decay + alpha x (1 - s)` that applies the decay and the saturating
+increment each exactly, in turn, so `s` stays in [0, 1] and saturates near 1 under dense input. At each step, before the membrane update, `u_e` gains
+
+```
+g_nmda * (B @ s_t) * mg_block(V_mV) * (E_nmda - V_e)
+V_mV = e_l_mv + V_e * (v_th_mv - e_l_mv) / theta_e
+mg_block(V_mV) = 1 / (1 + mg_mm * exp(-0.062 * V_mV) / 3.57)          (Jahr & Stevens 1990)
+```
+
+where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous step, and
+`E_nmda` is `e_nmda_mv` expressed in membrane units by the same map. The map sends reset (0) to
+`e_l_mv` (-70 mV) and each cell's threshold to `v_th_mv` (-50 mV), so the Mg2+ block and the
+driving force act on a physiological voltage scale. NMDA uses the same connections as `B`;
+`g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.055 of
+the fast component's charge per isolated spike. The STDP audio gate stays on the fast drive
+`a_e`, so NMDA changes learning only through the E spikes it causes.
 
 ### I neurons
 
@@ -182,8 +211,8 @@ song does not reach keep zero rows and respond fully to novel sound.
 
 - **Auditory** (`common.acts_to_spikes`): the encoder activations are rectified (negative
   coefficients produce no spikes), scaled by one population-wide factor chosen so that the mean
-  rate over the training song is `AUD_MEAN_RATE_HZ` (2.5 Hz), and sampled as Poisson counts per
-  1 ms bin. Every other stimulus (reversed song, DAF) is scaled by the factor from the training
+  rate over the training rendition (the song plus the silence after it) is `AUD_MEAN_RATE_HZ`
+  (2.5 Hz), and sampled as Poisson counts per 1 ms bin. Every other stimulus (reversed song, DAF) is scaled by the factor from the training
   song, not its own.
 - **HVC** (`common.generate_hvc_spikes`): neuron `i` of `n_hvc` has a Gaussian rate envelope
   centred at the `i`-th of `n_hvc` evenly spaced times across the motif, width `KERNEL_WIDTH_MS`
@@ -211,8 +240,9 @@ corpus's other renditions of the song.
   (`CAUSAL_N_ISTA` iterations in training, `N_ISTA = 50` when encoding stimuli for the network).
   Correlated filters explain each other away rather than firing together.
 - **Gain** (`CausalFilterEncoder.encode_signal`): each frame's code is divided by the norm of its
-  reconstruction and multiplied by the window mean removed above, so its size reports sound level
-  rather than how well the filters matched.
+  reconstruction and multiplied by the window mean removed above, taken from the previous frame
+  (the newest one the code read), so its size reports sound level rather than how well the filters
+  matched.
 - **Filters** (`causal_filters.learn`): learned to reconstruct the past window from the sparse
   code, pulled toward minimum phase (energy as early in the window as the magnitude response
   allows, which keeps the encoder's latency short), then pruned to those that fire.
@@ -222,9 +252,13 @@ corpus's other renditions of the song.
 | Quantity | Unit | Examples |
 |---|---|---|
 | Time step | 1 ms | the loop index `t`, `dt` |
-| Time constants, delays, refractory period | ms | `tau_e`, `tau_i`, `tau_s`, `tau_stdp`, `tau_sfa`, `aud_delay_ms`, `t_refr_ms` |
+| Time constants, delays, refractory period | ms | `tau_e`, `tau_i`, `tau_s`, `tau_stdp`, `tau_sfa`, `nmda_tau_rise`, `nmda_tau_decay`, `aud_delay_ms`, `t_refr_ms` |
 | Potentials, thresholds, drives, noise std | dimensionless | `V_e`, `theta_e`, `drive_e`, `noise_e`, `v_reset` |
 | Weights, adaptation increment | dimensionless | `B`, `JIE`, `J_max_ie`, `a_sfa`, `A_jie` |
+| NMDA conductance, gating | dimensionless (conductance relative to `B`); `s` in [0, 1] | `g_nmda`, `s_nmda` |
+| NMDA rate constant | 1 / ms | `nmda_alpha` |
+| Voltages for the NMDA map only | mV | `e_l_mv`, `v_th_mv`, `e_nmda_mv` |
+| Mg2+ concentration | mM | `mg_mm` |
 | Filtered input `h` | spikes (a sum of decaying unit jumps) | `h_aud`, `h_hvc` |
 | Rates used for thresholds | spikes per ms | `target_rate` (0.025 = 25 Hz), `target_rate_i` |
 | Other rates | Hz | `r_i_th`, `AUD_MEAN_RATE_HZ`, `PEAK_RATE_HZ` |
@@ -244,6 +278,9 @@ corpus's other renditions of the song.
 - **E / I** -- excitatory and inhibitory populations.
 - **STDP** -- spike-timing-dependent plasticity: a weight change set by the relative timing of pre-
   and postsynaptic spikes. Here, I (pre) before E (post) potentiates I->E.
+- **NMDA** -- a glutamate receptor whose current is slow (~100 ms decay) and blocked by Mg2+
+  near rest, so it flows mainly in depolarised cells. Here, an optional slow component of the
+  auditory -> E synapse.
 - **ISTA** -- iterative shrinkage-thresholding algorithm: a gradient step on the reconstruction
   error followed by a soft threshold, repeated; it solves the L1-penalised sparse coding problem.
 - **STRF** -- spectro-temporal receptive field: the time-frequency pattern of sound a neuron

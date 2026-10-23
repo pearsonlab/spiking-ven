@@ -6,6 +6,8 @@ Architecture
 - E neurons        →  JEI (n_i × n_e)                 →  I neurons  [fixed]
 - HVC spikes       (n_hvc, T) →  B_hvc (n_i × n_hvc) →  I neurons  [fixed sparse]
 - I neurons        →  JIE (n_e × n_i)                 →  E neurons  [plastic — causal Hebbian]
+- Optional: an NMDA conductance on the auditory → E synapses (``g_nmda > 0``; off at the
+  shipped operating point). See ``docs/MODEL.md``.
 
 Plasticity
 ----------
@@ -30,7 +32,40 @@ from .common import (
     spike_to_rate,        # re-exported for convenience
 )
 
-__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate"]
+__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate",
+           "nmda_gating", "mg_block"]
+
+#: Saved NMDA parameters; files without them load with the NMDA component off.
+_NMDA_KEYS = ("g_nmda", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
+              "e_nmda_mv", "e_l_mv", "v_th_mv")
+
+
+# ---------------------------------------------------------------------------
+# NMDA synapse
+# ---------------------------------------------------------------------------
+
+def nmda_gating(aud_spikes, tau_rise=C.NMDA_TAU_RISE, tau_decay=C.NMDA_TAU_DECAY,
+                alpha=C.NMDA_ALPHA, dt=1.0):
+    """NMDA gating variable per auditory channel, ``(n_aud, T)`` in [0, 1].
+
+    ``dx/dt = -x / tau_rise + spikes`` and ``ds/dt = -s / tau_decay + alpha x (1 - s)``
+    (Wang 2002), stepped exactly for the decay and the saturating increment, so ``s``
+    stays in [0, 1] at any input rate.
+    """
+    x = spike_to_rate(aud_spikes, tau_rise, dt).astype(np.float64)
+    keep = np.exp(-dt / tau_decay)
+    s = np.zeros_like(x)
+    prev = np.zeros(x.shape[0])
+    for t in range(x.shape[1]):
+        decayed = prev * keep
+        prev = decayed + (1.0 - decayed) * (1.0 - np.exp(-alpha * x[:, t] * dt))
+        s[:, t] = prev
+    return s
+
+
+def mg_block(v_mv, mg_mm=C.MG_MM):
+    """Fraction of NMDA conductance not blocked by Mg2+ at ``v_mv`` (Jahr & Stevens 1990)."""
+    return 1.0 / (1.0 + mg_mm * np.exp(-0.062 * np.asarray(v_mv)) / 3.57)
 
 
 # ---------------------------------------------------------------------------
@@ -46,8 +81,13 @@ def _simulate(
     learn_weights, alpha_stdp, rng,
     aud_delay_ms: int = 0,
     hvc_delay_ms: int = 0,
+    s_nmda=None,
+    g_nmda: float = 0.0,
+    nmda_v=None,
 ):
     # Membrane noise comes from the caller's seeded generator, never the global np.random.
+    # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the per-neuron map from the
+    # dimensionless membrane to mV, and the NMDA reversal in membrane units.
     n_e = B.shape[0]
     n_i = JEI.shape[0]
     T   = h_aud.shape[1]
@@ -85,6 +125,13 @@ def _simulate(
         # --- E dynamics ---
         audio_drive_e = B @ h_aud_t
         u_e = drive_e + audio_drive_e - JIE @ sI_prev
+        if g_nmda > 0.0:
+            # NMDA conductance through the same connections, Mg2+-blocked at the
+            # membrane's current potential (in mV), with driving force E_NMDA - V.
+            e_l_mv, mv_per_unit, e_nmda_units, mg_mm = nmda_v
+            s_t = s_nmda[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
+            mg = mg_block(e_l_mv + V_e * mv_per_unit, mg_mm)
+            u_e = u_e + g_nmda * (B @ s_t) * mg * (e_nmda_units - V_e)
         if a_sfa > 0.0:
             w_sfa *= decay_sfa
             u_e = u_e - w_sfa
@@ -179,6 +226,11 @@ class VocalErrorNet:
     noise_i      : std of additive Gaussian noise on I input
     target_rate  : E firing rate used to analytically initialise theta_e (Hz-like units)
     target_rate_i: I firing rate used to analytically initialise theta_i
+    g_nmda       : NMDA conductance of the aud->E synapses, relative to ``B`` (0 = off)
+    nmda_tau_rise, nmda_tau_decay, nmda_alpha : NMDA gating kinetics (ms, ms, 1/ms)
+    mg_mm, e_nmda_mv : Mg2+ concentration (mM) and NMDA reversal potential (mV)
+    e_l_mv, v_th_mv  : mV values the dimensionless membrane's reset and threshold map to,
+                   for the Mg2+ block and the NMDA driving force
     seed         : RNG seed
 
     Every default is the shipped operating point (:mod:`spiking_ven.constants`), except
@@ -219,6 +271,14 @@ class VocalErrorNet:
         aud_delay_ms: int = C.AUD_DELAY_MS,
         hvc_delay_ms: int = C.HVC_DELAY_MS,
         tau_stdp: float = C.TAU_STDP,
+        g_nmda: float = C.G_NMDA,
+        nmda_tau_rise: float = C.NMDA_TAU_RISE,
+        nmda_tau_decay: float = C.NMDA_TAU_DECAY,
+        nmda_alpha: float = C.NMDA_ALPHA,
+        mg_mm: float = C.MG_MM,
+        e_nmda_mv: float = C.E_NMDA_MV,
+        e_l_mv: float = C.E_L_MV,
+        v_th_mv: float = C.V_TH_MV,
         seed: int | None = None,
     ) -> None:
         if n_aud is None:
@@ -262,6 +322,15 @@ class VocalErrorNet:
         self.aud_delay_ms  = int(aud_delay_ms)
         self.hvc_delay_ms  = int(hvc_delay_ms)
         self.tau_stdp      = float(tau_stdp)
+        #: NMDA component of aud -> E (see constants.G_NMDA); off when g_nmda is 0.
+        self.g_nmda         = float(g_nmda)
+        self.nmda_tau_rise  = float(nmda_tau_rise)
+        self.nmda_tau_decay = float(nmda_tau_decay)
+        self.nmda_alpha     = float(nmda_alpha)
+        self.mg_mm          = float(mg_mm)
+        self.e_nmda_mv      = float(e_nmda_mv)
+        self.e_l_mv         = float(e_l_mv)
+        self.v_th_mv        = float(v_th_mv)
         self.v_reset: float = 0.0
         self.stimulus: dict = {}
 
@@ -352,6 +421,7 @@ class VocalErrorNet:
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
             aud_delay_ms=self.aud_delay_ms, hvc_delay_ms=self.hvc_delay_ms,
             tau_stdp=self.tau_stdp,
+            **{k: getattr(self, k) for k in _NMDA_KEYS},
             theta_e=self.theta_e, theta_i=self.theta_i,
             stimulus_json=np.array(json.dumps(self.stimulus, sort_keys=True)),
         )
@@ -377,6 +447,14 @@ class VocalErrorNet:
         "aud_delay_ms": 0,
         "hvc_delay_ms": 0,
         "tau_stdp": 0.0,
+        "g_nmda": 0.0,
+        "nmda_tau_rise": C.NMDA_TAU_RISE,
+        "nmda_tau_decay": C.NMDA_TAU_DECAY,
+        "nmda_alpha": C.NMDA_ALPHA,
+        "mg_mm": C.MG_MM,
+        "e_nmda_mv": C.E_NMDA_MV,
+        "e_l_mv": C.E_L_MV,
+        "v_th_mv": C.V_TH_MV,
         "stimulus_json": {},
     }
 
@@ -403,7 +481,7 @@ class VocalErrorNet:
             setattr(obj, k, float(d[k]))
 
         opt = cls.OPTIONAL_KEY_DEFAULTS
-        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_stdp"):
+        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_stdp") + _NMDA_KEYS:
             setattr(obj, k, float(d[k]) if k in d else opt[k])
         for k in ("aud_delay_ms", "hvc_delay_ms"):
             setattr(obj, k, int(d[k]) if k in d else opt[k])
@@ -449,6 +527,7 @@ class VocalErrorNet:
             "t_refr_ms":    float(self.t_refr_ms),
             "aud_delay_ms": int(self.aud_delay_ms),
             "hvc_delay_ms": int(self.hvc_delay_ms),
+            **{k: float(getattr(self, k)) for k in _NMDA_KEYS},
             "n_e":          int(self.n_e),
             "n_i":          int(self.n_i),
             "n_aud":        int(self.n_aud),
@@ -477,6 +556,16 @@ class VocalErrorNet:
 
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
+        nmda = {}
+        if self.g_nmda > 0.0:
+            mv_per_unit = (self.v_th_mv - self.e_l_mv) / self.theta_e
+            nmda = dict(
+                s_nmda=nmda_gating(aud_spikes, self.nmda_tau_rise, self.nmda_tau_decay,
+                                   self.nmda_alpha, dt),
+                g_nmda=float(self.g_nmda),
+                nmda_v=(self.e_l_mv, mv_per_unit,
+                        (self.e_nmda_mv - self.e_l_mv) / mv_per_unit, self.mg_mm),
+            )
 
         sE_mat, sI_mat, JIE = _simulate(
             h_aud, h_hvc,
@@ -493,6 +582,7 @@ class VocalErrorNet:
             learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
+            **nmda,
         )
 
         if learn_weights:

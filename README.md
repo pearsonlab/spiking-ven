@@ -103,16 +103,18 @@ against the shipped model; `make test-repro` runs it.
 | time to peak | 54 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.039 | < 0.15 — a transient, not a step (Fig. 8E) |
 
-**The open problem is response magnitude: the model is ~1.7–2.2x too strong.** Everything
-else is inside the bird's range, duration only just: 47.5 ms against a lower bound of
-47 (46.0 ± 1.2 ms over five evaluation seeds). Duration follows the paper's rule -- the
-response ends at the first run of ten non-significant 2 ms bins -- searched up to 300 ms
-after onset, so long responses are timed rather than dropped. Stated in spikes rather than Hz because a count needs no
-assumption about binning: the bird's responder adds about one spike on hearing the
-distortion, on a baseline under one spike in the same window. (Converting the paper's
-~20 Hz peak over a 90 ± 43 ms duration into a count needs an assumed shape, since none is
-reported; triangular and rise-then-exponential shapes both give ~0.8–1.0 spikes, a
-rectangle 1.8.)
+**The open problem is response magnitude: the model is ~1.7–2.2x too strong.** It is stated
+in spikes rather than Hz because a count needs no assumption about binning: the bird's
+responder adds about one spike on hearing the distortion, on a baseline under one spike in
+the same window. (Converting the paper's ~20 Hz peak over a 90 ± 43 ms duration into a count
+needs an assumed shape, since none is reported; triangular and rise-then-exponential shapes
+both give ~0.8–1.0 spikes, a rectangle 1.8.)
+
+Everything else is inside the bird's range, duration only just: 47.5 ms at the test seed
+against a lower bound of 47, and 45.0 ± 1.3 ms over ten evaluation seeds. The model's
+response is short and strong where the bird's is long and weak. Duration follows the
+paper's rule -- the response ends at the first run of ten non-significant 2 ms bins --
+searched up to 300 ms after onset, so long responses are timed rather than dropped.
 
 `baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
 by a paired t-test for post > pre, which preferentially picks neurons quiet in the
@@ -129,6 +131,16 @@ gives (for the latency and duration z-tests) and is what we use. So any ratio ag
 ~20 Hz carries an unknown mismatch. The spike count does not: it is invariant to binning,
 and is the quantity the paper's own bootstrap used ("the maximal spike count over
 150 ms").
+
+## Experimental: an NMDA component on auditory -> E synapses
+
+`sven-train-ven --g-nmda G` adds a standard NMDA conductance to the auditory -> E synapses
+(Wang 2002: saturating gating with 2 ms rise and 100 ms decay, Mg2+ block, reversal 0 mV),
+aimed at the long, weak response above. It is off by default (`G_NMDA = 0`), so the shipped
+model and the numbers above do not use it, and the Brian2 runtime refuses a model that
+does. In a first sweep it lengthened the response from 46 to 60 ms and cut the extra spikes
+from 1.77 to 1.57, at a latency of 34 ms; see `docs/MODEL.md` for the equations and
+`docs/design-notes.md` for the sweep.
 
 ## Citing
 

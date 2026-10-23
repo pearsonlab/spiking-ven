@@ -204,7 +204,7 @@ def test_train_encoder_front_end_is_sane():
         ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
         ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
-        ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"),
+        ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"), ("g_nmda", "G_NMDA"),
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):

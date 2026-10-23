@@ -44,6 +44,8 @@ __all__ = [
     "R_I_TH", "J_MAX_IE",
     "A_SFA", "TAU_SFA",
     "TAU_I", "C_JEI", "NOISE_E", "NOISE_I", "TARGET_RATE_E", "TARGET_RATE_I", "T_REFR_MS",
+    "G_NMDA", "NMDA_TAU_RISE", "NMDA_TAU_DECAY", "NMDA_ALPHA", "MG_MM", "E_NMDA_MV",
+    "E_L_MV", "V_TH_MV",
     "T_POST", "T_BURN", "N_ISTA",
     "a_jie_for",
     # 3. the causal encoder operating point
@@ -145,6 +147,26 @@ DRIVE_I = 0.058
 TAU_S = 20.0
 TAU_E = 30.0
 TAU_I = 10.0
+
+#: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
+#: Wang (2001). Off by default (``G_NMDA = 0``). It uses the same connections as the fast
+#: weights ``B``; ``G_NMDA`` is its conductance relative to them, in units of the leak.
+#: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
+#: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
+#: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
+#: Current: G_NMDA (B s) B(V) (E_NMDA - V).
+G_NMDA = 0.0
+NMDA_TAU_RISE = 2.0
+NMDA_TAU_DECAY = 100.0
+NMDA_ALPHA = 0.5
+MG_MM = 1.0
+E_NMDA_MV = 0.0
+
+#: Voltage scale for the Mg2+ block and the NMDA driving force: the dimensionless E
+#: membrane maps reset (0) to E_L and threshold (theta_e) to V_th, the values of Wang's
+#: pyramidal cells (mV).
+E_L_MV = -70.0
+V_TH_MV = -50.0
 
 #: E -> I connection probability (fixed weights).
 C_JEI = 0.5

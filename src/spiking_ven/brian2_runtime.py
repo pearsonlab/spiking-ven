@@ -76,6 +76,15 @@ def _eqs(template: str, noise_amp: float, sigma_name: str) -> str:
 # VEN groups
 # ---------------------------------------------------------------------------
 
+def _check_supported(w: dict) -> None:
+    """Refuse a model using a feature this port does not implement."""
+    if float(w.get("g_nmda", 0.0)) > 0.0:
+        raise NotImplementedError(
+            "the NMDA component of aud -> E (g_nmda > 0) is not implemented in the Brian2 "
+            "runtime; the network would run without it"
+        )
+
+
 def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     """Build the E and I LIF NeuronGroups of a trained network.
 
@@ -86,6 +95,7 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     sigma = noise * sqrt(1 ms) / tau. Calibrating to the Brian2 dt instead would give
     10x smaller variance at dt = 0.1 ms and suppress the noise-driven crossings.
     """
+    _check_supported(w)
     DT_NUMPY_S = 1e-3   # VocalErrorNet reference timestep (1 ms)
     sigma_e = w["noise_e"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_e"] * 1e-3)
     sigma_i = w["noise_i"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_i"] * 1e-3)

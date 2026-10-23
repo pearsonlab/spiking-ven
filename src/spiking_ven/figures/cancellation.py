@@ -56,7 +56,8 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
     T_song, sr = st["T_song"], st["sr"]
     cols = []
     for title, sig_key, aud_key in COLUMNS:
-        sE, sI = ven.transform_all(st["hvc_on"], st[aud_key])
+        sE, sI = ven.transform_all(st["hvc_on"], st[aud_key],
+                                   hvc_prelude=st.get("hvc_prelude"))
         cols.append(dict(title=title, sig=st[sig_key], aud=st[aud_key], sE=sE, sI=sI))
 
     # ── Neuron subsets ────────────────────────────────────────────────────────

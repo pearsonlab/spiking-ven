@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
 
     m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
                         aud_trained=st["aud_correct"], aud_daf=st["aud_daf"],
-                        aud_reversed=st["aud_reversed"])
+                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"])
 
     # The DAF number that means something: a windowed, per-neuron responder measurement
     # rather than an excitatory rate averaged over a whole rendition, which cannot see a

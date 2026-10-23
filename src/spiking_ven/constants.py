@@ -36,6 +36,7 @@ __all__ = [
     "AUD_DELAY_MS",
     "AUD_MEAN_RATE_HZ",
     "HVC_DELAY_MS",
+    "HVC_INTRO",
     # 2. the network operating point
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
@@ -105,6 +106,13 @@ DAF_WINDOW_S = (0.400, 0.450)
 #: frame timing therefore moves the predicted latency, and this value is what keeps the
 #: total in place.
 AUD_DELAY_MS = 2
+
+#: HVC activity before each motif: ``(n_notes, note_ms, gap_ms)`` introductory notes, each
+#: a short stereotyped HVC sequence repeated note to note, with no sound, and a gap after
+#: each one (the last gap precedes the motif). Without it the HVC-driven inhibition of E
+#: switches on only at motif onset, and E fires through its first ~50 ms. ``(0, 0, 0)``
+#: disables it.
+HVC_INTRO = (2, 80, 20)
 
 #: HVC -> AIV-I conduction delay (ms). Estimated -- no direct measurement exists. Zero in
 #: the validated operating point: HVC drives I directly and any delay here shifts the

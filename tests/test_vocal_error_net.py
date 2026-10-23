@@ -412,3 +412,23 @@ def test_nmda_parameters_round_trip_and_the_brian2_port_refuses_them(tmp_path):
     brian2_runtime = pytest.importorskip("spiking_ven.brian2_runtime")
     with pytest.raises(NotImplementedError, match="NMDA"):
         brian2_runtime.build_ven_groups(w)
+
+
+
+# ------------------------------------------------------------------- HVC prelude
+
+
+def test_a_prelude_is_trimmed_and_changes_no_weights():
+    net = VocalErrorNet(n_e=20, n_i=8, n_hvc=6, n_aud=5, seed=0)
+    T = 120
+    hvc = generate_hvc_spikes(n_hvc=6, T=T, n_renditions=1, T_song=100, T_burn=0,
+                              T_post=20, seed=1)
+    aud = (np.random.default_rng(2).random((5, T)) < 0.05).astype(np.float32)
+    pre = generate_hvc_spikes(n_hvc=6, T=60, n_renditions=1, T_song=50, T_burn=0,
+                              T_post=10, seed=3)
+    sE, sI = net.transform_all(hvc, aud, hvc_prelude=pre)
+    assert sE.shape == (20, T) and sI.shape == (8, T)
+    # Learning needs auditory drive, so a prelude alone (no sound) leaves JIE untouched.
+    net.fit(np.zeros((6, 0), dtype=np.float32), np.zeros((5, 0), dtype=np.float32),
+            hvc_prelude=pre)
+    assert not net.JIE.any()

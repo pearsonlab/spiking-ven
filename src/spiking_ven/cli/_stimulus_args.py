@@ -29,6 +29,10 @@ def add_stimulus_flags(p: argparse.ArgumentParser) -> None:
     g.add_argument("--n-ista", type=int, default=None, help="ISTA iterations per frame")
     g.add_argument("--daf-window-s", type=float, nargs=2, default=None,
                    metavar=("START", "END"), help="DAF noise window within the motif (s)")
+    g.add_argument("--hvc-intro", type=int, nargs=3, default=None,
+                   metavar=("NOTES", "NOTE_MS", "GAP_MS"),
+                   help="HVC introductory notes before each motif; a model that records "
+                        "its stimuli but no intro notes was trained without them")
 
 
 def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
@@ -46,7 +50,8 @@ def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
         getattr(ven, "stimulus", {}),
         {"sr": args.sr, "seed": args.stimulus_seed, "t_post": args.t_post,
          "t_burn": args.t_burn, "mean_rate_hz": args.mean_rate_hz,
-         "n_ista": args.n_ista, "daf_window_s": args.daf_window_s},
+         "n_ista": args.n_ista, "daf_window_s": args.daf_window_s,
+         "hvc_intro": args.hvc_intro},
         encoder_path=encoder_path, motifs_path=motifs_path,
     )
     seed = settings.pop("seed")

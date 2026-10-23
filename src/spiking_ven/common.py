@@ -133,6 +133,39 @@ def generate_hvc_spikes(
     return apply_refractory(spikes, t_refr_ms)
 
 
+def generate_hvc_intro(
+    n_hvc: int,
+    T_song: int,
+    n_notes: int,
+    note_ms: int,
+    gap_ms: int,
+    peak_rate: float = 150.0,
+    kernel_width: float = 20.0,
+    seed: int | None = None,
+    t_refr_ms: float = 2.0,
+) -> np.ndarray:
+    """HVC spikes for ``n_notes`` introductory notes: ``(n_hvc, n_notes * (note_ms + gap_ms))``.
+
+    Each note is a sparse HVC sequence with the motif's burst density: ``round(n_hvc *
+    note_ms / T_song)`` neurons, spread evenly over the population, burst at evenly spaced
+    times within the note (Gaussian envelopes, as in :func:`generate_hvc_spikes`). The same
+    neurons and times repeat every note; each note is followed by ``gap_ms`` of silence.
+    Pass ``constants.PEAK_RATE_HZ`` and ``KERNEL_WIDTH_MS`` for the operating point.
+    """
+    period = note_ms + gap_ms
+    out = np.zeros((n_hvc, n_notes * period), dtype=bool)
+    if n_notes <= 0 or note_ms <= 0:
+        return out
+    k = max(1, int(round(n_hvc * note_ms / T_song)))
+    rows = np.unique(np.linspace(0, n_hvc - 1, k).round().astype(int))
+    note = generate_hvc_spikes(n_hvc=len(rows), T=period, n_renditions=1, T_song=note_ms,
+                               T_burn=0, T_post=gap_ms, peak_rate=peak_rate,
+                               kernel_width=kernel_width, seed=seed, t_refr_ms=t_refr_ms)
+    for r in range(n_notes):
+        out[rows, r * period:(r + 1) * period] = note > 0
+    return out
+
+
 def _lognormal_sparse(shape, c, mean, std, rng):
     """Sparse log-normal weight matrix with connection probability c."""
     sigma2 = np.log(1 + (std / mean) ** 2)

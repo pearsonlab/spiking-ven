@@ -31,6 +31,7 @@ from ..constants import (
     DRIVE_I,
     G_NMDA,
     HVC_DELAY_MS,
+    HVC_INTRO,
     J_MAX_IE,
     N_E,
     N_HVC,
@@ -101,6 +102,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--t-burn", type=int, default=T_BURN)
     p.add_argument("--aud-delay-ms", type=int, default=AUD_DELAY_MS,
                    help="cochlea->AIV-E conduction delay (estimated)")
+    p.add_argument("--hvc-intro", type=int, nargs=3, default=list(HVC_INTRO),
+                   metavar=("NOTES", "NOTE_MS", "GAP_MS"),
+                   help="HVC introductory notes before each motif (no sound); 0 0 0 for none")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
@@ -143,8 +147,10 @@ def main(argv: list[str] | None = None) -> None:
     # call -- one definition, so training and the metrics cannot drift apart.
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
-                       mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista)
+                       mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista,
+                       hvc_intro=tuple(args.hvc_intro))
     aud_correct, aud_reversed = st["aud_correct"], st["aud_reversed"]
+    hvc_prelude = st["hvc_prelude"]
     correct_pool = st["correct_pool"]
     hvc_on, hvc_off, hvc_burn, aud_burn = (st["hvc_on"], st["hvc_off"], st["hvc_burn"],
                                            st["aud_burn"])
@@ -181,8 +187,10 @@ def main(argv: list[str] | None = None) -> None:
     monitor_rng = np.random.default_rng(args.seed + 20_000)
 
     def snapshot() -> tuple[float, float]:
-        trained = float(ven.transform(hvc_on, aud_correct, rng=monitor_rng).mean() * 1000)
-        reversed_ = float(ven.transform(hvc_on, aud_reversed, rng=monitor_rng).mean() * 1000)
+        trained = float(ven.transform(hvc_on, aud_correct, rng=monitor_rng,
+                                      hvc_prelude=hvc_prelude).mean() * 1000)
+        reversed_ = float(ven.transform(hvc_on, aud_reversed, rng=monitor_rng,
+                                        hvc_prelude=hvc_prelude).mean() * 1000)
         return trained, reversed_
 
     trained_trace: list[float] = []
@@ -201,14 +209,15 @@ def main(argv: list[str] | None = None) -> None:
         reversed_trace.append(reversed_)
         jie_trace.append(float(ven.JIE.mean()))
 
-    # Rendition 1 carries the burn-in.
+    # Rendition 1 carries the burn-in, which ends with the intro notes; every later
+    # rendition runs them as a prelude.
     ven.fit(hvc_burn, aud_burn)
     record()
     if 1 in LOG_AT:
         log(1)
 
     for r in range(1, args.n_rend):
-        ven.fit(hvc_on, correct_pool[r % len(correct_pool)])
+        ven.fit(hvc_on, correct_pool[r % len(correct_pool)], hvc_prelude=hvc_prelude)
         record()
         if (r + 1) in LOG_AT or r == args.n_rend - 1:
             log(r + 1)
@@ -219,7 +228,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\nSaved {out_path}")
 
     m = rendition_rates(ven, hvc_on=hvc_on, hvc_off=hvc_off, aud_trained=aud_correct,
-                        aud_daf=st["aud_daf"], aud_reversed=aud_reversed)
+                        aud_daf=st["aud_daf"], aud_reversed=aud_reversed,
+                        hvc_prelude=hvc_prelude)
     print()
     print(format_rendition_rates(m))
     r = daf_response(ven, encoder, st, n_trials=20, seed=args.seed)

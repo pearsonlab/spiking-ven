@@ -373,9 +373,16 @@ class VocalErrorNet:
     # public API
     # ------------------------------------------------------------------
 
-    def fit(self, hvc_spikes: np.ndarray, aud_spikes: np.ndarray) -> np.ndarray:
-        """Train on paired HVC+auditory input: updates JIE by STDP. Returns sE_mat."""
-        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=True)
+    def fit(self, hvc_spikes: np.ndarray, aud_spikes: np.ndarray, *,
+            hvc_prelude: np.ndarray | None = None) -> np.ndarray:
+        """Train on paired HVC+auditory input: updates JIE by STDP. Returns sE_mat.
+
+        ``hvc_prelude`` is HVC activity run first, with no sound (introductory notes,
+        say); the returned spikes start after it. No learning happens during it, because
+        the STDP rule needs auditory drive.
+        """
+        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=True,
+                            hvc_prelude=hvc_prelude)
         return sE
 
     def transform(
@@ -384,14 +391,18 @@ class VocalErrorNet:
         aud_spikes: np.ndarray,
         *,
         rng: np.random.Generator | None = None,
+        hvc_prelude: np.ndarray | None = None,
     ) -> np.ndarray:
         """Inference pass (no weight updates). Returns (n_e, T) float32 E spike matrix.
 
         Membrane noise is drawn from ``rng`` if given, otherwise from the network's own
         seeded stream. Pass a separate generator for side computations (monitoring during
         training, say) so they do not change the noise the next ``fit`` sees.
+        ``hvc_prelude`` is HVC activity run first, with no sound; the returned spikes
+        start after it, so they align with ``hvc_spikes``.
         """
-        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng)
+        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng,
+                            hvc_prelude=hvc_prelude)
         return sE
 
     def transform_all(
@@ -400,10 +411,12 @@ class VocalErrorNet:
         aud_spikes: np.ndarray,
         *,
         rng: np.random.Generator | None = None,
+        hvc_prelude: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Inference pass. Returns (sE_mat, sI_mat) both (n, T) float32; ``rng`` as in
-        :meth:`transform`."""
-        return self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng)
+        """Inference pass. Returns (sE_mat, sI_mat) both (n, T) float32; ``rng`` and
+        ``hvc_prelude`` as in :meth:`transform`."""
+        return self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng,
+                         hvc_prelude=hvc_prelude)
 
     def save(self, path: str) -> None:
         np.savez(
@@ -544,7 +557,15 @@ class VocalErrorNet:
         aud_spikes: np.ndarray,
         learn_weights: bool = False,
         rng: np.random.Generator | None = None,
+        hvc_prelude: np.ndarray | None = None,
     ):
+        n_pre = 0 if hvc_prelude is None else int(np.asarray(hvc_prelude).shape[1])
+        if n_pre:
+            hvc_spikes = np.concatenate(
+                [np.asarray(hvc_prelude, dtype=np.float32), np.asarray(hvc_spikes)], axis=1)
+            aud_spikes = np.concatenate(
+                [np.zeros((aud_spikes.shape[0], n_pre), dtype=np.float32),
+                 np.asarray(aud_spikes)], axis=1)
         dt      = 1.0
         decay_e = float(np.exp(-dt / self.tau_e))
         decay_i = float(np.exp(-dt / self.tau_i))
@@ -587,7 +608,7 @@ class VocalErrorNet:
 
         if learn_weights:
             self.JIE = JIE.astype(np.float32)
-        return sE_mat, sI_mat
+        return sE_mat[:, n_pre:], sI_mat[:, n_pre:]
 
 
 class VocalErrorNetV2(VocalErrorNet):

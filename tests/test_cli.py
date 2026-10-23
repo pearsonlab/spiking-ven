@@ -32,6 +32,7 @@ from spiking_ven.constants import (
     HVC_DELAY_MS,
     SR,
 )
+from spiking_ven.stimuli import STIMULUS_DEFAULTS
 
 PARSER_MODULES = [cli_train_encoder, cli_train_ven, cli_evaluate, cli_figure]
 ALL_MODULES = PARSER_MODULES + [cli_prep]
@@ -87,15 +88,43 @@ def test_seed_default_is_shared(mod):
     assert mod.build_parser().parse_args([]).seed == 42
 
 
-@pytest.mark.parametrize(
-    "mod",
-    [cli_train_ven, cli_evaluate, cli_figure],
-    ids=lambda m: m.__name__.rsplit(".", 1)[-1],
-)
-def test_mean_rate_tracks_the_constant(mod):
+def test_mean_rate_tracks_the_constant():
     """A figure rendered at a different rate than its model was trained at encodes a
-    different stimulus, so every consumer must default to the same constant."""
-    assert mod.build_parser().parse_args([]).mean_rate_hz == AUD_MEAN_RATE_HZ
+    different stimulus. Training reads the constant; the consumers default to None --
+    "what the model recorded" -- and fall back to the same constant."""
+    assert cli_train_ven.build_parser().parse_args([]).mean_rate_hz == AUD_MEAN_RATE_HZ
+    assert STIMULUS_DEFAULTS["mean_rate_hz"] == AUD_MEAN_RATE_HZ
+
+
+@pytest.mark.parametrize("mod", PARSER_MODULES, ids=lambda m: m.__name__.rsplit(".", 1)[-1])
+def test_sr_defaults_to_the_corpus(mod):
+    """None means "the corpus's own rate"; a default of SR would be a second copy of a
+    fact the motifs file already carries."""
+    assert mod.build_parser().parse_args([]).sr is None
+    assert mod.build_parser().parse_args(["--sr", "16000"]).sr == 16000
+
+
+@pytest.mark.parametrize("mod", [cli_evaluate, cli_figure],
+                         ids=lambda m: m.__name__.rsplit(".", 1)[-1])
+def test_stimulus_flags_default_to_the_model_record(mod):
+    """Every stimulus flag of a model consumer is None, so the model's recorded value
+    (else the constant) decides; see stimuli.resolve_stimulus_settings."""
+    a = mod.build_parser().parse_args([])
+    for dest in ("sr", "stimulus_seed", "t_post", "t_burn", "mean_rate_hz", "n_ista",
+                 "daf_window_s"):
+        assert getattr(a, dest) is None, dest
+    assert "n_hvc" not in vars(a), "n_hvc comes from the loaded model"
+    a = mod.build_parser().parse_args(["--daf-window-s", "0.3", "0.35"])
+    assert a.daf_window_s == [0.3, 0.35]
+
+
+def test_stimulus_fallbacks_are_the_constants():
+    assert STIMULUS_DEFAULTS == {
+        "sr": None,
+        "t_post": C.T_POST, "t_burn": C.T_BURN,
+        "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
+        "daf_window_s": tuple(C.DAF_WINDOW_S),
+    }
 
 
 @pytest.mark.parametrize(
@@ -143,13 +172,23 @@ def test_train_encoder_causal_defaults_come_from_the_operating_point():
     assert a.no_prune is False, "silent filters are pruned by default"
 
 
+@pytest.mark.parametrize(
+    ("dest", "const"),
+    [
+        ("n_bases", "CAUSAL_N_BASES"), ("k_frames", "CAUSAL_K_FRAMES"),
+        ("n_coch_ch", "CAUSAL_N_COCH_CH"), ("frame_rate", "CAUSAL_FRAME_RATE"),
+        ("lo_hz", "CAUSAL_LO_HZ"), ("hi_hz", "CAUSAL_HI_HZ"), ("rms_ref", "CAUSAL_RMS_REF"),
+    ],
+)
+def test_train_encoder_front_end_comes_from_the_operating_point(dest, const):
+    assert getattr(cli_train_encoder.build_parser().parse_args([]), dest) == getattr(C, const)
+
+
 def test_train_encoder_front_end_is_sane():
-    """The cochleagram front end is shared with nothing else, so its invariants are
-    checked here rather than its literals."""
+    """Invariants of the front end, rather than its literals."""
     a = cli_train_encoder.build_parser().parse_args([])
     assert a.n_bases > 0 and a.k_frames > 0
-    assert a.lo_hz < a.hi_hz <= a.sr / 2, "cochleagram band inside Nyquist"
-    assert a.sr == SR
+    assert a.lo_hz < a.hi_hz <= SR / 2, "cochleagram band inside Nyquist"
 
 
 # ---------------------------------------------------------------------- train_ven
@@ -199,17 +238,11 @@ def test_train_ven_delays_track_the_constants():
 # ------------------------------------------------------------------------ evaluate
 
 
-def test_evaluate_shares_the_operating_point():
+def test_evaluate_flags():
     a = cli_evaluate.build_parser().parse_args([])
-    assert (a.n_hvc, a.n_ista) == (C.N_HVC, C.N_ISTA)
-    assert (a.t_post, a.t_burn) == (C.T_POST, C.T_BURN)
     assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True
-
-
-def test_figure_shares_the_operating_point():
-    assert cli_figure.build_parser().parse_args([]).t_post == C.T_POST
 
 
 # -------------------------------------------------------------------------- figure

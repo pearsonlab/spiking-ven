@@ -14,7 +14,7 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   repeating the value.
 - **The template rendition** (highest RMS) was once chosen separately in four places. It now lives in
   `corpus.py`, so training, scoring and the figure cannot pick different motifs.
-- **Stimuli are built once, by `evaluate.build_stimuli`**, for the trainer, the CLIs, the tests and
+- **Stimuli are built once, by `stimuli.build_stimuli`**, for the trainer, the CLIs, the tests and
   the figures alike.
 - **Simulation noise is seeded.** It was originally drawn from the global `np.random`, so `seed=`
   fixed only the initial weights, and two identical runs differed by ~1% in E rate.
@@ -117,7 +117,7 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst
   ~20:1 and lands on top of the reversed-song rate, so the DAF number is computed per neuron in
-  150 ms windows (`evaluate.daf_response`).
+  150 ms windows (`metrics.daf_response`).
 - **Peak over responders only**, matching Fig. 8E (n = 7). Averaging over all units mixed
   non-responders' flat PSTHs into a number compared against a responders-only one.
 - **Peak bin width.** It was computed at 1 ms, finer than any binning the paper states, which

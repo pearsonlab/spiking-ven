@@ -43,9 +43,12 @@ __all__ = [
     "TAU_S", "TAU_E", "TAU_STDP",
     "R_I_TH", "J_MAX_IE",
     "A_SFA", "TAU_SFA",
+    "TAU_I", "C_JEI", "NOISE_E", "NOISE_I", "TARGET_RATE_E", "TARGET_RATE_I", "T_REFR_MS",
     "T_POST", "T_BURN", "N_ISTA",
     "a_jie_for",
     # 3. the causal encoder operating point
+    "CAUSAL_N_BASES", "CAUSAL_K_FRAMES", "CAUSAL_N_COCH_CH", "CAUSAL_FRAME_RATE",
+    "CAUSAL_LO_HZ", "CAUSAL_HI_HZ", "CAUSAL_RMS_REF",
     "CAUSAL_EPOCHS", "CAUSAL_LAMBDA",
     "CAUSAL_LR", "CAUSAL_L1", "CAUSAL_SMOOTH", "CAUSAL_N_ISTA", "CAUSAL_MP_STRENGTH",
 ]
@@ -65,11 +68,10 @@ PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
 
 #: DAF white noise is mixed at this multiple of song RMS: ~95 dBSPL WN vs ~80 dBSPL song.
 #:
-#: This scales the *figure's* DAF column, where the noise is added into a window of the
-#: song and the relative level therefore matters. It does NOT affect the K2/K3 metrics:
-#: ``evaluate.build_stimuli`` sends its white noise through the same RMS-normalising
-#: encoder path as every other stimulus, so the amplitude divides straight back out.
-#: See the note in :mod:`spiking_ven.evaluate`.
+#: It sets the DAF stimulus wherever one is built -- the figure's DAF column and the
+#: responder metrics alike. The noise is mixed into a window of the song, and both
+#: normalisation stages take the song as their reference, so this relative level is what
+#: reaches the network.
 DAF_WN_AMPLITUDE = 5.6
 
 #: Auditory population mean firing rate during song (Hz), the encoder's spike-rate
@@ -111,15 +113,19 @@ HVC_DELAY_MS = 0
 # =============================================================================
 # 2. The network operating point -- what the fit landed on
 # =============================================================================
+# Units: times in ms; membrane potentials, thresholds, drives, weights and noise are
+# dimensionless (the membrane relaxes toward its input, and a spike is a crossing of
+# theta); rates in Hz unless a name says otherwise. The simulation step is 1 ms.
 
+#: Population sizes (E projection neurons, I interneurons, HVC inputs) and training length.
 N_E = 600
 N_I = 150
 N_HVC = 60
 N_RENDITIONS = 600
 
-#: Auditory -> E. ``C_B`` is sparse enough that each E cell samples only a few encoder
-#: channels, so ``B_SCALE`` is the mean weight per surviving connection rather than a
-#: population gain.
+#: Auditory -> E. Each E cell connects to each encoder channel with probability ``C_B``,
+#: so it samples only a few channels. The mean weight per connection is
+#: ``B_SCALE / n_aud`` (n_aud = the encoder's channel count).
 B_SCALE = 16.0
 C_B = 0.05
 
@@ -134,14 +140,33 @@ C_HVC = 0.1
 DRIVE_E = 0.06
 DRIVE_I = 0.058
 
+#: Input synaptic time constant (ms) for aud -> E and HVC -> I, and the membrane time
+#: constants (ms) of E and I.
 TAU_S = 20.0
 TAU_E = 30.0
+TAU_I = 10.0
 
-#: STDP coincidence window, pinned independently of the synaptic ``TAU_S``.
+#: E -> I connection probability (fixed weights).
+C_JEI = 0.5
+
+#: Standard deviation of the Gaussian noise added to the E and I input every 1 ms step.
+NOISE_E = 0.1
+NOISE_I = 0.0
+
+#: Firing rates (spikes per ms) that set the thresholds: ``theta_e`` is chosen so the tonic
+#: drive alone fires E at TARGET_RATE_E, and ``theta_i`` from TARGET_RATE_I.
+TARGET_RATE_E = 0.025
+TARGET_RATE_I = 0.05
+
+#: Absolute refractory period (ms) of the E and I membranes and the input populations.
+T_REFR_MS = 2.0
+
+#: STDP coincidence window (ms), set independently of the synaptic ``TAU_S``.
 TAU_STDP = 20.0
 
 #: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
-#: E cells ever acquire inhibition.
+#: E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the STDP trace is
+#: debiased against; ``J_MAX_IE`` caps each weight.
 R_I_TH = 6.0
 J_MAX_IE = 1.0
 
@@ -152,6 +177,8 @@ J_MAX_IE = 1.0
 A_SFA = 1.0
 TAU_SFA = 10.0
 
+#: Protocol: silence after each motif (ms), silent burn-in before the first (ms), and ISTA
+#: iterations per frame when encoding stimuli for the network.
 T_POST = 200
 T_BURN = 500
 N_ISTA = 50
@@ -176,6 +203,16 @@ def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
 # 3. The causal minimum-phase encoder operating point
 # =============================================================================
 
+#: Front end: filters trained, context window (frames), cochleagram channels, frame rate
+#: (Hz; 500 -> 2 ms frames, so 16 frames = 32 ms of past), band edges (Hz), and the RMS
+#: every waveform is scaled to before the cochleagram.
+CAUSAL_N_BASES = 64
+CAUSAL_K_FRAMES = 16
+CAUSAL_N_COCH_CH = 40
+CAUSAL_FRAME_RATE = 500
+CAUSAL_LO_HZ = 200.0
+CAUSAL_HI_HZ = 8000.0
+CAUSAL_RMS_REF = 0.1
 
 #: Code sparsity, and with it how many filters survive: 0.3 keeps 54 of 64 filters, with
 #: ~11% of coefficients active during training. Larger values keep far fewer. Chosen on
@@ -195,6 +232,7 @@ CAUSAL_MP_STRENGTH = 0.25
 CAUSAL_L1 = 7e-5
 CAUSAL_SMOOTH = 1e-3
 
+#: Learning rate, epochs, and ISTA iterations per frame during training.
 CAUSAL_LR = 10.0
 CAUSAL_EPOCHS = 80
 CAUSAL_N_ISTA = 20

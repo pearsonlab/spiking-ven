@@ -21,13 +21,10 @@ import pytest
 
 from spiking_ven.causal_filters import CausalFilterEncoder
 from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS
-from spiking_ven.evaluate import (
-    BIOLOGICAL_TARGETS,
-    PEAK_BIN_MS,
-    build_stimuli,
-    daf_response,
-)
-from spiking_ven.vocal_error_net import VocalErrorNetV2
+from spiking_ven.metrics import daf_response
+from spiking_ven.stimuli import build_stimuli
+from spiking_ven.targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
+from spiking_ven.vocal_error_net import VocalErrorNet
 
 OUT = Path("outputs")
 MOTIFS = OUT / "motifs.npz"
@@ -50,7 +47,7 @@ def setup():
     enc = CausalFilterEncoder.load(str(ENCODER))
     st = build_stimuli(enc, str(MOTIFS), sr=16000, seed=SEED, n_hvc=60, n_ista=50,
                        verbose=False)
-    ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
+    ven = VocalErrorNet.load(str(MODEL), seed=SEED)
     return enc, st, ven
 
 
@@ -92,18 +89,18 @@ def test_model_carries_the_operating_point(setup):
 
 
 def test_daf_response_matches_the_recorded_run(daf):
-    assert daf["responder_fraction"] == pytest.approx(0.520, abs=0.03)
-    assert daf["baseline_hz_all"] == pytest.approx(2.53, rel=0.08)
-    assert daf["peak_change_hz"] == pytest.approx(44.4, rel=0.10)
-    assert daf["latency_ms"] == pytest.approx(29.6, abs=2.5)
-    assert daf["duration_ms"] == pytest.approx(47.4, abs=4.0)
-    assert daf["extra_spikes_responders"] == pytest.approx(1.75, rel=0.10)
+    assert daf["responder_fraction"] == pytest.approx(0.522, abs=0.03)
+    assert daf["baseline_hz_all"] == pytest.approx(2.52, rel=0.08)
+    assert daf["peak_change_hz"] == pytest.approx(44.6, rel=0.10)
+    assert daf["latency_ms"] == pytest.approx(30.5, abs=2.5)
+    assert daf["duration_ms"] == pytest.approx(47.5, abs=4.0)
+    assert daf["extra_spikes_responders"] == pytest.approx(1.74, rel=0.10)
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.65, rel=0.12)
+    assert daf["extra_spikes_p90"] == pytest.approx(3.60, rel=0.12)
     assert daf["extra_spikes_max"] == pytest.approx(9.05, rel=0.15)
     assert daf["extra_spikes_sd"] == pytest.approx(1.37, rel=0.12)
 
@@ -115,6 +112,8 @@ def test_biological_targets_that_are_met(daf):
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
     assert abs(daf["latency_ms"] - lat) <= lat_sd
+    # Duration sits at the lower edge (90 - 43 = 47 ms): 47.5 ms at this seed, 46.0 +/- 1.2
+    # ms over five evaluation seeds.
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
     # 7/17 has a 95% CI of 21-64%, so the responder fraction only has to land inside that.

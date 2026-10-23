@@ -85,6 +85,9 @@ def test_every_subpackage_is_importable():
         "spiking_ven.cochleagram",
         "spiking_ven.common",
         "spiking_ven.evaluate",
+        "spiking_ven.metrics",
+        "spiking_ven.stimuli",
+        "spiking_ven.targets",
         "spiking_ven.filterbank",
         "spiking_ven.manifest",
         "spiking_ven.causal_filters",
@@ -99,6 +102,7 @@ def test_every_subpackage_is_importable():
         "spiking_ven.cli.train_ven",
         "spiking_ven.cli.evaluate",
         "spiking_ven.cli.figure",
+        "spiking_ven.cli._stimulus_args",
     ):
         importlib.import_module(name)
 
@@ -114,6 +118,7 @@ def test_figures_subpackage_is_importable():
         "spiking_ven.figures.daf_psth",
         "spiking_ven.figures.causal_filters",
         "spiking_ven.figures.unit_strfs",
+        "spiking_ven.figures.gammatone",
     ):
         importlib.import_module(name)
 

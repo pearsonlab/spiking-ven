@@ -1,6 +1,6 @@
 """The Brian2 runtime must run the network the numpy model trained.
 
-``brian2_runtime`` takes everything from ``VocalErrorNetV2.to_brian_weights()``. These
+``brian2_runtime`` takes everything from ``VocalErrorNet.to_brian_weights()``. These
 tests pin the parts of the numpy dynamics that have to survive the port -- spike-frequency
 adaptation, the refractory period, the I-population noise -- and check end to end that the
 same weights and input put both runtimes in the same rate regime. Skipped without the
@@ -25,7 +25,7 @@ from spiking_ven.brian2_runtime import (  # noqa: E402
     build_ven_groups,
     build_ven_synapses,
 )
-from spiking_ven.vocal_error_net import VocalErrorNetV2  # noqa: E402
+from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def _scope():
 
 
 def _weights(**overrides):
-    w = VocalErrorNetV2(n_e=20, n_i=5, n_hvc=4, n_aud=6, seed=0).to_brian_weights()
+    w = VocalErrorNet(n_e=20, n_i=5, n_hvc=4, n_aud=6, seed=0).to_brian_weights()
     w.update(overrides)
     return w
 
@@ -122,9 +122,9 @@ def test_same_weights_give_the_same_e_rate_regime_in_both_runtimes(a_sfa):
     rng = np.random.default_rng(0)
     n_e, n_i, n_aud, n_hvc, T = 60, 15, 12, 6, 400
 
-    net = VocalErrorNetV2(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e=0.0,
-                          noise_i=0.0, t_refr_ms=2.0, a_sfa=a_sfa, tau_sfa=10.0,
-                          seed=0)
+    net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e=0.0,
+                        noise_i=0.0, t_refr_ms=2.0, a_sfa=a_sfa, tau_sfa=10.0,
+                        seed=0)
     aud_spikes = (rng.random((n_aud, T)) < 0.02).astype(np.float32)
     hvc_spikes = (rng.random((n_hvc, T)) < 0.02).astype(np.float32)
     numpy_rate = float(net.transform(hvc_spikes, aud_spikes).mean() * 1000)

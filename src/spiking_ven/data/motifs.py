@@ -8,7 +8,8 @@ This is the single upstream artifact for everything else: the causal encoder tra
 and the vocal error network is trained and evaluated against it.
 
 Output keys: ``audio``, ``lengths``, ``sr``, ``syl_on``, ``syl_off``, ``song_Ts``,
-``raw_song_Ts``.
+``raw_song_Ts``, ``template_index`` (the DTW reference, which ``corpus.load_corpus``
+uses as the template).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from scipy.signal import spectrogram as sp_spectrogram
 from scipy.spatial.distance import cdist
 
 from ..corpus import highest_rms_index
-from ..paths import ensure_parent
+from ..paths import data_dir, ensure_parent, motifs_npz
 
 MOTIF_PATTERN = "abcded"
 TARGET_SR = 16000
@@ -169,8 +170,9 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     # Dashed spellings match the other CLIs; the underscore forms are accepted too.
-    parser.add_argument("--wav-dir", "--wav_dir", dest="wav_dir", default="data/song_wavs")
-    parser.add_argument("--out", default="outputs/motifs.npz")
+    parser.add_argument("--wav-dir", "--wav_dir", dest="wav_dir",
+                        default=str(data_dir() / "song_wavs"))
+    parser.add_argument("--out", default=str(motifs_npz()))
     parser.add_argument("--sr", type=int, default=TARGET_SR, help="target sample rate")
     parser.add_argument("--hop-ms", "--hop_ms", dest="hop_ms", type=float, default=HOP_MS,
                         help="DTW feature frame hop (ms)")
@@ -253,8 +255,8 @@ def main(argv: list[str] | None = None) -> None:
     # Step 2: choose template (highest RMS)
     # ---------------------------------------------------------------------------
 
-    # Same rule as corpus.Corpus.template_index, from the same function: the template
-    # decides what trains, what is scored and what the figure draws.
+    # The template is the DTW reference; it is saved as ``template_index`` so the corpus
+    # trains on, scores and draws this rendition rather than re-choosing after warping.
     rms_all   = np.array([float(np.sqrt(np.mean(m["audio"] ** 2))) for m in raw_motifs])
     train_idx = highest_rms_index([m["audio"] for m in raw_motifs])
     tpl_audio = raw_motifs[train_idx]["audio"]
@@ -310,6 +312,7 @@ def main(argv: list[str] | None = None) -> None:
         syl_off=syl_off_out,
         song_Ts=song_Ts_out,
         raw_song_Ts=raw_durs,
+        template_index=train_idx,
     )
     print(f"\nSaved {args.out}")
     print(f"  shape: {audio_out.shape}  SR: {args.sr} Hz  T_template: {tpl_n} samples ({tpl_ms:.1f} ms)")

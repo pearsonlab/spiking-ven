@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from spiking_ven import constants
-from spiking_ven.corpus import Corpus, highest_rms_index
+from spiking_ven.corpus import Corpus, highest_rms_index, load_corpus
 
 
 def _corpus(n=4, T=1000, loud=2):
@@ -61,3 +61,40 @@ def test_peak_rate_is_derived_not_hardcoded():
     """Changing the kernel width must carry the peak rate with it."""
     assert constants.PEAK_RATE_HZ == pytest.approx(
         150.0 * 20.0 / constants.KERNEL_WIDTH_MS)
+
+
+def test_stored_template_index_wins_over_computed():
+    c, loud = _corpus()
+    other = (loud + 1) % c.n_motifs
+    c = Corpus(audio=c.audio, lengths=c.lengths, song_Ts=c.song_Ts, sr=c.sr,
+               stored_template_index=other)
+    assert c.template_index == other
+    assert c.template()[1] == other
+
+
+def test_template_falls_back_to_highest_rms_without_stored_index():
+    c, loud = _corpus()
+    assert c.stored_template_index is None
+    assert c.template_index == loud
+
+
+@pytest.mark.parametrize("bad", [-1, 4, 10])
+def test_out_of_range_stored_index_rejected(bad):
+    c, _ = _corpus()
+    with pytest.raises(ValueError, match="out of range"):
+        Corpus(audio=c.audio, lengths=c.lengths, song_Ts=c.song_Ts, sr=c.sr,
+               stored_template_index=bad)
+
+
+@pytest.mark.parametrize("stored", [None, 0])
+def test_load_corpus_round_trip(tmp_path, stored):
+    c, loud = _corpus()
+    extra = {} if stored is None else {"template_index": stored}
+    path = tmp_path / "motifs.npz"
+    np.savez_compressed(path, audio=c.audio, lengths=c.lengths, sr=c.sr,
+                        song_Ts=c.song_Ts, **extra)
+    loaded = load_corpus(path)
+    assert loaded.stored_template_index == stored
+    assert loaded.template_index == (loud if stored is None else stored)
+    np.testing.assert_array_equal(loaded.audio, c.audio)
+    assert loaded.sr == c.sr

@@ -12,9 +12,14 @@ So the coverage split is deliberate:
     on a machine that can actually download it
 """
 
+import json
+
 import numpy as np
 
-from spiking_ven.cli import train_encoder, train_ven
+from spiking_ven.cli import evaluate, train_encoder, train_ven
+from spiking_ven.constants import AUD_MEAN_RATE_HZ, DAF_WINDOW_S, N_ISTA, T_BURN, T_POST
+from spiking_ven.manifest import sha256_file
+from spiking_ven.vocal_error_net import VocalErrorNet
 
 
 def _synthetic_motifs(path, *, n_motifs=3, sr=16000, dur_ms=500, n_syl=6, seed=0):
@@ -49,11 +54,12 @@ def _synthetic_motifs(path, *, n_motifs=3, sr=16000, dur_ms=500, n_syl=6, seed=0
         syl_off=syl_off,
         song_Ts=np.full(n_motifs, float(dur_ms)),
         raw_song_Ts=np.full(n_motifs, float(dur_ms)),
+        template_index=0,
     )
     return path
 
 
-def test_encoder_then_network_end_to_end(tmp_path):
+def test_encoder_then_network_end_to_end(tmp_path, capsys):
     motifs = _synthetic_motifs(tmp_path / "motifs.npz")
     encoder_out = tmp_path / "enc.npz"
     model_out = tmp_path / "ven.npz"
@@ -81,13 +87,30 @@ def test_encoder_then_network_end_to_end(tmp_path):
     tr = np.load(tmp_path / "ven_traces.npz")
     # Not asserting biology on synthetic audio -- only that the pipeline produced
     # finite, structurally sane numbers.
-    for key in ("rc", "rn", "jie"):
+    for key in ("trained_hz", "reversed_hz", "jie_mean"):
         assert tr[key].shape == (2,), f"{key} should have one entry per rendition"
         assert np.isfinite(tr[key]).all(), f"{key} contains non-finite values"
-    for key in ("k1", "rc_hvc"):
-        if key in tr.files:
-            assert np.isfinite(tr[key]).all()
-    assert float(tr["jie"][-1]) > 0, "JIE should be positive after training"
+    for key in ("final_trained_hz", "final_reversed_hz", "final_daf_not_singing_hz"):
+        assert np.isfinite(tr[key]), key
+    assert float(tr["jie_mean"][-1]) > 0, "JIE should be positive after training"
+
+    # The model records how its stimuli were built, so evaluation can rebuild them.
+    stim = VocalErrorNet.load(str(model_out)).stimulus
+    assert stim["sr"] == 16000 and stim["seed"] == 42 and stim["n_hvc"] == 6
+    assert (stim["t_post"], stim["t_burn"]) == (T_POST, T_BURN)
+    assert (stim["mean_rate_hz"], stim["n_ista"]) == (AUD_MEAN_RATE_HZ, N_ISTA)
+    assert stim["daf_window_s"] == list(DAF_WINDOW_S)
+    assert stim["encoder_sha256"] == sha256_file(encoder_out)
+    assert stim["motifs_sha256"] == sha256_file(motifs)
+
+    # ... and sven-evaluate does, with no stimulus flags and no warnings.
+    capsys.readouterr()
+    evaluate.main(["--json", "--model", str(model_out), "--encoder", str(encoder_out),
+                   "--motifs", str(motifs), "--n-trials", "3"])
+    out = capsys.readouterr()
+    assert "warning" not in out.err
+    m = json.loads(out.out)
+    assert np.isfinite(m["trained_hz"]) and m["daf_response"]["burst_ms"] > 0
 
 
 def test_synthetic_corpus_matches_the_real_schema(tmp_path):
@@ -95,7 +118,7 @@ def test_synthetic_corpus_matches_the_real_schema(tmp_path):
     motifs = _synthetic_motifs(tmp_path / "m.npz")
     d = np.load(motifs)
     assert set(d.files) == {
-        "audio", "lengths", "sr", "syl_on", "syl_off", "song_Ts", "raw_song_Ts",
+        "audio", "lengths", "sr", "syl_on", "syl_off", "song_Ts", "raw_song_Ts", "template_index",
     }
     assert d["audio"].dtype == np.float32
     assert d["audio"].shape[0] == d["lengths"].shape[0] == d["song_Ts"].shape[0]

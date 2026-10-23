@@ -1,4 +1,4 @@
-"""Spiking E-I vocal error network — v2 (HVC→I architecture).
+"""Spiking E-I vocal error network (HVC -> I architecture).
 
 Architecture
 ------------
@@ -10,25 +10,34 @@ Architecture
 Plasticity
 ----------
 Only JIE learns, by causal STDP, during ``fit()``. Everything else is fixed.
+
+:class:`VocalErrorNet` defaults to the shipped operating point in
+:mod:`spiking_ven.constants`, so ``VocalErrorNet(n_aud=encoder.n_channels)`` builds the
+network the published model was trained as. :class:`VocalErrorNetV2` is the earlier
+name, kept with its earlier (non-operating-point) defaults so existing callers behave as
+before; new code should use :class:`VocalErrorNet`.
 """
+
+import json
 
 import numpy as np
 from numpy.random import default_rng
 
+from . import constants as C
 from .common import (
     _lognormal_sparse,
     generate_hvc_spikes,  # re-exported for convenience
     spike_to_rate,        # re-exported for convenience
 )
 
-__all__ = ["VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate"]
+__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate"]
 
 
 # ---------------------------------------------------------------------------
 # simulation loop
 # ---------------------------------------------------------------------------
 
-def _sim_loop_v2(
+def _simulate(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
     decay_e, decay_i,
     theta_e, theta_i, v_reset, noise_e, noise_i, t_refr_ms, a_sfa, tau_sfa,
@@ -134,7 +143,7 @@ def _sim_loop_v2(
 # main class
 # ---------------------------------------------------------------------------
 
-class VocalErrorNetV2:
+class VocalErrorNet:
     """Spiking LIF E-I vocal error network with causal Hebbian STDP on I→E.
 
     HVC premotor input drives I neurons; auditory input drives E neurons.
@@ -143,7 +152,8 @@ class VocalErrorNetV2:
 
     Parameters
     ----------
-    n_e, n_i, n_hvc, n_aud : population sizes
+    n_e, n_i, n_hvc, n_aud : population sizes. ``n_aud`` has no default: it must equal
+                   the encoder's ``n_channels``.
     tau_e, tau_i : membrane time constants (ms)
     tau_s        : input synaptic time constant (ms). Sets the decay of the conductance
                    each auditory and HVC spike produces -- `spike_to_rate` on aud_spikes
@@ -170,39 +180,51 @@ class VocalErrorNetV2:
     target_rate  : E firing rate used to analytically initialise theta_e (Hz-like units)
     target_rate_i: I firing rate used to analytically initialise theta_i
     seed         : RNG seed
+
+    Every default is the shipped operating point (:mod:`spiking_ven.constants`), except
+    ``A_jie``, which defaults to ``constants.a_jie_for(tau_stdp, tau_s)`` for the given
+    windows.
+
+    ``stimulus`` is a dict describing how the training stimuli were built (rate
+    calibration, ISTA iterations, protocol timing, input checksums). It is empty on a new
+    network, is saved with the model, and lets later evaluation rebuild the same stimuli.
     """
 
     def __init__(
         self,
-        n_e: int = 600,
-        n_i: int = 150,
-        n_hvc: int = 15,
-        n_aud: int = 256,
-        tau_e: float = 30.0,
-        tau_i: float = 10.0,
-        tau_s: float = 10.0,
-        A_jie: float = 5e-6,
-        J_max_ie: float = 1.0,
-        c_B: float = 0.05,
-        B_scale: float = 5.0,
-        c_hvc: float = 0.3,
-        B_hvc_scale: float = 2.0,
-        c_JEI: float = 0.5,
-        t_refr_ms: float = 2.0,
-        a_sfa: float = 0.0,
-        tau_sfa: float = 100.0,
-        r_i_th: float = 0.0,
-        drive_e: float = 0.155,
-        drive_i: float = 0.058,
-        noise_e: float = 0.1,
-        noise_i: float = 0.0,
-        target_rate: float = 0.025,
-        target_rate_i: float = 0.05,
-        aud_delay_ms: int = 0,
-        hvc_delay_ms: int = 0,
-        tau_stdp: float = 0.0,
+        n_e: int = C.N_E,
+        n_i: int = C.N_I,
+        n_hvc: int = C.N_HVC,
+        n_aud: int | None = None,
+        tau_e: float = C.TAU_E,
+        tau_i: float = C.TAU_I,
+        tau_s: float = C.TAU_S,
+        A_jie: float | None = None,
+        J_max_ie: float = C.J_MAX_IE,
+        c_B: float = C.C_B,
+        B_scale: float = C.B_SCALE,
+        c_hvc: float = C.C_HVC,
+        B_hvc_scale: float = C.B_HVC_SCALE,
+        c_JEI: float = C.C_JEI,
+        t_refr_ms: float = C.T_REFR_MS,
+        a_sfa: float = C.A_SFA,
+        tau_sfa: float = C.TAU_SFA,
+        r_i_th: float = C.R_I_TH,
+        drive_e: float = C.DRIVE_E,
+        drive_i: float = C.DRIVE_I,
+        noise_e: float = C.NOISE_E,
+        noise_i: float = C.NOISE_I,
+        target_rate: float = C.TARGET_RATE_E,
+        target_rate_i: float = C.TARGET_RATE_I,
+        aud_delay_ms: int = C.AUD_DELAY_MS,
+        hvc_delay_ms: int = C.HVC_DELAY_MS,
+        tau_stdp: float = C.TAU_STDP,
         seed: int | None = None,
     ) -> None:
+        if n_aud is None:
+            raise ValueError("n_aud is required: pass the encoder's n_channels")
+        if A_jie is None:
+            A_jie = C.a_jie_for(tau_stdp, tau_s)
         rng = default_rng(seed)
         # Separate stream for simulation noise, so weight initialisation and the
         # simulation cannot interleave and perturb each other.
@@ -241,6 +263,7 @@ class VocalErrorNetV2:
         self.hvc_delay_ms  = int(hvc_delay_ms)
         self.tau_stdp      = float(tau_stdp)
         self.v_reset: float = 0.0
+        self.stimulus: dict = {}
 
         # aud→E: sparse log-normal, fixed
         mean_B = B_scale / n_aud
@@ -290,18 +313,28 @@ class VocalErrorNetV2:
         self,
         hvc_spikes: np.ndarray,
         aud_spikes: np.ndarray,
+        *,
+        rng: np.random.Generator | None = None,
     ) -> np.ndarray:
-        """Inference pass (no weight updates). Returns (n_e, T) float32 E spike matrix."""
-        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=False)
+        """Inference pass (no weight updates). Returns (n_e, T) float32 E spike matrix.
+
+        Membrane noise is drawn from ``rng`` if given, otherwise from the network's own
+        seeded stream. Pass a separate generator for side computations (monitoring during
+        training, say) so they do not change the noise the next ``fit`` sees.
+        """
+        sE, _sI = self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng)
         return sE
 
     def transform_all(
         self,
         hvc_spikes: np.ndarray,
         aud_spikes: np.ndarray,
+        *,
+        rng: np.random.Generator | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Inference pass. Returns (sE_mat, sI_mat) both (n, T) float32."""
-        return self._sim(hvc_spikes, aud_spikes, learn_weights=False)
+        """Inference pass. Returns (sE_mat, sI_mat) both (n, T) float32; ``rng`` as in
+        :meth:`transform`."""
+        return self._sim(hvc_spikes, aud_spikes, learn_weights=False, rng=rng)
 
     def save(self, path: str) -> None:
         np.savez(
@@ -320,30 +353,65 @@ class VocalErrorNetV2:
             aud_delay_ms=self.aud_delay_ms, hvc_delay_ms=self.hvc_delay_ms,
             tau_stdp=self.tau_stdp,
             theta_e=self.theta_e, theta_i=self.theta_i,
+            stimulus_json=np.array(json.dumps(self.stimulus, sort_keys=True)),
         )
 
+    #: Keys every saved model must contain. ``load`` refuses a file missing any of them.
+    _REQUIRED_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud")
+    _REQUIRED_FLOAT_KEYS = (
+        "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
+        "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
+        "drive_e", "drive_i", "noise_e", "noise_i",
+        "target_rate", "target_rate_i", "theta_i",
+    )
+    _REQUIRED_ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE", "theta_e")
+
+    #: Keys added with later features, and the value a file saved before the feature
+    #: existed loads with. Each default switches the feature off, so such a model reloads
+    #: with the dynamics it was trained with: no refractory period, no adaptation, no
+    #: conduction delay, and an STDP window equal to ``tau_s``.
+    OPTIONAL_KEY_DEFAULTS = {
+        "t_refr_ms": 0.0,
+        "a_sfa": 0.0,
+        "tau_sfa": 0.0,
+        "aud_delay_ms": 0,
+        "hvc_delay_ms": 0,
+        "tau_stdp": 0.0,
+        "stimulus_json": {},
+    }
+
     @classmethod
-    def load(cls, path: str, seed: int | None = None) -> "VocalErrorNetV2":
+    def load(cls, path: str, seed: int | None = None) -> "VocalErrorNet":
+        """Load a model written by :meth:`save`.
+
+        Raises ``ValueError`` naming every missing required key. Keys in
+        :attr:`OPTIONAL_KEY_DEFAULTS` may be absent and load with the listed default;
+        keys not listed anywhere are ignored. ``seed`` seeds the simulation noise.
+        """
         d = np.load(path)
+        required = cls._REQUIRED_INT_KEYS + cls._REQUIRED_FLOAT_KEYS + cls._REQUIRED_ARRAY_KEYS
+        missing = [k for k in required if k not in d]
+        if missing:
+            raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
+                             f"{', '.join(missing)}")
+
         obj = cls.__new__(cls)
         obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
-        for k in ("n_e", "n_i", "n_hvc", "n_aud"):
+        for k in cls._REQUIRED_INT_KEYS:
             setattr(obj, k, int(d[k]))
-        scalar_keys = (
-            "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
-            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
-            "drive_e", "drive_i", "noise_e", "noise_i",
-            "target_rate", "target_rate_i",
-            "tau_stdp", "theta_i", "t_refr_ms", "a_sfa", "tau_sfa",
-        )
-        # Keys not listed here are ignored. A missing key loads as 0.0, which for
-        # ``t_refr_ms`` means a model saved without a refractory period reloads without
-        # one, as it was trained.
-        for k in scalar_keys:
-            setattr(obj, k, float(d[k]) if k in d else 0.0)
-        obj.aud_delay_ms  = int(d["aud_delay_ms"]) if "aud_delay_ms" in d else 0
-        obj.hvc_delay_ms  = int(d["hvc_delay_ms"]) if "hvc_delay_ms" in d else 0
-        raw_theta = d["theta_e"] if "theta_e" in d else np.array(0.0)
+        for k in cls._REQUIRED_FLOAT_KEYS:
+            setattr(obj, k, float(d[k]))
+
+        opt = cls.OPTIONAL_KEY_DEFAULTS
+        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_stdp"):
+            setattr(obj, k, float(d[k]) if k in d else opt[k])
+        for k in ("aud_delay_ms", "hvc_delay_ms"):
+            setattr(obj, k, int(d[k]) if k in d else opt[k])
+        obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
+                        else dict(opt["stimulus_json"]))
+
+        # theta_e is saved per neuron; a scalar is broadcast to every E cell.
+        raw_theta = d["theta_e"]
         obj.theta_e = (raw_theta.copy() if raw_theta.ndim > 0
                        else np.full(obj.n_e, float(raw_theta), dtype=np.float64))
         obj.B        = d["B"]
@@ -396,6 +464,7 @@ class VocalErrorNetV2:
         hvc_spikes: np.ndarray,
         aud_spikes: np.ndarray,
         learn_weights: bool = False,
+        rng: np.random.Generator | None = None,
     ):
         dt      = 1.0
         decay_e = float(np.exp(-dt / self.tau_e))
@@ -409,7 +478,7 @@ class VocalErrorNetV2:
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
 
-        sE_mat, sI_mat, JIE = _sim_loop_v2(
+        sE_mat, sI_mat, JIE = _simulate(
             h_aud, h_hvc,
             self.B.astype(np.float64),
             self.B_hvc.astype(np.float64),
@@ -421,7 +490,7 @@ class VocalErrorNetV2:
             self.t_refr_ms, self.a_sfa, self.tau_sfa,
             float(self.A_jie), float(self.J_max_ie), xi_th,
             float(self.drive_e), float(self.drive_i),
-            learn_weights, alpha_stdp, self._sim_rng,
+            learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
         )
@@ -429,3 +498,54 @@ class VocalErrorNetV2:
         if learn_weights:
             self.JIE = JIE.astype(np.float32)
         return sE_mat, sI_mat
+
+
+class VocalErrorNetV2(VocalErrorNet):
+    """Earlier name for :class:`VocalErrorNet`, with its earlier constructor defaults.
+
+    Identical dynamics, save and load; only the defaults differ -- these are the values
+    the class had before the operating point became its default (no adaptation, no
+    conduction delay, ``n_aud=256``). Kept so code written against it keeps behaving
+    as before. Prefer :class:`VocalErrorNet`.
+    """
+
+    def __init__(
+        self,
+        n_e: int = 600,
+        n_i: int = 150,
+        n_hvc: int = 15,
+        n_aud: int = 256,
+        tau_e: float = 30.0,
+        tau_i: float = 10.0,
+        tau_s: float = 10.0,
+        A_jie: float = 5e-6,
+        J_max_ie: float = 1.0,
+        c_B: float = 0.05,
+        B_scale: float = 5.0,
+        c_hvc: float = 0.3,
+        B_hvc_scale: float = 2.0,
+        c_JEI: float = 0.5,
+        t_refr_ms: float = 2.0,
+        a_sfa: float = 0.0,
+        tau_sfa: float = 100.0,
+        r_i_th: float = 0.0,
+        drive_e: float = 0.155,
+        drive_i: float = 0.058,
+        noise_e: float = 0.1,
+        noise_i: float = 0.0,
+        target_rate: float = 0.025,
+        target_rate_i: float = 0.05,
+        aud_delay_ms: int = 0,
+        hvc_delay_ms: int = 0,
+        tau_stdp: float = 0.0,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(
+            n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, tau_e=tau_e, tau_i=tau_i,
+            tau_s=tau_s, A_jie=A_jie, J_max_ie=J_max_ie, c_B=c_B, B_scale=B_scale,
+            c_hvc=c_hvc, B_hvc_scale=B_hvc_scale, c_JEI=c_JEI, t_refr_ms=t_refr_ms,
+            a_sfa=a_sfa, tau_sfa=tau_sfa, r_i_th=r_i_th, drive_e=drive_e,
+            drive_i=drive_i, noise_e=noise_e, noise_i=noise_i, target_rate=target_rate,
+            target_rate_i=target_rate_i, aud_delay_ms=aud_delay_ms,
+            hvc_delay_ms=hvc_delay_ms, tau_stdp=tau_stdp, seed=seed,
+        )

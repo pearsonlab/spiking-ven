@@ -207,7 +207,7 @@ class CausalFilterEncoder:
     """A trained causal filter bank: waveform in, sparse activations out.
 
     ``n_channels`` and ``encode_signal`` are the whole contract the rest of the pipeline
-    relies on (see ``evaluate.encode_acts``).
+    relies on (see ``stimuli.encode_acts``).
     """
 
     def __init__(self, V, bias, lam, coch_params):

@@ -1,6 +1,6 @@
 """Brian2 runtime for a trained vocal error network.
 
-NeuronGroup/Synapses builders that run a :class:`~spiking_ven.vocal_error_net.VocalErrorNetV2`
+NeuronGroup/Synapses builders that run a :class:`~spiking_ven.vocal_error_net.VocalErrorNet`
 trained in numpy inside a Brian2 network, so a host circuit can wire its E population
 onward. Inference only: training happens in numpy, and every parameter here comes from
 ``ven.to_brian_weights()``.
@@ -14,7 +14,7 @@ pulls in Brian2. Typical use::
 
     from spiking_ven.brian2_runtime import build_ven_groups, build_ven_synapses
 
-    w = VocalErrorNetV2.load(path).to_brian_weights()
+    w = VocalErrorNet.load(path).to_brian_weights()
     groups = build_ven_groups(w)
     syns = build_ven_synapses(groups, w, aud_group, hvc_group)
 
@@ -79,14 +79,14 @@ def _eqs(template: str, noise_amp: float, sigma_name: str) -> str:
 def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     """Build the E and I LIF NeuronGroups of a trained network.
 
-    ``w`` is ``VocalErrorNetV2.to_brian_weights()``. Returns ``{"e_group", "i_group"}``.
+    ``w`` is ``VocalErrorNet.to_brian_weights()``. Returns ``{"e_group", "i_group"}``.
 
-    Noise: VocalErrorNetV2 adds ``noise_e`` per 1 ms step, so the SDE sigma is always
+    Noise: VocalErrorNet adds ``noise_e`` per 1 ms step, so the SDE sigma is always
     calibrated to dt = 1 ms regardless of Brian2's defaultclock.dt:
     sigma = noise * sqrt(1 ms) / tau. Calibrating to the Brian2 dt instead would give
     10x smaller variance at dt = 0.1 ms and suppress the noise-driven crossings.
     """
-    DT_NUMPY_S = 1e-3   # VocalErrorNetV2 reference timestep (1 ms)
+    DT_NUMPY_S = 1e-3   # VocalErrorNet reference timestep (1 ms)
     sigma_e = w["noise_e"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_e"] * 1e-3)
     sigma_i = w["noise_i"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_i"] * 1e-3)
     refractory = w["t_refr_ms"] * ms

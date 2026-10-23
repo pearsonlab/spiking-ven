@@ -7,6 +7,10 @@ perturbed sound survive.
 
 Defaults are the tuned operating point in :mod:`spiking_ven.constants`. Only JIE is
 plastic; B (aud->E), B_hvc (HVC->I) and JEI (E->I) are fixed.
+
+The saved model records how its stimuli were built (``ven.stimulus``: sample rate, seed,
+protocol timing, rate calibration, DAF window, and checksums of the encoder and motifs
+files), so ``sven-evaluate`` and ``sven-figure`` rebuild the same stimuli.
 """
 
 from __future__ import annotations
@@ -33,7 +37,6 @@ from ..constants import (
     N_ISTA,
     N_RENDITIONS,
     R_I_TH,
-    SR,
     T_BURN,
     T_POST,
     TAU_E,
@@ -42,15 +45,15 @@ from ..constants import (
     TAU_STDP,
     a_jie_for,
 )
-from ..evaluate import (
-    build_stimuli,
-    daf_metrics,
+from ..metrics import (
     daf_response,
-    format_metrics,
+    format_rendition_rates,
     format_responders,
+    rendition_rates,
 )
 from ..paths import encoder_npz, ensure_parent, motifs_npz, ven_model_npz
-from ..vocal_error_net import VocalErrorNetV2
+from ..stimuli import build_stimuli, stimulus_record
+from ..vocal_error_net import VocalErrorNet
 
 # Renditions at which progress is logged.
 LOG_AT = {1, 5, 10, 20, 30, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600}
@@ -65,7 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, help="output model .npz")
     p.add_argument("--traces", default=None, help="output traces .npz (default: alongside --out)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--sr", type=int, default=SR)
+    p.add_argument("--sr", type=int, default=None,
+                   help="corpus sample rate (Hz); must match the corpus. "
+                        "Default: the corpus's own rate")
     # tuned operating point
     p.add_argument("--drive-e", type=float, default=DRIVE_E)
     p.add_argument("--drive-i", type=float, default=DRIVE_I)
@@ -130,7 +135,7 @@ def main(argv: list[str] | None = None) -> None:
     n_kernels = encoder.n_channels
     print(f"  n_bases={n_kernels}  coch_params={encoder.coch_params}")
 
-    # Stimuli are built by evaluate.build_stimuli, which the reproduction tests also
+    # Stimuli are built by stimuli.build_stimuli, which the reproduction tests also
     # call -- one definition, so training and the metrics cannot drift apart.
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
@@ -142,7 +147,7 @@ def main(argv: list[str] | None = None) -> None:
     corr, train_idx, n_motifs = st["fwd_rev_corr"], st["train_idx"], st["n_motifs"]
 
     # --- network ----------------------------------------------------------
-    ven = VocalErrorNetV2(
+    ven = VocalErrorNet(
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, tau_s=args.tau_s,
@@ -167,24 +172,29 @@ def main(argv: list[str] | None = None) -> None:
     print(f"{'=' * 65}")
 
     # --- training loop ----------------------------------------------------
-    def snapshot() -> tuple[float, float]:
-        rc = float(ven.transform(hvc_on, aud_correct).mean() * 1000)
-        rn = float(ven.transform(hvc_on, aud_reversed).mean() * 1000)
-        return rc, rn
+    # Monitoring draws its membrane noise from its own generator, so logging does not
+    # advance the noise stream training sees: a run is the same with or without it.
+    monitor_rng = np.random.default_rng(args.seed + 20_000)
 
-    rc_trace: list[float] = []
-    rn_trace: list[float] = []
+    def snapshot() -> tuple[float, float]:
+        trained = float(ven.transform(hvc_on, aud_correct, rng=monitor_rng).mean() * 1000)
+        reversed_ = float(ven.transform(hvc_on, aud_reversed, rng=monitor_rng).mean() * 1000)
+        return trained, reversed_
+
+    trained_trace: list[float] = []
+    reversed_trace: list[float] = []
     jie_trace: list[float] = []
 
     def log(r: int) -> None:
-        ratio = rn_trace[-1] / rc_trace[-1] if rc_trace[-1] > 0 else float("nan")
-        print(f"  r{r:<5} correct={rc_trace[-1]:.2f}  novel={rn_trace[-1]:.2f}  "
+        ratio = (reversed_trace[-1] / trained_trace[-1] if trained_trace[-1] > 0
+                 else float("nan"))
+        print(f"  r{r:<5} trained={trained_trace[-1]:.2f}  reversed={reversed_trace[-1]:.2f}  "
               f"ratio={ratio:.3f}  JIE={jie_trace[-1]:.5f}", flush=True)
 
     def record() -> None:
-        rc, rn = snapshot()
-        rc_trace.append(rc)
-        rn_trace.append(rn)
+        trained, reversed_ = snapshot()
+        trained_trace.append(trained)
+        reversed_trace.append(reversed_)
         jie_trace.append(float(ven.JIE.mean()))
 
     # Rendition 1 carries the burn-in.
@@ -200,23 +210,26 @@ def main(argv: list[str] | None = None) -> None:
             log(r + 1)
 
     # --- save + evaluate --------------------------------------------------
+    ven.stimulus = stimulus_record(st, encoder_path=enc_path, motifs_path=motifs_path)
     ven.save(out_path)
     print(f"\nSaved {out_path}")
 
-    m = daf_metrics(ven, hvc_on=hvc_on, hvc_off=hvc_off, aud_correct=aud_correct,
-                    aud_daf=st["aud_daf"], aud_reversed=aud_reversed)
+    m = rendition_rates(ven, hvc_on=hvc_on, hvc_off=hvc_off, aud_trained=aud_correct,
+                        aud_daf=st["aud_daf"], aud_reversed=aud_reversed)
     print()
-    print(format_metrics(m))
+    print(format_rendition_rates(m))
     r = daf_response(ven, encoder, st, n_trials=20, seed=args.seed)
     print()
     print(format_responders(r))
 
+    # Per-rendition traces, then the rendition-level rates of the final network.
     np.savez(traces_path,
-             rc=np.array(rc_trace), rn=np.array(rn_trace),
-             jie=np.array(jie_trace),
+             trained_hz=np.array(trained_trace), reversed_hz=np.array(reversed_trace),
+             jie_mean=np.array(jie_trace),
              fwd_rev_corr=corr, train_idx=train_idx,
-             rc_hvc=m["k1"], rn_noh=m["k2_no_hvc"],
-             rn_rev_hvc=m["k4_rate"], ratio_k4=m["k4"],
+             final_trained_hz=m["trained_hz"], final_reversed_hz=m["reversed_hz"],
+             final_reversed_over_trained=m["reversed_over_trained"],
+             final_daf_not_singing_hz=m["daf_not_singing_hz"],
              B_scale=args.b_scale, drive_e=args.drive_e,
              tau_s=args.tau_s, n_rend=args.n_rend, a_jie=a_jie)
     print(f"Saved {traces_path}")

@@ -1,0 +1,135 @@
+# Design notes
+
+Why the model and pipeline are the way they are: the experiments, measurements and dead ends behind
+choices that the code comments state only briefly. **Numbers here are historical.** Each was
+measured on the model version current at the time, which may differ from the shipped one; the
+README and `tests/test_reproduction_causal.py` hold the current numbers.
+
+## Operating point and reproducibility
+
+- **The operating point lives in `constants.py`, and the CLIs read it as their defaults.** A
+  parameter sweep once built the network from the library's constructor defaults instead, because
+  the real values existed only in a scratch script; four grid points came back identical and broken.
+  For the same reason `tests/test_cli.py` checks that each flag *reads* its constant rather than
+  repeating the value.
+- **The template rendition** (highest RMS) was once chosen separately in four places. It now lives in
+  `corpus.py`, so training, scoring and the figure cannot pick different motifs.
+- **Stimuli are built once, by `evaluate.build_stimuli`**, for the trainer, the CLIs, the tests and
+  the figures alike.
+- **Simulation noise is seeded.** It was originally drawn from the global `np.random`, so `seed=`
+  fixed only the initial weights, and two identical runs differed by ~1% in E rate.
+- **Version.** v0.5.0 shipped with `__version__` and `pyproject.toml` disagreeing (0.4.0 vs 0.5.0);
+  the version is now read from `__version__` only.
+- **Packaging.** An unanchored `data/` rule in `.gitignore` once kept `src/spiking_ven/data/` out of
+  the repository; `test_every_subpackage_is_importable` guards against a repeat. The figure modules
+  once created `outputs/` in the working directory at import time.
+
+## Auditory input
+
+- **`AUD_MEAN_RATE_HZ`** was 15.0, an unsourced default repeated across seven call sites, which made
+  the auditory input ~4x faster than the broad-spiking higher-auditory-cortex population it models
+  (Schneider & Woolley 2013: 2.4 +/- 2.7 Hz).
+- **Two normalisation stages share one reference (the song).** If only the waveform scaling shares
+  it, the level difference reaches the activations and is then flattened again at the spike stage.
+  Measured on an earlier encoder: DAF at 5.6x song RMS gave 2.81x the activation energy but still
+  15.6 Hz/channel, against 43.4 Hz/channel with both stages shared.
+- **Refractory thinning of the input populations.** `acts_to_spikes` returns Poisson counts, so one
+  1 ms bin could carry several spikes (measured up to 5 for song and 8 for DAF on an earlier
+  encoder), and ~40% of auditory and ~27% of HVC inter-spike intervals were 1 ms. `apply_refractory`
+  removes both. `t_refr_ms=0` keeps the raw counts, so models trained before thinning existed still
+  reproduce.
+
+## The causal encoder
+
+- **Minimum phase.** An unconstrained kernel drifts toward near-linear phase, with its energy
+  centroid around L/2 -- 7.5 of 16 frames -- costing ~30 ms of encoder latency. Pulling toward
+  minimum phase moved the centroid to 10.9/16, raised the energy in the newest 4 frames from 0.26 to
+  0.50, and cut encoder latency from ~30 ms to ~2 ms, with no loss of forward/reversed selectivity.
+  An earlier convolutional (non-causal) encoder reported a response peaking 2 ms *before* its
+  stimulus, which is why causality is tested by truncation rather than by a summary statistic.
+- **Soft pull, not projection (`CAUSAL_MP_STRENGTH`).** The strict projection (`a = 1`) has a
+  degenerate fixed point. Measured there: lag-axis spectral flatness 0.08 -> 0.57, 58% of every
+  kernel's energy in the newest frame, song/reversed contrast 2.29 -> 1.83, DAF responder fraction
+  51% -> 74% (bird 41%). Over `a` = 0.10 / 0.25 / 0.50 the bank landed in the same place (centroid
+  10.1/16, sd 0.5; newest four frames 0.49 / 0.49 / 0.48 of the energy). The softness was once
+  accidental: `min_phase` defaulted to an FFT of `8 * L` points, which aliases the cepstrum (7.7%
+  magnitude error at L=16, against 1.2% at 512 and 0.5% at 1024).
+- **L1 on kernel entries (`CAUSAL_L1`).** Without it the kernels did not converge: at 3% activation
+  a filter fires too rarely to accumulate gradient, and after 80 epochs the kernels still correlated
+  +0.67 with their random initialisation (+0.81 over the 15 older frames), with reconstruction error
+  improved only 5%. The visible "speckle" was untouched initialisation. At `lr = 0.1` an `l1_V` of
+  0.03 put the soft threshold 1300x above the median gradient step and zeroed 99.8% of entries.
+- **No usage equalisation.** Forcing all filters to fire equally bought nothing on this stereotyped
+  corpus (effective rank 29/64 with it, 32/64 without) and kept the code too sparse to train.
+- **Pruning.** At `lam = 0.6` only 19 of 64 filters ever fired; the rest decayed into stubs that
+  never won a competition. Left in, they are permanently silent auditory channels that dilute each
+  E cell's sampled inputs.
+- **Code sparsity (`CAUSAL_LAMBDA`).** Measured on an earlier encoder: 0.3 -> 10.7% activation and
+  56/64 filters; 0.6 -> 3.2% and 23; 1.2 -> 0.15% and 1. 0.3 was chosen for song cancellation
+  (song/reversed 2.47 vs 1.72 at 0.6), at a cost in responder fraction (52% vs 43%, bird 41%) and
+  peak change (316 vs 262 Hz, on the binning of the time). At 0.3, white noise drives the
+  dictionary 17x harder than at 0.6; with no measurement of continuous noise during singing to
+  compare against, that was not used to set the value.
+- **Mean subtraction.** Without `causal_meansub` the code is dominated by level and cannot tell
+  forward from reversed song (forward/reversed correlation 0.998).
+- **Frame timing (PR #12).** `gtgram` labels each window by its first frame, so the code at frame t
+  read audio up to ~2 ms past t, and the divisive gain up to ~4 ms (measured lookahead 2-3 ms).
+  Removing that added ~4 ms of response latency, compensated by lowering `AUD_DELAY_MS` from 5 to 2.
+
+## Network dynamics
+
+- **Conduction delay (`AUD_DELAY_MS`).** It was once set to the bird's 23 ms response *latency*,
+  which double-counts: the network then integrates for a further ~43 ms (modelled latency ~66 ms)
+  and the comparison with 23 ms becomes circular.
+- **`tau_s` and the STDP window** were once the same constant, which tied the coincidence window to
+  the synaptic time course; `tau_stdp` now sets it separately.
+- **Membrane refractory period.** Without it the ceiling was 1000 Hz and was reached: during a DAF
+  burst the median E inter-spike interval was 1 ms, with 73% of burst spikes in the very next bin,
+  while the baseline median ISI was 31 ms. Decrementing the countdown after the spike test, rather
+  than before, would silently make the period `t_refr_ms + 1`.
+- **Spike-frequency adaptation rather than a weaker drive.** Extra spikes per burst depended only on
+  the product of auditory rate and `B_scale`, roughly as drive^0.36 (two runs at drive 149 and 161
+  gave 9.04 and 9.36 spikes despite 4x and 4.4x differences in rate and weight). Reaching the bird's
+  ~1 spike that way needed an auditory rate near 0.3 Hz, an order of magnitude below Schneider &
+  Woolley. A gain change also has the wrong shape: per responder the model spanned 1.1-19.9 extra
+  spikes, the weak end already inside the bird's range, and a gain change moves both ends.
+- **`TAU_SFA` shorter than the burst.** At 100 ms adaptation integrated over the motif and acted as
+  a tonic gain change (baseline -59%, peak barely moved); at 10 ms it builds and recovers within the
+  50 ms burst.
+- **`A_SFA` sweep** at `tau_sfa = 10 ms` (model version before PR #12):
+
+  | a_sfa | extra spikes | peak (Hz) | latency (ms) | duration (ms) | spikes / peak (ms) |
+  |---|---|---|---|---|---|
+  | 0.3 | 2.89 | 87.6 | 34.5 | 57.1 | 33.0 |
+  | 0.6 | 2.11 | 61.5 | 35.0 | 55.3 | 34.3 |
+  | 1.0 | 1.61 | 46.9 | 33.9 | 52.3 | 34.3 |
+  | 2.0 | 1.18 | 31.5 | 38.0 | 43.1 | 37.5 |
+  | bird | 0.78-1.01 | ~20 | 23 +/- 12 | 90 +/- 43 | ~45 |
+
+  1.0 was the strongest setting that kept latency and duration inside the bird's ranges; 2.0 nearly
+  matched the spike count but pushed latency past 35 ms and duration below 47 ms. Spikes per peak
+  rose with adaptation, against the expectation that adaptation narrows the response: it suppresses
+  the peak more than the tail. Part of the fall in duration is the measure, not the response:
+  duration is a z-test against pre-onset variability, so a weaker response stays detectable for less
+  time.
+
+## DAF metrics
+
+- **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst
+  ~20:1 and lands on top of the reversed-song rate, so the DAF number is computed per neuron in
+  150 ms windows (`evaluate.daf_response`).
+- **Peak over responders only**, matching Fig. 8E (n = 7). Averaging over all units mixed
+  non-responders' flat PSTHs into a number compared against a responders-only one.
+- **Peak bin width.** It was computed at 1 ms, finer than any binning the paper states, which
+  inflated it ~7%. 2 ms is now part of the metric's definition (`PEAK_BIN_MS`).
+- **Onset, not argmax.** The 23 +/- 12 ms latency is an onset; the PSTH argmax (~50 ms) was once
+  printed against it.
+
+## Testing
+
+- **Truncation causality is compared to a tolerance.** Bit-exactness held on macOS/Accelerate at
+  every thread count but failed intermittently on Linux CI, because truncating the signal changes the
+  shape of the drive matmul and BLAS may round it differently. A genuinely non-causal solver tested
+  the same way moved earlier coefficients by up to 0.549.
+- **Brian2 port gaps that tests now pin:** `noise_i` was accepted and dropped (no noise term in the
+  I equation), and the port once lacked the refractory period and adaptation entirely.

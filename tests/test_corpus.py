@@ -1,8 +1,7 @@
 """The corpus helper and the shared constants.
 
-Template selection used to be re-derived in four places. These tests pin the single
-implementation, including the invariant that actually matters: the template is the
-loudest rendition, because that is the one the network trains on.
+These pin the single template-selection rule, including the invariant that matters: the
+template is the loudest rendition, because that is the one the network trains on.
 """
 
 import numpy as np

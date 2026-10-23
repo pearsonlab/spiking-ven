@@ -10,7 +10,7 @@ Two figures, because they answer different questions:
     Where the energy sits in time, how tuning is spread over frequency, and how evenly
     the bank is used. The first panel is the one the minimum-phase constraint exists
     for: an unconstrained kernel puts its energy mid-window (~L/2, near-linear phase),
-    which is where ~30 ms of encoder latency came from.
+    which costs tens of milliseconds of encoder latency.
 
 Public API
 ----------

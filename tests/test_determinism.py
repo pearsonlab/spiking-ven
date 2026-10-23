@@ -1,9 +1,8 @@
 """The seed must govern the simulation, not just weight initialisation.
 
-The vocal error network injects Gaussian membrane noise every timestep. That noise was
-originally drawn from the global ``np.random``, so ``seed=`` fixed only the initial
-weights and two runs with identical arguments diverged (~1% in the E rate). These tests
-pin the fix: the seed now controls the simulation too.
+The vocal error network injects Gaussian membrane noise every timestep. That noise comes
+from a generator seeded by ``seed=``, so two runs with identical arguments must agree
+exactly, in training and in inference.
 """
 
 import numpy as np

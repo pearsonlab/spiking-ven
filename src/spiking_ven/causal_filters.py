@@ -17,9 +17,9 @@ The kernels are constrained to be **minimum phase** (:func:`min_phase`). That is
 makes the code prompt. An unconstrained kernel drifts toward near-linear phase, whose
 group delay is ~L/2 -- an energy centroid of ~7.5 of 16 frames, costing ~30 ms of encoder
 latency. Minimum phase places the energy as early as the magnitude response allows -- it
-constrains *when* a filter responds without constraining *what* it is tuned to.
-Measured: centroid 7.5 -> 10.9 of 16, energy in the newest 4 frames 0.26 -> 0.50, coder
-latency 30 ms -> 2 ms, with no loss of forward/reversed selectivity.
+constrains *when* a filter responds without constraining *what* it is tuned to. In the
+shipped bank the energy centroid is 10.9 of 16 frames, and the newest 4 frames hold 59%
+of the energy.
 """
 
 import numpy as np
@@ -28,9 +28,13 @@ __all__ = ["causal_meansub", "infer", "learn", "min_phase", "prune_silent"]
 
 
 def causal_meansub(X, w):
-    """Subtract the mean over the trailing w frames (causal per-window DC removal).
-    Without it the code is level-dominated and goes direction-blind (measured
-    forward/reversed correlation 0.998)."""
+    """Subtract a causal running level from every frame.
+
+    For each frame, the mean over the trailing ``w`` frames (including that frame) is taken
+    per channel and then averaged across channels; that one number is subtracted from
+    every channel. Without it the code is dominated by overall level and cannot tell
+    forward from reversed song.
+    """
     C, T = X.shape
     cs = np.cumsum(np.concatenate([np.zeros((C, 1)), X], axis=1), axis=1)
     idx = np.arange(T)
@@ -94,72 +98,35 @@ def learn(cochs, K=64, L=16, lam=0.3, n_epochs=30, n_iter=20, lr=0.1, seed=42, l
           mp_strength=0.25, l1_V=7e-5, smooth_V=0.0):
     """Alternate causal inference with a gradient step on the kernels; returns ``V``.
 
-    Objective is reconstruction of the strictly-past window from the sparse code, with
-    the kernels pulled toward minimum phase after each update.
+    The objective is reconstruction of the strictly-past window from the sparse code. Each
+    update runs, in order: gradient step -> roughness penalty -> pull toward minimum phase
+    -> L1 soft-threshold -> renormalise every kernel to unit norm.
 
-    ``smooth_V`` weights a roughness penalty on the kernels -- L2 on first differences
-    along channel and lag (see :func:`_roughness_grad`). Use this, not weight decay: a
-    plain L2 penalty is exactly cancelled by the per-filter unit-norm renormalisation.
+    ``lam``         code sparsity, and with it how many filters survive training.
+    ``l1_V``        L1 on kernel entries, applied as a soft threshold of ``lr * l1_V``. It
+                    zeroes entries the data never shaped, so what survives is what the
+                    data paid for. It has to be scaled against the gradient step: a
+                    threshold of the same order as the median step is useful, one far
+                    above it zeroes the whole dictionary.
+    ``smooth_V``    roughness penalty: L2 on first differences along channel and lag (see
+                    :func:`_roughness_grad`). Plain L2 weight decay would do nothing here,
+                    because the unit-norm renormalisation cancels a uniform rescale.
+    ``mp_strength`` how hard each update pulls toward minimum phase:
+                    ``V <- (1 - a) V + a * min_phase(V)``. ``a = 0`` disables it. ``a = 1``
+                    is the strict projection, which has a degenerate fixed point: minimum
+                    phase turns a white magnitude response into an impulse, so repeated
+                    projection collapses every kernel onto its newest frame and loses the
+                    temporal integration that song cancellation relies on. Values between
+                    0.1 and 0.5 converge to the same bank.
 
-    Both penalties have to be scaled against the data gradient, which is small: at
-    ``lr = 0.1`` the median gradient step on an entry is 2.3e-6 against entries of
-    magnitude 2.6e-2. An ``l1_V`` of 0.03 puts the soft-threshold 1300x above that and
-    annihilates the dictionary -- 99.8% of entries zero, one surviving tap per kernel.
-    The useful range is a threshold of order the gradient step, so ``lr * l1_V`` around
-    1e-5 to 1e-4.
-
-    ``lam`` now carries the code sparsity, and with it how many filters survive: 0.3 ->
-    10.7% activation and 56 of 64 filters, 0.6 -> 3.2% and 23, 1.2 -> 0.15% and 1. The
-    default is 0.3, chosen on song cancellation (song/reversed 2.47 against 1.72 at 0.6),
-    which is what the network exists to do. It costs responder fraction (52% against 43%,
-    bird 41%) and peak change (316 Hz against 262); DAF latency is inside the bird's
-    23 +/- 12 ms either way. ``lam`` is also the only thing rejecting broadband noise --
-    at 0.3 white noise drives the dictionary 17x harder than at 0.6 -- but there is no
-    experimental measurement of continuous noise during singing, so that is a diagnostic
-    and was not allowed to set the default.
-
-    ``l1_V`` puts an L1 penalty on the kernel entries, applied as a soft-threshold after
-    each update. Without it the kernels do not converge to anything: at 3% activation a
-    filter fires too rarely to accumulate gradient, and over 80 epochs the past frames
-    move almost not at all -- measured median correlation with the random initialisation
-    +0.67 overall and +0.81 over the 15 older frames, with reconstruction error improving
-    5%. The visible "speckle" in those kernels was untouched initialisation, not a
-    learned receptive field. L1 drives those entries to zero instead of leaving noise
-    there, so what survives is what the data paid for.
-
-    Note the tension with ``mp_strength``: the minimum-phase step is an FFT resynthesis
-    and returns a dense kernel, so it partly refills what L1 zeroed. The order here is
-    gradient -> minimum-phase pull -> soft-threshold -> renormalise, which leaves the
-    stored kernels genuinely sparse and the minimum-phase constraint approximate. Both
-    are soft pulls; neither is imposed exactly.
+    The minimum-phase step is an FFT resynthesis and returns dense kernels, so it partly
+    refills what L1 zeroed. Running L1 after it keeps the stored kernels sparse and leaves
+    the minimum-phase constraint approximate; both are soft pulls.
 
     There is no usage equalisation: filters that stop winning are allowed to die, and
-    :func:`prune_silent` removes them. Forcing all K filters to fire equally on a corpus
-    this stereotyped bought nothing (effective rank 29/64 with it, 32/64 without) and
-    pinned the code so sparse that the dictionary could not train.
+    :func:`prune_silent` removes them afterwards.
 
-    ``mp_strength`` is how hard that pull is: ``V <- (1-a) V + a * min_phase(V)``, a
-    proximal step on the distance to the minimum-phase manifold rather than a hard
-    projection. ``a = 0`` disables it; ``a = 1`` is the strict projection, and the strict
-    projection has a **degenerate fixed point**. Minimum phase turns a white magnitude
-    response into an impulse, so each strict projection concentrates energy at lag 0,
-    which whitens the lag-axis spectrum, which makes the next projection concentrate
-    harder. Measured at ``a = 1``: lag-axis spectral flatness 0.08 -> 0.57 and 58% of
-    every kernel's energy in the single most recent frame -- an instantaneous spectral
-    code. Latency is fine there (it was already solved) but the temporal integration that
-    sharpens song cancellation is gone: song/reversed contrast fell 2.29 -> 1.83 and the
-    DAF responder fraction went 51% -> 74% against the bird's 41%.
-
-    The default is not tuned. Measured over ``a`` = 0.10 / 0.25 / 0.50, the bank lands on
-    the same place every time -- kernel energy centroid 10.1 of 16 (sd 0.5), newest four
-    frames holding 0.49 / 0.49 / 0.48 of the energy. The soft pull has one stable fixed
-    point and only ``a = 1`` escapes it into the impulse. So the choice here is between
-    pulling toward minimum phase and projecting onto it, not a value to sweep.
-
-    This was invisible for a while because :func:`min_phase` defaulted to an FFT short
-    enough to alias the cepstrum, which made the "projection" accidentally soft. That is
-    a bad way to set a hyperparameter; the softness is explicit here and the projection
-    itself is now accurate.
+    The measurements behind these choices are in ``docs/design-notes.md``.
     """
     C = cochs[0].shape[0]
     rng = np.random.default_rng(seed)
@@ -200,13 +167,11 @@ def min_phase(V, n_fft=None, eps=1e-9):
     order before projection and back afterwards.
 
     ``n_fft`` has to be generous. The cepstrum of a short kernel is long, so a short FFT
-    aliases it and the projection stops being magnitude-preserving -- which would mean
-    quietly retuning the filters, the one thing this is supposed not to do. Measured
-    relative magnitude error at L=16: 7.7% at N=128 (the old ``8*L`` default), 1.2% at
-    512, 0.5% at 1024. The FFT is over (K, C) kernels once per gradient step and is
-    negligible against ISTA, so the default is sized for accuracy, not speed. A residual
-    error remains at any N because the minimum-phase counterpart of a finite kernel is in
-    general IIR and is truncated back to L frames here.
+    aliases it and the projection stops preserving the magnitude response -- quietly
+    retuning the filters. At L=16 the relative magnitude error is 7.7% at N=128 and 0.5%
+    at the default 1024; the cost is negligible against ISTA. A residual error remains at
+    any N because the minimum-phase counterpart of a finite kernel is in general IIR and
+    is truncated back to L frames here.
     """
     K, C, L = V.shape
     N = int(n_fft or max(64 * L, 1024))
@@ -226,12 +191,10 @@ def min_phase(V, n_fft=None, eps=1e-9):
 def prune_silent(V, cochs, lam, n_iter=20):
     """Drop filters that never win on the training corpus. Returns (V, kept).
 
-    Without usage equalisation the dictionary is free to shed filters, which on a corpus
-    this stereotyped it does: at ``lam = 0.6`` only 19 of 64 ever fire. The other 45 do
-    not vanish -- they decay into near-identical stubs that lose every competition -- so
-    they have to be removed explicitly. Leaving them in is not harmless: they become
-    permanently silent auditory channels, and the VEN samples each E cell's auditory
-    inputs from that width, so they dilute its convergence.
+    Without usage equalisation the dictionary sheds filters on a corpus this stereotyped.
+    The losers do not vanish -- they decay into near-identical stubs that lose every
+    competition -- so they are removed explicitly. Left in, they would be permanently
+    silent auditory channels diluting each E cell's sampled inputs.
     """
     fired = np.zeros(V.shape[0], dtype=bool)
     for X in cochs:

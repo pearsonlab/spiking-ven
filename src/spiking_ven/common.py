@@ -19,10 +19,8 @@ def spike_to_rate(
 ) -> np.ndarray:
     """Causal exponential filter applied row-by-row.
 
-    ``h[t] = decay * h[t-1] + spikes[t]``, which is a one-pole IIR filter, so it is
-    evaluated with ``lfilter`` rather than a Python loop over timesteps. This runs once
-    per population per simulation call -- a few thousand times over a training run --
-    and the float32 recursion is bit-identical to the explicit loop it replaces.
+    ``h[t] = decay * h[t-1] + spikes[t]``, a one-pole IIR filter, evaluated with
+    ``lfilter`` rather than a Python loop over timesteps.
 
     Parameters
     ----------
@@ -46,15 +44,14 @@ def apply_refractory(spikes, t_refr_ms: float = 2.0):
     For the Poisson/Bernoulli input populations, which are sampled per 1 ms bin with no
     history and so can emit spikes a neuron could not produce. Two separate violations
     are fixed here: a bin carrying more than one spike (``acts_to_spikes`` returns Poisson
-    COUNTS -- measured up to 5 per bin for song and 8 for DAF), and spikes closer together
-    than ``t_refr_ms`` (measured ~40% of auditory ISIs and ~27% of HVC ISIs at 1 ms).
+    counts), and spikes closer together than ``t_refr_ms``.
 
     The E and I populations do NOT use this: their refractory belongs in the membrane
     dynamics, where it also gates integration, not in a post-hoc filter.
 
     Thinning lowers the realised rate slightly, by construction -- it removes spikes and
-    adds none. That is the intended effect and the rate calibration is deliberately not
-    re-run afterwards, which would put the violating spikes back as higher-rate ones.
+    adds none. The rate calibration is deliberately not re-run afterwards, which would put
+    the removed spikes back elsewhere.
     """
     s = (np.asarray(spikes) > 0).astype(np.float32)     # at most one spike per bin
     r = int(round(t_refr_ms))
@@ -86,8 +83,9 @@ def generate_hvc_spikes(
     """Generate Poisson spike trains for a parametric HVC population.
 
     Each of the n_hvc neurons bursts once per rendition at a linearly-spaced
-    time within the motif window, with a Gaussian rate envelope.  Mirrors
-    generate_HVC() + generate_syl_time() in the paper's train_funcs.py.
+    time within the motif window, with a Gaussian rate envelope, following
+    ``generate_HVC`` and ``generate_syl_time`` in ``train_funcs.py`` of the rate-model
+    repository (pearsonlab/vocal-error-network).
 
     Parameters
     ----------
@@ -100,8 +98,8 @@ def generate_hvc_spikes(
     peak_rate   : peak firing rate in Hz
     kernel_width: Gaussian σ in ms
 
-    The ``peak_rate``/``kernel_width`` defaults here are the function's original values,
-    not the calibrated operating point. Pass ``constants.PEAK_RATE_HZ`` and
+    The ``peak_rate``/``kernel_width`` defaults here are NOT the calibrated operating
+    point. Pass ``constants.PEAK_RATE_HZ`` and
     ``constants.KERNEL_WIDTH_MS`` (as ``evaluate.build_stimuli`` and the figures do) to
     get the drive the shipped model was trained with.
 
@@ -111,9 +109,8 @@ def generate_hvc_spikes(
     """
     rng = default_rng(seed)
     T_rend = T_song + T_post
-    # Bursts are placed at absolute times up to T_burn + n_renditions * T_rend. If T is
-    # shorter, the tail renditions land outside the array and are silently dropped --
-    # the population simply stops driving, with nothing to indicate why.
+    # Bursts are placed at absolute times up to T_burn + n_renditions * T_rend; a shorter
+    # T would silently drop the tail renditions.
     T_needed = T_burn + n_renditions * T_rend
     if T < T_needed:
         raise ValueError(
@@ -186,11 +183,9 @@ def acts_to_spikes(
     lam = act * rate_scale * (1.0 / frame_rate)
     counts = rng.poisson(lam)
     if t_refr_ms <= 0.0:
-        # Exactly the pre-refractory behaviour, multi-spike bins included. Not merely
-        # "no thinning": apply_refractory also collapses counts to 1, so routing through
-        # it at 0 would still change the output and a model pinned to the old dynamics
-        # would not reproduce.
+        # Raw Poisson counts, multi-spike bins included. Not routed through
+        # apply_refractory, which would still collapse each bin to one spike.
         return counts.astype(np.float32)
-    # Poisson COUNTS, so a bin can carry several spikes; apply_refractory collapses that
-    # to at most one and enforces the floor. See its docstring for the measurements.
+    # A bin can carry several spikes; apply_refractory collapses that to at most one and
+    # enforces the refractory floor.
     return apply_refractory(counts, t_refr_ms)

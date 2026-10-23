@@ -2,9 +2,8 @@
 
 These are the numbers ``sven-train-ven`` produces with pure defaults against
 ``outputs/causal_encoder.npz``. They exist so that a change to the dynamics, the encoder
-or the metrics cannot silently move the result: several times during development a
-"harmless" change (the refractory period, the auditory rate calibration, a metric
-definition) moved these by 2x or more, and only a recorded reference makes that visible.
+or the metrics cannot silently move the result: small-looking changes (a refractory
+period, a rate calibration, a metric definition) can move these by 2x or more.
 
 Marked ``slow`` -- each test re-runs VEN inference over several stimuli -- and skipped
 when the artifacts are absent so a bare checkout still gets a green suite. Regenerate with
@@ -103,7 +102,7 @@ def test_daf_response_matches_the_recorded_run(daf):
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
-    truncation, and the mean alone hid that distinction across two sweeps."""
+    truncation of the strongest responses."""
     assert daf["extra_spikes_p90"] == pytest.approx(3.65, rel=0.12)
     assert daf["extra_spikes_max"] == pytest.approx(9.05, rel=0.15)
     assert daf["extra_spikes_sd"] == pytest.approx(1.37, rel=0.12)
@@ -126,10 +125,10 @@ def test_response_shape_matches_figure_8e(daf):
     """Fig. 8E, black trace (noise during singing, n = 7), read off the panel.
 
     Shape rather than magnitude. The peak's AMPLITUDE depends on a bin width the paper
-    never states -- across 1/2/5/10/20 ms bins the model's peak moves 97 -> 64 Hz -- so it
-    is deliberately not asserted anywhere. When the peak occurs, and whether the response
-    is a transient or a step, do not depend on that: the same sweep moves peak latency
-    only 54 -> 50 ms.
+    never states -- from 1 to 10 ms bins the model's peak falls 49 -> 35 Hz -- so it is
+    deliberately not asserted anywhere. When the peak occurs, and whether the response is
+    a transient or a step, depend much less on it: over the same bins the peak time stays
+    at 50-55 ms.
 
     Both bounds come from reading a published panel, not from a stated number, so they are
     wider than the figure appears to justify.

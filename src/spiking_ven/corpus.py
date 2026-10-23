@@ -2,9 +2,7 @@
 
 The "template" is the highest-RMS rendition. That single rule decides which motif the
 network trains on, which one the metrics score, and which one the figure draws -- so it
-lives here once. It used to be re-derived in four places, and if those had ever diverged
-the figure and the metrics would have silently described a different motif than training
-used.
+lives here once.
 """
 
 from __future__ import annotations

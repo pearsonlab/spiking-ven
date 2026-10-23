@@ -10,11 +10,9 @@ authority:
    with. Empirical, not measured: they are what the fit landed on.
 3. **The causal encoder operating point.** The same, for the minimum-phase filter bank.
 
-All three are here rather than restated at each use site, which is a drift hazard rather
-than a style problem: the stimulus the figure draws has to be the stimulus the network was
-trained and scored on, or the figure describes a different experiment. A sweep once built
-the network from library defaults rather than section 2, because those values lived only
-in a scratch script, and four grid points came back identical and broken.
+All three live here rather than being restated at each use site: the stimulus the figure
+draws has to be the stimulus the network was trained and scored on, or the figure
+describes a different experiment.
 
 Some of section 2 is DERIVED -- see :func:`a_jie_for`, which ties the STDP amplitude to
 the window width. That is why this is a module and not a data file: a formula has to live
@@ -79,17 +77,17 @@ DAF_WN_AMPLITUDE = 5.6
 #:
 #: Schneider & Woolley 2013, Neuron 79:141-152 (DOI 10.1016/j.neuron.2013.04.038) measure
 #: 2.4 +/- 2.7 Hz for the broad-spiking neurons of the higher-level auditory cortex -- the
-#: sparse, selective, background-invariant population this encoder models. 2.5 realises
-#: 2.30 Hz after the refractory period. It was 15.0, an unsourced default repeated across
-#: seven call sites, which made the auditory input ~4x too fast.
+#: sparse, selective, background-invariant population this encoder models. The target is
+#: a mean over the whole rendition (song plus the silence after it). Refractory thinning
+#: removes some spikes, so the realised rate is 2.16 Hz over the rendition and 2.66 Hz
+#: during the song itself.
 AUD_MEAN_RATE_HZ = 2.5
 
 #: Window within the motif that the DAF stimulus perturbs (seconds).
 #:
 #: 50 ms, matching the noise bursts in Mandelblat-Cerf et al. 2014 -- the experiment the
-#: responder statistics come from. It was 200 ms, which is long enough that the modelled
-#: response keeps building through the burst instead of being the transient the paper
-#: measures (peak 118 ms in at 200 ms, against 88 ms at 50 ms).
+#: responder statistics come from. A much longer burst lets the modelled response keep
+#: building instead of being the transient the paper measures.
 DAF_WINDOW_S = (0.400, 0.450)
 
 #: Cochlea -> AIV-E conduction delay (ms), on top of the encoder's own processing time.
@@ -147,11 +145,10 @@ TAU_STDP = 20.0
 R_I_TH = 6.0
 J_MAX_IE = 1.0
 
-#: Firing-rate adaptation on E. ``TAU_SFA`` must stay SHORTER than the 50 ms DAF burst it
-#: has to truncate: at 100 ms the current integrates over the whole motif and acts as a
-#: tonic gain change, cutting the baseline 59% while barely moving the peak. At 10 ms it
-#: builds and recovers within the burst. Swept at that timescale, ``A_SFA`` 1.0 is the
-#: strongest setting that keeps latency and duration inside the bird's ranges.
+#: Firing-rate adaptation on E. ``TAU_SFA`` must stay shorter than the 50 ms DAF burst it
+#: has to truncate; a timescale longer than the burst integrates over the motif and acts
+#: as a tonic gain change instead. ``A_SFA`` was chosen by a sweep at this timescale --
+#: see ``docs/design-notes.md``.
 A_SFA = 1.0
 TAU_SFA = 10.0
 
@@ -180,20 +177,21 @@ def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
 # =============================================================================
 
 
-#: Code sparsity, and with it how many filters survive: 0.3 gives ~10.7% activation and
-#: 54 of 64 filters, 0.6 gives 3.2% and 23, 1.2 collapses to one. Chosen on song
-#: cancellation, which is what the network exists to do.
+#: Code sparsity, and with it how many filters survive: 0.3 keeps 54 of 64 filters, with
+#: ~11% of coefficients active during training. Larger values keep far fewer. Chosen on
+#: song cancellation, which is what the network exists to do.
 CAUSAL_LAMBDA = 0.3
 
 #: A soft pull toward minimum phase, not a projection. The hard projection has a
 #: degenerate fixed point -- minimum phase maps a white magnitude response to an impulse,
 #: so each application concentrates energy at lag 0 and whitens the spectrum further.
-#: Not tuned: 0.10 / 0.25 / 0.50 all converge to the same bank.
+#: Not tuned: values between 0.1 and 0.5 converge to the same bank.
 CAUSAL_MP_STRENGTH = 0.25
 
 #: L1 on kernel entries and a roughness penalty over channel and lag. ``CAUSAL_L1`` has to
-#: be scaled against the gradient step, which is small: at 0.03 the soft-threshold sits
-#: 1300x above it and annihilates the dictionary.
+#: be scaled against the gradient step: at ``CAUSAL_LR`` the soft threshold
+#: ``lr * l1 = 7e-4`` is about the size of the median step (9e-4), whereas 0.03 would put it
+#: over 300x above and zero the dictionary.
 CAUSAL_L1 = 7e-5
 CAUSAL_SMOOTH = 1e-3
 

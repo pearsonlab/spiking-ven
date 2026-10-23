@@ -1,12 +1,8 @@
 """Download the R469 song corpus.
 
-Replaces the shell + curl approach used previously. Two reasons this is Python and
-stdlib-only:
-
-* The host sits behind CloudFront, which answers the default ``curl``/``urllib``
-  User-Agent with ``403 Request blocked``. The browser UA is set here, in code, so the
-  failure cannot come back through a forgotten shell flag.
-* No ``requests`` dependency, and no dependence on ``curl``/``unzip`` being present.
+Python standard library only -- no ``requests``, ``curl`` or ``unzip``. The host sits
+behind CloudFront, which answers the default ``curl``/``urllib`` User-Agent with
+``403 Request blocked``, so a browser User-Agent is sent.
 
 Sources
 -------

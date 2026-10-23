@@ -1,10 +1,8 @@
 """Absolute refractory period, on every spiking population.
 
-Model neurons were free to fire on consecutive 1 ms bins, so the ceiling was 1000 Hz, and
-during a DAF burst the median E inter-spike interval was exactly 1 ms with 73% of spikes
-following the previous one in the very next bin. The auditory population was worse than
-unbounded: ``acts_to_spikes`` returns Poisson COUNTS, so a single bin could carry 5 spikes
-(8 under DAF). These pin both fixes.
+The E and I membranes enforce the period in their dynamics; the auditory and HVC input
+populations are thinned after sampling (``apply_refractory``), which also collapses
+Poisson counts to at most one spike per bin.
 """
 
 import numpy as np
@@ -22,11 +20,7 @@ def _min_isi(S):
 
 @pytest.mark.parametrize("refr", [2.0, 3.0, 5.0])
 def test_membrane_refractory_sets_the_isi_floor(refr):
-    """Under saturating drive a cell fires exactly every ``refr`` ms -- not refr+1.
-
-    Decrementing the countdown after the spike test rather than before costs an extra
-    millisecond and would make the period silently refr+1.
-    """
+    """Under saturating drive a cell fires exactly every ``refr`` ms -- not refr + 1."""
     v = VocalErrorNetV2(n_e=20, n_i=10, n_aud=4, n_hvc=4, seed=0, t_refr_ms=refr,
                         noise_e=0.0, noise_i=0.0)
     v.theta_e = np.full(v.n_e, 1e-6)                      # fire whenever permitted
@@ -37,7 +31,7 @@ def test_membrane_refractory_sets_the_isi_floor(refr):
 
 
 def test_membrane_refractory_off_is_unbounded():
-    """t_refr_ms=0 recovers the old dynamics, so saved models reload as they trained."""
+    """t_refr_ms=0 disables the period, so models saved without one reload as trained."""
     v = VocalErrorNetV2(n_e=20, n_i=10, n_aud=4, n_hvc=4, seed=0, t_refr_ms=0.0,
                         noise_e=0.0, noise_i=0.0)
     v.theta_e = np.full(v.n_e, 1e-6)

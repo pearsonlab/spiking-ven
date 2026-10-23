@@ -67,24 +67,22 @@ BIOLOGICAL_TARGETS = {
     #: response to distorted auditory feedback (50 ms noise bursts) presented during
     #: singing ... p<0.02 for n = 7/17 neurons".
     "responder_fraction": 7 / 17,
-    #: Fig 8E, black trace ("noise during singing", n=7). NOT A TARGET -- a documented
-    #: approximation, and the weakest number here. It is read off a figure axis rather
-    #: than stated in text, and the panel's y-axis is CHANGE in firing rate, so it is an
-    #: increase above baseline rather than a rate. Worse, a peak is bin-width dependent
-    #: and the paper never says how that PSTH was binned: the methods give 2 ms bins only
-    #: for the latency/duration z-tests, the figure legends say only "averaged PSTH", and
-    #: no smoothing is described anywhere in the paper (no Gaussian, kernel or
-    #: convolution appears in the text) although the published trace looks smoother than
-    #: 2 ms binning would give. The model's peak falls steadily as the bins widen, so any ratio against 20 Hz carries an
-    #: unknown binning mismatch. Compare ``extra_spikes_responders`` instead: a spike
-    #: count is invariant to binning, and the paper's own bootstrap used one ("the maximal
-    #: spike count over 150 ms").
+    #: Fig 8E, black trace ("noise during singing", n=7), read off the panel's y-axis,
+    #: which is the CHANGE in firing rate. A diagnostic, not a target: a peak depends on
+    #: bin width, and the paper states none for this PSTH (2 ms bins appear only in the
+    #: latency/duration tests). The model's peak falls from 49 to 35 Hz between 1 and
+    #: 10 ms bins. Compare spike counts (``extra_spikes_per_burst``) instead, which do not
+    #: depend on binning.
     "responder_peak_change_hz": 20.0,
-    #: Fig 8E, black trace, READ OFF THE PANEL (the paper states no number): the peak of
-    #: the averaged responder PSTH falls ~40-60 ms after noise onset. Widened to 35-75 to
-    #: cover figure-reading error. Unlike the peak's amplitude this is robust to the
-    #: unknown binning -- across 1/2/5/10/20 ms bins the model's peak latency moves
-    #: 54 -> 50 ms (7%) where its amplitude moves 97 -> 64 Hz (33%).
+    #: Extra spikes per responder per burst, derived from the two numbers above and below:
+    #: a ~20 Hz peak over a 90 ms response is ~0.8-1.0 spikes for a triangular or
+    #: rise-then-exponential shape (a rectangle would give 1.8). The paper reports no
+    #: shape, so this is a conversion, not a measurement.
+    "extra_spikes_per_burst": (0.8, 1.0),
+    #: Fig 8E, black trace, read off the panel (the paper states no number): the peak
+    #: falls ~40-60 ms after noise onset, widened to 35-75 ms for figure-reading error.
+    #: Less bin-dependent than the amplitude: the model's peak time stays at 50-55 ms
+    #: from 1 to 10 ms bins.
     "responder_peak_latency_ms": (35.0, 75.0),
     #: Also off Fig 8E: the black trace is back to ~0 by 120-150 ms and stays there, i.e.
     #: a transient rather than a step. The isolated-noise trace in the same panel does
@@ -200,9 +198,8 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
                  alpha: float = 0.02, seed: int = 42) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
-    Replaces averaging the excitatory rate over a whole rendition, which cannot see a
-    50 ms burst: diluted ~20:1 in a 1048 ms rendition, that number is dominated by the
-    cancelled song and lands on top of the reversed-song rate.
+    Per neuron, in windows either side of noise onset, because an E rate averaged over a
+    whole rendition dilutes a 50 ms burst ~20:1 and cannot see it.
 
     Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
     :func:`daf_responders`.
@@ -218,16 +215,9 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
     base = pre.mean(axis=0) * (1000.0 / W)
     nan = float("nan")
 
-    # The paper's ~20 Hz peak is the trial average over its SEVEN RESPONDERS (Fig 8E,
-    # n=7), so the model's peak has to be averaged over responders too. It used to average
-    # over every unit, which mixes the non-responders' flat PSTHs into a number compared
-    # against a responders-only one -- and understates the gap, since responders are
-    # roughly half the population here.
-    #
-    # Binned at PEAK_BIN_MS, the only bin width the paper states (2 ms, for its latency
-    # and duration z-tests). This was computed at 1 ms, finer than anything the paper
-    # uses, which inflated it ~7%. See BIOLOGICAL_TARGETS["responder_peak_change_hz"] for
-    # why this quantity should not be read as a hard target either way.
+    # The paper's ~20 Hz peak averages over its seven responders (Fig 8E, n=7), so the
+    # model's peak averages over responders too. Binned at PEAK_BIN_MS; see
+    # BIOLOGICAL_TARGETS["responder_peak_change_hz"] for why it is not a hard target.
     def _peak(mask):
         if not np.any(mask):
             return nan, 0
@@ -250,11 +240,11 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
 
     late_over_peak = _late_over_peak(resp)
 
-    # Response onset latency and duration, by the paper's own rule: 2 ms bins, a bin is
-    # significant at p < 0.05 against the pre-onset distribution, latency is the first bin
-    # followed by five consecutive significant ones, duration runs to the first run of ten
-    # non-significant bins. This is an ONSET, which is what 23 +/- 12 ms refers to -- not
-    # the PSTH argmax, which is later (49 ms here) and was being printed against it.
+    # Response onset latency and duration, per responder: 2 ms bins, each significant at
+    # p < 0.05 against the pre-onset distribution. Latency is the first of five
+    # consecutive significant bins; duration runs from there to the start of the first
+    # run of ten non-significant bins. This is an onset, which is what the paper's
+    # 23 +/- 12 ms is -- the PSTH peak (peak_latency_ms) comes ~25 ms later.
     BIN = 2
     nb = (2 * W) // BIN
     half = nb // 2
@@ -280,14 +270,12 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int =
         "responder_fraction": float(resp.mean()),
         "baseline_hz_all": float(base.mean()),
         "baseline_hz_responders": float(base[resp].mean()) if resp.any() else nan,
-        #: Extra spikes per neuron per burst, over the analysis window. The directly
-        #: interpretable form: the paper's responder gains ~1-2 spikes when it hears the
-        #: distortion, on a baseline of well under one spike in the same window.
+        #: Extra spikes per neuron per burst, over the analysis window. Compare with
+        #: BIOLOGICAL_TARGETS["extra_spikes_per_burst"].
         "extra_spikes_responders": (float((post - pre)[:, resp].mean())
                                     if resp.any() else nan),
-        #: The spread matters more than the mean here. Per responder the model spans
-        #: ~1-20 extra spikes: the weak end already sits inside the bird's 0.47-2.66, so
-        #: only the tail is wrong, and a uniform gain change moves both.
+        #: The spread across responders (0.3-9 extra spikes in the shipped model): a
+        #: uniform gain change would move both ends, where the excess is in the tail.
         "extra_spikes_sd": (float((post - pre)[:, resp].mean(axis=0).std())
                             if resp.any() else nan),
         "extra_spikes_p90": (float(np.percentile((post - pre)[:, resp].mean(axis=0), 90))
@@ -312,7 +300,7 @@ def format_responders(r: dict) -> str:
     pk = t["responder_peak_change_hz"]
     dur_m, dur_sd = t["response_duration_ms"]
     pl_lo, pl_hi = t["responder_peak_latency_ms"]
-    dur = dur_m / 1000.0
+    xs_lo, xs_hi = t["extra_spikes_per_burst"]
     return "\n".join([
         f"DAF response, {r['burst_ms']:.0f} ms burst, {r['window_ms']} ms windows, "
         f"{r['n_trials']} trials (Mandelblat-Cerf 2014):",
@@ -334,15 +322,11 @@ def format_responders(r: dict) -> str:
         f"paper ~{pl_lo:.0f}-{pl_hi:.0f} ms (Fig 8E, read off the panel)",
         f"  late (100-150ms) / peak   {r['late_over_peak']:7.3f}         "
         f"paper < {t['responder_late_over_peak_max']:.2f} (Fig 8E: a transient, not a step)",
-        # The window mean and the peak are different quantities, so the paper's peak is
-        # converted here rather than printed beside a mean as if they matched. A 20 Hz
-        # peak lasting 90 +/- 43 ms is 1.8 extra spikes if the response is rectangular,
-        # 0.9 if triangular -- the honest range given the paper reports no shape.
         f"  extra spikes  p90 {r['extra_spikes_p90']:6.2f}  max {r['extra_spikes_max']:6.2f}"
         f"   sd {r['extra_spikes_sd']:5.2f}",
         f"  extra spikes/neuron/burst {r['extra_spikes_responders']:7.2f}         "
-        f"bird ~0.7-1.1 ({pk:.0f} Hz peak over {1000 * dur:.0f} ms; "
-        f"shape-matched to this model's PSTH, and rise-then-exponential)",
+        f"bird ~{xs_lo:.1f}-{xs_hi:.1f} ({pk:.0f} Hz peak over {dur_m:.0f} ms; "
+        f"no shape reported, so a conversion)",
     ])
 
 
@@ -401,11 +385,8 @@ def format_metrics(m: dict) -> str:
 # ---------------------------------------------------------------------------
 # Stimulus construction
 # ---------------------------------------------------------------------------
-# Defined once, here, and used by BOTH the trainer and the reproduction tests. If the
-# two ever built their stimuli separately they would drift, and the metrics would stop
-# describing the model that was trained.
-
-
+# Defined once, here, and used by the trainer, the CLIs, the tests and the figures, so
+# the metrics always describe the stimuli the model was trained on.
 
 def build_stimuli(
     encoder,
@@ -438,13 +419,10 @@ def build_stimuli(
     sig_train, train_idx = corpus.template()
     rms_train = float(np.sqrt(np.mean(sig_train**2)))
 
-    # The encoder path normalises TWICE, and both have to share one reference or the
-    # level difference does not reach the network:
-    #   encode_signal scales the waveform  -> rms_from=sig_train
+    # The encoder path normalises TWICE, and both have to share one reference (the song)
+    # or the level difference between stimuli does not reach the network:
+    #   encode_signal scales the waveform    -> rms_from=sig_train
     #   acts_to_spikes scales the spike rate -> calibrate_on=acts_train
-    # Fixing only the first restores level in the activations and then flattens it again
-    # at the spike stage: measured, DAF at 5.6x song RMS gives 2.81x the activation
-    # energy but still 15.6 Hz/channel, against 43.4 Hz/channel when both are shared.
     acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=n_ista,
                              T_out_ms=T_rend, rms_from=sig_train)
 

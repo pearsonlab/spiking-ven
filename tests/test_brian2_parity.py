@@ -99,7 +99,7 @@ def test_all_zero_weight_matrices_wire_inactive_synapses():
 
 
 def test_noise_i_reaches_the_i_membrane():
-    """noise_i was once accepted and dropped: the I equation had no noise term at all."""
+    """noise_i must reach the I equation, and zero noise must stay exactly noiseless."""
     voltages = {}
     for amp in (0.0, 0.5):
         brian2.start_scope()
@@ -117,8 +117,7 @@ def test_same_weights_give_the_same_e_rate_regime_in_both_runtimes(a_sfa):
 
     Not an equality check -- the Brian2 port filters the recurrent couplings through a
     1 ms synaptic decay and integrates in continuous time, so the two differ by
-    construction. Run with the shipped refractory period and adaptation, which the
-    Brian2 port once lacked entirely.
+    construction. Run with the shipped refractory period and adaptation.
     """
     rng = np.random.default_rng(0)
     n_e, n_i, n_aud, n_hvc, T = 60, 15, 12, 6, 400

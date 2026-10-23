@@ -101,33 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
                    help="auditory spike-rate calibration (Schneider & Woolley 2013)")
     p.add_argument("--n-ista", type=int, default=N_ISTA)
-    # Firing-rate adaptation on E -- the single most effective lever on response
-    # magnitude, and the only one tried that is not the wrong SHAPE.
-    #
-    # tau_sfa must stay SHORTER than the 50 ms DAF burst: at 100 ms it integrates over the
-    # motif and acts as a tonic gain change (it cut the baseline 59% while barely moving
-    # the peak), where at 10 ms it builds and recovers within the burst.
-    #
-    # a_sfa swept at tau=10 ms, with the bird in the last row:
-    #       a_sfa   spikes   peak Hz   latency   duration   eff. width
-    #         0.3     2.89      87.6    34.5 ms    57.1 ms     33.0 ms
-    #         0.6     2.11      61.5    35.0 ms    55.3 ms     34.3 ms
-    #         1.0     1.61      46.9    33.9 ms    52.3 ms     34.3 ms
-    #         2.0     1.18      31.5    38.0 ms    43.1 ms     37.5 ms
-    #        bird  0.78-1.01     ~20   23 +/- 12  90 +/- 43      ~45 ms
-    #
-    # 1.0 is the strongest setting that keeps every other metric inside the bird's range.
-    # 2.0 gets the spike count essentially matched but puts latency past 23+12 and
-    # duration below 90-43.
-    #
-    # Note the effective width (spikes/peak) RISES with adaptation, 33.0 -> 37.5 ms,
-    # toward the bird's ~45. That contradicts the expectation that adaptation would narrow
-    # the response: it suppresses the peak more than the tail. The duration column falls
-    # over the same sweep, but duration is a z-test against pre-stimulus variability, so a
-    # weaker response is detectable for less time -- some of that decline is the measure,
-    # not the response.
-    p.add_argument("--a-sfa", type=float, default=A_SFA)
-    p.add_argument("--tau-sfa", type=float, default=TAU_SFA)
+    # Spike-frequency adaptation on E; the sweep behind A_SFA is in docs/design-notes.md.
+    p.add_argument("--a-sfa", type=float, default=A_SFA,
+                   help="adaptation increment per E spike (units of theta_e)")
+    p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
+                   help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
     return p
 
 

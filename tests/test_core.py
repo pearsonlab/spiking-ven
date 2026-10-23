@@ -14,8 +14,8 @@ import spiking_ven as sv
 
 
 def test_version_matches_package_metadata():
-    """pyproject reads the version from __version__; v0.5.0 shipped with the two set by
-    hand and disagreeing (0.4.0 vs 0.5.0), so pip and uv reported the wrong release."""
+    """pyproject reads the version from __version__, so the installed metadata and the
+    package must agree."""
     from importlib.metadata import version
 
     assert sv.__version__ == version("spiking-ven")
@@ -58,7 +58,7 @@ def test_centre_frequencies_are_ordered_and_in_band():
 
 
 def test_hvc_spikes_reject_a_too_short_window():
-    """Bursts past the end of T were silently dropped, leaving the drive to stop."""
+    """A T too short for the requested renditions must fail, not drop the tail bursts."""
     with pytest.raises(ValueError, match="too short"):
         sv.generate_hvc_spikes(n_hvc=4, T=100, n_renditions=2, T_song=300,
                                T_burn=50, T_post=50)
@@ -77,13 +77,8 @@ def test_hvc_spikes_are_binary_and_seed_deterministic():
 
 
 def test_every_subpackage_is_importable():
-    """Guard against a subpackage being missing from the distribution.
-
-    `src/spiking_ven/data/` was once absent from the repo entirely: the .gitignore had an
-    unanchored `data/` rule, intended for the raw song corpus, which also matched the
-    subpackage. Imports and unit tests still passed, so only a CI run that actually
-    invoked the data CLI caught it. This test would have caught it immediately.
-    """
+    """Guard against a subpackage being missing from the distribution -- for example
+    ignored by an over-broad .gitignore rule, which other unit tests would not notice."""
     import importlib
 
     for name in (
@@ -124,7 +119,7 @@ def test_figures_subpackage_is_importable():
 
 
 def test_importing_the_figures_does_not_create_directories(tmp_path):
-    """Both figure modules ran os.makedirs("outputs") at import, in the process CWD."""
+    """Importing a figure module must not create outputs/ in the working directory."""
     pytest.importorskip("matplotlib", reason="requires the 'plots' extra")
     out = subprocess.run(
         [sys.executable, "-c",

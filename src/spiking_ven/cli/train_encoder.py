@@ -86,8 +86,6 @@ def main(argv: list[str] | None = None) -> None:
     }
 
     print("Loading motifs...")
-    # Via load_corpus, not a hand-rolled np.load: trimming to each rendition's valid
-    # length and rounding T_song are corpus.py's job, in one place.
     corpus = load_corpus(motifs_path)
     print(f"  {corpus.n_motifs} motifs  T_song={corpus.T_song} ms")
 
@@ -111,9 +109,8 @@ def main(argv: list[str] | None = None) -> None:
         V_kept, kept = prune_silent(V, cochs, args.lam,
                                     n_iter=args.n_ista)
         if len(kept) == 0:
-            # Degenerate, and only reachable on a corpus too small or a run too short for
-            # any filter to win a competition. Writing an encoder with no filters would
-            # fail far downstream, where the cause is no longer visible.
+            # Only on a corpus too small or a run too short for any filter to win. An
+            # encoder with no filters would fail far downstream, so keep them all.
             print(f"  WARNING: no filter fired; keeping all {args.n_bases} unpruned")
         else:
             V = V_kept

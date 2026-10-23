@@ -2,10 +2,9 @@
 
 The property that matters is causality -- an activation at time t must not depend on
 anything at or after t -- and it is not visible in any summary statistic, so it is
-pinned here by truncation: cutting the signal after t must leave S[:, :t] bit-identical.
-A non-causal solver fails this while still producing a plausible-looking code, which is
-how an earlier convolutional encoder reported a response peaking 2 ms BEFORE its
-stimulus.
+pinned here by truncation and by perturbation: changing the signal from t on must leave
+every earlier activation unchanged. A non-causal solver fails this while still producing
+a plausible-looking code.
 """
 
 import numpy as np
@@ -50,19 +49,11 @@ def test_past_windows_exclude_the_present(toy):
 def test_inference_is_causal_under_truncation(toy):
     """Cut the signal at t; every earlier activation must be unchanged.
 
-    Compared to a tolerance, not bit-exactly. ``infer`` builds its drive with
-    ``_past_windows(X, L) @ W.T``, a matmul whose FIRST dimension is T, so truncating the
-    signal changes the matrix shape; BLAS may then partition the same dot product
-    differently and round it differently. Everything after that is a deterministic,
-    continuous function of the drive -- ISTA's soft-threshold is Lipschitz, so it cannot
-    turn a rounding difference into a large one -- which is why a tolerance is safe here.
-
-    Bit-exactness held on macOS/Accelerate at every thread count but failed
-    intermittently on Linux CI, on commits that did not touch this file.
-
-    1e-9 is ~7 orders of magnitude above double rounding and ~8 below a real leak: when a
-    genuinely non-causal solver was tested this way, truncation moved earlier
-    coefficients by up to 0.549.
+    Compared to a tolerance, not bit-exactly: truncating the signal changes the shape of
+    the drive matmul, and BLAS may round the same dot product differently. ISTA's
+    soft-threshold is Lipschitz, so it cannot turn a rounding difference into a large
+    one. 1e-9 sits many orders of magnitude above double rounding and far below a real
+    leak.
     """
     V, X, _, _, _ = toy
     S_full = infer(X, V, lam=0.05)
@@ -121,8 +112,8 @@ def test_min_phase_preserves_magnitude_and_advances_energy(toy):
     a = np.abs(np.fft.rfft(V[:, :, ::-1], 2048, axis=2))
     b = np.abs(np.fft.rfft(M[:, :, ::-1], 2048, axis=2))
     # Exact preservation is unreachable: the minimum-phase counterpart of a finite
-    # kernel is IIR and is truncated back to L frames. 1% pins the default n_fft, which
-    # was 7.7% off at L=16 before it was raised.
+    # kernel is IIR and is truncated back to L frames. 1% pins a sufficiently large
+    # default n_fft.
     assert np.abs(a - b).max() / a.max() < 0.01
 
     def centroid(A):

@@ -6,12 +6,8 @@ below has its own tests, and duplicating them here would make the suite slow and
 not catch the kind of bug this layer actually has.
 
 The defaults tests assert WIRING, not values: that each flag reads the shared constant
-rather than restating a number. Restating the number here would be worse than redundant --
-it would make the test tautological the moment the constant moved, and it would put a
-second copy of the operating point in the repository, which is the exact failure these
-CLIs exist to prevent. A sweep once built the network from library defaults rather than
-the trained point, because the real parameters lived only in a scratch script, and four
-grid points came back identical and broken before anyone noticed.
+rather than restating a number. Restating it would put a second copy of the operating
+point in the repository, which is the drift these CLIs exist to prevent.
 
 What catches a WRONG value is not here but in test_reproduction_causal.py, which runs the
 model and checks the DAF metrics against the bird. Change B_SCALE and that fails with a
@@ -97,8 +93,8 @@ def test_seed_default_is_shared(mod):
     ids=lambda m: m.__name__.rsplit(".", 1)[-1],
 )
 def test_mean_rate_tracks_the_constant(mod):
-    """Hardcoding this is the bug --mean-rate-hz was added to fix: a figure rendered at a
-    different rate than its model was trained at encodes a different stimulus."""
+    """A figure rendered at a different rate than its model was trained at encodes a
+    different stimulus, so every consumer must default to the same constant."""
     assert mod.build_parser().parse_args([]).mean_rate_hz == AUD_MEAN_RATE_HZ
 
 

@@ -56,28 +56,16 @@ def _sim_loop_v2(
     _zero_hvc = np.zeros(h_hvc.shape[0])
 
     # Absolute refractory period, in 1 ms steps. Without it a cell can fire on every
-    # consecutive bin whenever (1 - decay) * u clears threshold from v_reset, so the
-    # ceiling is 1000 Hz. It was being reached: during a DAF burst the median E ISI was
-    # 1 ms, with 73% of burst spikes following the previous one in the very next bin. The
-    # baseline was unaffected (median ISI 31 ms), which is what makes this the right
-    # constraint rather than a knob -- it clips only what is firing impossibly fast.
+    # consecutive bin (a 1000 Hz ceiling), which strong DAF drive reaches; the baseline
+    # fires far slower, so the constraint clips only what is firing impossibly fast.
     refr_e = np.zeros(n_e)
     refr_i = np.zeros(n_i)
 
     # Spike-frequency adaptation on E: a per-neuron hyperpolarising current that steps up
-    # by ``a_sfa`` on every spike and decays with ``tau_sfa``. Chosen over any further
-    # reduction of the auditory drive because the two are not interchangeable. Extra
-    # spikes per burst turned out to depend only on the PRODUCT of auditory rate and
-    # B_scale, as drive^0.36 -- two runs at drive 149 and 161 gave 9.04 and 9.36 spikes
-    # despite a 4x difference in rate and a 4.4x difference in weight -- so reaching the
-    # bird's ~1-2 spikes that way needs an auditory rate near 0.3 Hz, an order of
-    # magnitude under the 2.4 +/- 2.7 Hz Schneider & Woolley measured.
-    #
-    # More to the point, a gain change is the wrong SHAPE. Per responder the model already
-    # spans 1.1 to 19.9 extra spikes: the weak end is inside the bird's range and only the
-    # tail is wrong. Scaling the drive moves both. Adaptation is activity-dependent, so it
-    # bites hardest on exactly the cells firing most and barely touches a cell adding one
-    # spike.
+    # by ``a_sfa`` on every spike and decays with ``tau_sfa``. It limits the DAF response
+    # where weakening the auditory drive cannot: adaptation bites hardest on the cells
+    # firing most and barely touches a cell adding one spike, whereas a weaker drive
+    # scales every cell alike. See docs/design-notes.md.
     w_sfa = np.zeros(n_e)
     decay_sfa = float(np.exp(-1.0 / tau_sfa)) if tau_sfa > 0.0 else 0.0
 
@@ -94,8 +82,7 @@ def _sim_loop_v2(
         if noise_e > 0.0:
             u_e += rng.normal(0.0, noise_e, n_e)
         # Countdown is decremented BEFORE the spike test, so a cell with t_refr_ms = 2
-        # may fire again 2 ms later, not 3. Testing first and decrementing after costs an
-        # extra millisecond and would silently make the refractory period t_refr_ms + 1.
+        # may fire again 2 ms later, not 3.
         if t_refr_ms > 0.0:
             refr_e = np.maximum(refr_e - 1.0, 0.0)
         V_e = decay_e * V_e + (1.0 - decay_e) * u_e
@@ -163,11 +150,9 @@ class VocalErrorNetV2:
                    and hvc_spikes -- so it is the EPSC time course of the aud->E and
                    HVC->I synapses, not a free smoothing parameter.
 
-                   It is NOT the STDP trace constant. It used to double as one, which
-                   tied the coincidence window to the synaptic one; set ``tau_stdp`` to
-                   pin the STDP window independently. One coupling survives that split:
-                   the LTP audio gate is ``B @ h_aud > 0``, so shortening tau_s still
-                   narrows the window in which LTP can occur.
+                   It is NOT the STDP trace constant: ``tau_stdp`` sets that window. One
+                   coupling remains: the LTP audio gate is ``B @ h_aud > 0``, so
+                   shortening tau_s still narrows the window in which LTP can occur.
     A_jie        : causal Hebbian STDP amplitude for JIE (I→E)
     J_max_ie     : hard upper bound on JIE weights
     c_B          : auditory→E connection probability
@@ -237,12 +222,12 @@ class VocalErrorNetV2:
         self.B_hvc_scale   = B_hvc_scale
         self.c_JEI         = c_JEI
         #: Absolute refractory period (ms). 2 ms is the standard cortical value and caps
-        #: the instantaneous rate at 500 Hz. Set to 0 to recover the old unbounded
-        #: dynamics, which allowed 1000 Hz.
+        #: the instantaneous rate at 500 Hz; 0 disables it (ceiling 1000 Hz).
         self.t_refr_ms     = float(t_refr_ms)
         #: Spike-frequency adaptation: increment per spike and decay constant (ms).
-        #: ``a_sfa`` is in the same units as ``theta_e`` (~0.044), so an increment of
-        #: 0.01 means ~4 spikes in quick succession suffice to silence a cell.
+        #: ``a_sfa`` is in the same units as ``theta_e`` (~0.044) and ``drive_e``; the
+        #: shipped 1.0 is ~23x the threshold, so one spike holds a cell silent for
+        #: several ``tau_sfa`` unless its auditory input is strong.
         self.a_sfa         = float(a_sfa)
         self.tau_sfa       = float(tau_sfa)
         self.r_i_th        = r_i_th
@@ -278,17 +263,15 @@ class VocalErrorNetV2:
         # get trained (via STDP in fit()), leaving novel-E rows at zero.
         self.JIE = np.zeros((n_e, n_i), dtype=np.float32)
 
-        # E threshold, per neuron.
-        # Effective steady-state input is drive_e (tonic), not target_rate * tau_s —
-        # tau_s is the STDP trace constant and must not appear in the membrane threshold.
+        # E threshold, per neuron, set so the tonic drive alone fires at target_rate.
         _decay_e  = float(np.exp(-1.0 / tau_e))
         _isi_e    = 1.0 / target_rate
         _theta_e0 = float(max(drive_e * (1.0 - _decay_e ** _isi_e), 1e-3))
         self.theta_e = np.full(n_e, _theta_e0, dtype=np.float64)
 
-        # I threshold: use a fixed tau_s reference of 10 ms so theta_i stays at the
-        # calibrated value regardless of the STDP trace tau_s.  theta_i >> drive_i
-        # ensures I only fires when HVC drives it, not from tonic E feedback alone.
+        # I threshold, from a fixed 10 ms reference so it does not move with tau_s.
+        # theta_i >> drive_i, so I fires only when HVC drives it, not from tonic E
+        # feedback alone.
         _TAU_S_REF = 10.0
         _decay_i   = float(np.exp(-1.0 / tau_i))
         _isi_i     = 1.0 / target_rate_i
@@ -353,11 +336,9 @@ class VocalErrorNetV2:
             "target_rate", "target_rate_i",
             "tau_stdp", "theta_i", "t_refr_ms", "a_sfa", "tau_sfa",
         )
-        # Models saved before these knobs were removed carry extra keys; ignoring them
-        # rather than reading them is the point. The missing-key default of 0.0 also does
-        # the right thing for ``t_refr_ms``: a model trained before the refractory period
-        # existed had none, so it reloads with the dynamics it was actually trained under
-        # rather than silently acquiring the new constructor default.
+        # Keys not listed here are ignored. A missing key loads as 0.0, which for
+        # ``t_refr_ms`` means a model saved without a refractory period reloads without
+        # one, as it was trained.
         for k in scalar_keys:
             setattr(obj, k, float(d[k]) if k in d else 0.0)
         obj.aud_delay_ms  = int(d["aud_delay_ms"]) if "aud_delay_ms" in d else 0

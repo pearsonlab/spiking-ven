@@ -67,7 +67,7 @@ projection neurons / E population rate) by three stimulus columns (training song
 time-reversed motif / distorted auditory feedback, i.e. the song with a 50 ms noise
 burst).
 
-The result is in the excitatory rows: the trained song is cancelled (~2 Hz, flat), while
+The result is in the excitatory rows: the trained song is cancelled (~2.6 Hz, flat), while
 the time-reversed motif and the DAF burst still drive the E population -- the burst as a
 sharp transient. The network has learned to cancel the response to the song it hears every
 rendition, while responses to novel or perturbed sound survive as an error signal. The
@@ -77,13 +77,13 @@ figure draws exactly the stimuli the metrics below are computed on.
 
 Definitions follow Mandelblat-Cerf et al. 2014: a 50 ms noise burst during singing, spike
 counts in 150 ms windows either side of onset, compared per neuron across 20 renditions by
-paired t-test, responder at p < 0.02. Latency is an onset -- the first 2 ms bin followed by
-five significant ones -- not a PSTH peak. `tests/test_reproduction_causal.py` pins these
+paired t-test, responder at p < 0.02. Latency is an onset -- the first of five consecutive
+significant 2 ms bins -- not a PSTH peak. `tests/test_reproduction_causal.py` pins these
 against the shipped model; `make test-repro` runs it.
 
 | Metric | Model | Bird |
 |---|---|---|
-| auditory input rate during song | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
+| auditory input rate, per rendition (2.66 Hz during the song itself) | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
 | baseline, all units | 2.53 Hz | 1–10 Hz (Fig. 7C) |
 | responders | 52% | 41% = 7/17, 95% CI 21–64% |
 | response onset latency | 29.6 ms | 23 ± 12 ms |
@@ -98,7 +98,8 @@ else is inside the bird's range. Stated in spikes rather than Hz because a count
 assumption about binning: the bird's responder adds about one spike on hearing the
 distortion, on a baseline under one spike in the same window. (Converting the paper's
 ~20 Hz peak over a 90 ± 43 ms duration into a count needs an assumed shape, since none is
-reported; triangular and rise-then-exponential shapes both give ~0.9–1.05 spikes.)
+reported; triangular and rise-then-exponential shapes both give ~0.8–1.0 spikes, a
+rectangle 1.8.)
 
 `baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
 by a paired t-test for post > pre, which preferentially picks neurons quiet in the

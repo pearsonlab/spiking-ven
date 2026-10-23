@@ -6,8 +6,8 @@ Architecture
 - E neurons        →  JEI (n_i × n_e)                 →  I neurons  [fixed]
 - HVC spikes       (n_hvc, T) →  B_hvc (n_i × n_hvc) →  I neurons  [fixed sparse]
 - I neurons        →  JIE (n_e × n_i)                 →  E neurons  [plastic — causal Hebbian]
-- Optional: an NMDA conductance on the auditory → E synapses (``g_nmda > 0``; off at the
-  shipped operating point). See ``docs/MODEL.md``.
+- Auditory spikes  also drive an NMDA conductance on E (``g_nmda``), through B; see
+  ``docs/MODEL.md``.
 
 Plasticity
 ----------

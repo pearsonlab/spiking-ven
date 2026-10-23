@@ -24,7 +24,7 @@ BIOLOGICAL_TARGETS = {
     #: Compare ``baseline_hz_all`` against this, NEVER ``baseline_hz_responders``.
     #: Responders are selected by a paired t-test for post > pre, which preferentially
     #: picks neurons that happened to be quiet in the pre-window, so their baseline is
-    #: biased low by the selection itself -- measured here ~0.3 Hz against the
+    #: biased low by the selection itself -- measured here ~0.4 Hz against the
     #: population's ~2.6 Hz. The paper applies the same criterion, so the
     #: bias is shared and the responder-vs-responder comparisons stay fair; it just means
     #: the responder baseline is not an estimate of anything's firing rate.

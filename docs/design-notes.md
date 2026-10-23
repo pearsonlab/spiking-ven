@@ -140,13 +140,21 @@ The bird's response is long and weak (~1 extra spike over ~90 ms); the model's i
   auditory spike's drive to an 80 ms exponential, total charge unchanged, gave 68 ms and 1.8 spikes
   at `f = 0.5`, with every other metric inside the bird's range. It was rejected as unprincipled:
   nothing in a real synapse redistributes charge that way.
-- **Standard NMDA (`G_NMDA`, off by default).** Wang (2002) kinetics and Mg2+ block on the
+- **Standard NMDA (`G_NMDA`), adopted.** Wang (2002) kinetics and Mg2+ block on the
   auditory -> E synapses. Duration grows with `g_nmda` (46 -> 59 ms at 40, an NMDA:AMPA charge
   ratio of ~2.2 at threshold), but alone it adds spikes. Shifting drive from the fast weights to
   NMDA helped on every axis but latency: at `g_nmda = 40`, `B_SCALE = 10`, duration 60 ms, extra
   spikes 1.57, peak 35 Hz, latency 34 ms (bound 35), reversed/trained 1.15. The effect is weaker
   than the linear trace's because the Mg2+ block self-limits: once the burst ends and the membrane
-  falls toward reset, the NMDA current shuts off. Larger `g_nmda` is untested.
+  falls toward reset, the NMDA current shuts off.
+- **The adopted point: `G_NMDA = 60`, `B_SCALE = 10`** (with intro notes, 5 seeds). Over
+  `g_nmda` 30 / 40 / 60 at `B_SCALE` 10: durations 56 / 57 / 63 ms, extra spikes 1.56 / 1.59 /
+  1.66, latency 33.9 / 33.8 / 33.2 ms. At `B_SCALE` 12, `g_nmda` 40 / 60 / 80 gave 59 / 64 /
+  66 ms but 1.76 / 1.82 / 1.89 spikes, more than without NMDA. 60 / 10 is the setting that
+  lengthens the response and weakens it. Its NMDA:AMPA charge ratio at threshold, ~3.3, is
+  on the high side; 40 / 10 (~2.2) is the conservative alternative at 57 ms. Ten-seed means
+  at the adopted point: duration 60.6 ms, extra spikes 1.66, peak 35 Hz, latency 33.9 +/- 1.8
+  ms (bound 35), reversed/trained 1.16.
 
 ## Onset of each motif
 

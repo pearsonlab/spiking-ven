@@ -94,7 +94,7 @@ def test_all_zero_weight_matrices_wire_inactive_synapses():
     aud = SpikeGeneratorGroup(w["n_aud"], [], [] * ms)
     hvc = SpikeGeneratorGroup(w["n_hvc"], [], [] * ms)
     syns = build_ven_synapses(groups, w, aud, hvc)
-    assert len(syns) == 4
+    assert len(syns) == 5, "four weight matrices plus the NMDA synapse on B"
     assert all(not bool(s.active) for s in syns), "empty matrices should deactivate"
 
 
@@ -147,3 +147,36 @@ def test_same_weights_give_the_same_e_rate_regime_in_both_runtimes(a_sfa):
         f"E rates in different regimes: numpy={numpy_rate:.1f} Hz "
         f"brian2={brian_rate:.1f} Hz"
     )
+
+
+def _rates_both_runtimes(net, aud_spikes, hvc_spikes, T):
+    numpy_rate = float(net.transform(hvc_spikes, aud_spikes).mean() * 1000)
+    w = net.to_brian_weights()
+    groups = build_ven_groups(w)
+    a_i, a_t = np.nonzero(aud_spikes.T)
+    h_i, h_t = np.nonzero(hvc_spikes.T)
+    aud_g = SpikeGeneratorGroup(aud_spikes.shape[0], a_t.astype(int), a_i.astype(float) * ms)
+    hvc_g = SpikeGeneratorGroup(hvc_spikes.shape[0], h_t.astype(int), h_i.astype(float) * ms)
+    syns = build_ven_synapses(groups, w, aud_g, hvc_g)
+    mon = SpikeMonitor(groups["e_group"])
+    Network(aud_g, hvc_g, groups["e_group"], groups["i_group"], *syns, mon).run(T * ms)
+    return numpy_rate, mon.num_spikes / net.n_e / (T * 1e-3), syns
+
+
+def test_nmda_runs_in_brian2_in_the_same_regime_as_numpy():
+    """The NMDA port: a fifth synapse object, and the same E rate regime as numpy, with
+    NMDA adding firing in both runtimes."""
+    rng = np.random.default_rng(0)
+    n_e, n_i, n_aud, n_hvc, T = 60, 15, 12, 6, 400
+    aud = (rng.random((n_aud, T)) < 0.03).astype(np.float32)
+    hvc = (rng.random((n_hvc, T)) < 0.02).astype(np.float32)
+    out = {}
+    for g in (0.0, 40.0):
+        brian2.start_scope()
+        net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e=0.0,
+                            noise_i=0.0, seed=0, g_nmda=g, B_scale=10.0)
+        out[g] = _rates_both_runtimes(net, aud, hvc, T)
+    (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[40.0]
+    assert len(syns0) == 4 and len(syns1) == 5
+    assert np1 > np0 and br1 > br0, out
+    assert br1 == pytest.approx(np1, rel=0.5), (np1, br1)

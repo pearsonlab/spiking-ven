@@ -51,11 +51,31 @@ __all__ = [
 # other group's noise. Omitting it keeps a noiseless population exactly
 # noiseless and leaves the rest of the network's draws untouched.
 _EQS_VEN_E = """
-dv/dt     = (-v + drive_e_ven + g_aud - g_inh - w_sfa) / tau_e_ven{noise} : 1 (unless refractory)
+dv/dt     = (-v + drive_e_ven + g_aud - g_inh - w_sfa{nmda}) / tau_e_ven{noise} : 1 (unless refractory)
 dg_aud/dt = -g_aud / tau_s_ven : 1
 dg_inh/dt = -g_inh / tau_inh_ven : 1
 dw_sfa/dt = -w_sfa / tau_sfa_ven : 1
 theta     : 1
+{nmda_vars}"""
+
+# NMDA on aud -> E (Wang 2002), present only when g_nmda > 0. ``s_nmda`` is the summed
+# B-weighted gating from the NMDA synapses; the Mg2+ block is evaluated at the potential in
+# mV given by the same map as the numpy model (reset -> e_l_mv, theta -> v_th_mv), and
+# ``e_nmda_u`` is the reversal potential in membrane units.
+_NMDA_TERM = (" + g_nmda_ven * s_nmda * (e_nmda_u - v)"
+              " / (1 + mg_mm_ven * exp(-0.062 * (e_l_mv_ven + v * mv_per_unit)) / 3.57)")
+_NMDA_VARS = """s_nmda    : 1
+mv_per_unit : 1 (constant)
+e_nmda_u  : 1 (constant)
+"""
+
+# Per-synapse NMDA gating. Every synapse from one auditory channel sees the same spikes,
+# so this equals the per-channel gating of the numpy model.
+_EQS_NMDA_SYN = """
+w_syn : 1
+dx_nmda/dt = -x_nmda / tau_nmda_rise : 1 (clock-driven)
+ds_gate/dt = -s_gate / tau_nmda_decay + alpha_nmda * x_nmda * (1 - s_gate) : 1 (clock-driven)
+s_nmda_post = w_syn * s_gate : 1 (summed)
 """
 
 # I neurons: dimensionless LIF. g_hvc filtered at tau_s (spike_to_rate); g_exc fast
@@ -76,15 +96,6 @@ def _eqs(template: str, noise_amp: float, sigma_name: str) -> str:
 # VEN groups
 # ---------------------------------------------------------------------------
 
-def _check_supported(w: dict) -> None:
-    """Refuse a model using a feature this port does not implement."""
-    if float(w.get("g_nmda", 0.0)) > 0.0:
-        raise NotImplementedError(
-            "the NMDA component of aud -> E (g_nmda > 0) is not implemented in the Brian2 "
-            "runtime; the network would run without it"
-        )
-
-
 def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     """Build the E and I LIF NeuronGroups of a trained network.
 
@@ -95,15 +106,17 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     sigma = noise * sqrt(1 ms) / tau. Calibrating to the Brian2 dt instead would give
     10x smaller variance at dt = 0.1 ms and suppress the noise-driven crossings.
     """
-    _check_supported(w)
     DT_NUMPY_S = 1e-3   # VocalErrorNet reference timestep (1 ms)
     sigma_e = w["noise_e"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_e"] * 1e-3)
     sigma_i = w["noise_i"] * float(np.sqrt(DT_NUMPY_S)) / (w["tau_i"] * 1e-3)
     refractory = w["t_refr_ms"] * ms
 
+    nmda = float(w.get("g_nmda", 0.0)) > 0.0
+    eqs_e = _EQS_VEN_E.replace("{nmda}", _NMDA_TERM if nmda else "").replace(
+        "{nmda_vars}", _NMDA_VARS if nmda else "")
     e_group = NeuronGroup(
         w["n_e"],
-        _eqs(_EQS_VEN_E, w["noise_e"], "sigma_e_ven"),
+        _eqs(eqs_e, w["noise_e"], "sigma_e_ven"),
         threshold="v > theta",
         reset="v = v_reset_ven; w_sfa += a_sfa_ven",
         refractory=refractory,
@@ -116,12 +129,18 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
             "drive_e_ven": w["drive_e"],
             "v_reset_ven": w["v_reset"],
             "sigma_e_ven": sigma_e / second**0.5,   # SDE noise amplitude [1/sqrt(s)]
+            **({"g_nmda_ven": w["g_nmda"], "mg_mm_ven": w["mg_mm"],
+                "e_l_mv_ven": w["e_l_mv"]} if nmda else {}),
         },
         method="euler",
         name=f"{name_prefix}_e",
     )
     e_group.v     = 0.0
     e_group.theta = w["theta_e"]
+    if nmda:
+        mv_per_unit = (w["v_th_mv"] - w["e_l_mv"]) / np.asarray(w["theta_e"], dtype=float)
+        e_group.mv_per_unit = mv_per_unit
+        e_group.e_nmda_u = (w["e_nmda_mv"] - w["e_l_mv"]) / mv_per_unit
 
     i_group = NeuronGroup(
         w["n_i"],
@@ -185,7 +204,10 @@ def build_ven_synapses(
     so the trained JIE weights see the same relative timing here that produced them --
     the causal I-before-E STDP window is built on that offset.
 
-    Returns ``[syn_b, syn_b_hvc, syn_jei, syn_jie]``.
+    With ``g_nmda > 0`` the NMDA component of aud→E is a fifth synapse object on the same
+    connections, appended to the list.
+
+    Returns ``[syn_b, syn_b_hvc, syn_jei, syn_jie]`` (plus ``syn_nmda``).
     """
     e_group = groups["e_group"]
     i_group = groups["i_group"]
@@ -197,9 +219,19 @@ def build_ven_synapses(
         return syn
 
     # Use w_syn (not w) to avoid collision with a host model's adaptation variable w.
-    return [
+    syns = [
         _syn(aud_group, e_group, "g_aud", w["B"], w["aud_delay_ms"], "b"),
         _syn(hvc_group, i_group, "g_hvc", w["B_hvc"], w["hvc_delay_ms"], "b_hvc"),
         _syn(e_group, i_group, "g_exc", w["JEI"], 0.0, "jei"),
         _syn(i_group, e_group, "g_inh", w["JIE"], 0.0, "jie"),
     ]
+    if float(w.get("g_nmda", 0.0)) > 0.0:
+        syn = Synapses(aud_group, e_group, _EQS_NMDA_SYN, on_pre="x_nmda += 1",
+                       delay=w["aud_delay_ms"] * ms, method="euler",
+                       namespace={"tau_nmda_rise": w["nmda_tau_rise"] * ms,
+                                  "tau_nmda_decay": w["nmda_tau_decay"] * ms,
+                                  "alpha_nmda": w["nmda_alpha"] / ms},
+                       name=f"{name_prefix}_nmda")
+        _wire(syn, np.asarray(w["B"], dtype=np.float64))
+        syns.append(syn)
+    return syns

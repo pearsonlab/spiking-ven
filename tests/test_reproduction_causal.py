@@ -92,20 +92,20 @@ def test_model_carries_the_operating_point(setup):
 
 def test_daf_response_matches_the_recorded_run(daf):
     # value at seed 42, tolerance ~3 SD over seeds 42-51 (SD in the comment)
-    assert daf["responder_fraction"] == pytest.approx(0.507, abs=0.03)       # 0.010
-    assert daf["baseline_hz_all"] == pytest.approx(2.62, abs=0.15)           # 0.042 Hz
-    assert daf["peak_change_hz"] == pytest.approx(46.9, abs=4.5)             # 1.40 Hz
-    assert daf["latency_ms"] == pytest.approx(31.4, abs=6.5)                 # 2.12 ms
-    assert daf["duration_ms"] == pytest.approx(50.3, abs=8.5)                # 2.88 ms
-    assert daf["extra_spikes_responders"] == pytest.approx(1.77, abs=0.10)   # 0.030
+    assert daf["responder_fraction"] == pytest.approx(0.513, abs=0.03)       # 0.010
+    assert daf["baseline_hz_all"] == pytest.approx(2.64, abs=0.10)           # 0.032 Hz
+    assert daf["peak_change_hz"] == pytest.approx(34.3, abs=3.5)             # 1.17 Hz
+    assert daf["latency_ms"] == pytest.approx(32.5, abs=5.5)                 # 1.80 ms
+    assert daf["duration_ms"] == pytest.approx(64.9, abs=9.0)                # 2.99 ms
+    assert daf["extra_spikes_responders"] == pytest.approx(1.66, abs=0.05)   # 0.013
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.64, abs=0.20)          # 0.060
-    assert daf["extra_spikes_max"] == pytest.approx(9.30, abs=0.60)          # 0.150
-    assert daf["extra_spikes_sd"] == pytest.approx(1.37, abs=0.07)           # 0.023
+    assert daf["extra_spikes_p90"] == pytest.approx(3.22, abs=0.10)          # 0.029
+    assert daf["extra_spikes_max"] == pytest.approx(8.20, abs=0.45)          # 0.148
+    assert daf["extra_spikes_sd"] == pytest.approx(1.19, abs=0.05)           # 0.014
 
 
 def test_biological_targets_that_are_met(daf):
@@ -114,9 +114,9 @@ def test_biological_targets_that_are_met(daf):
     lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
+    # Latency sits near the upper edge (23 + 12 = 35 ms): 32.5 ms at this seed, but
+    # 33.9 +/- 1.8 ms over seeds 42-51, so some seeds would fail this check.
     assert abs(daf["latency_ms"] - lat) <= lat_sd
-    # Duration sits at the lower edge (90 - 43 = 47 ms): 50.3 ms at this seed, but
-    # 45.7 +/- 2.9 ms over seeds 42-51, so other seeds would fail this check.
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
     # 7/17 has a 95% CI of 21-64%, so the responder fraction only has to land inside that.

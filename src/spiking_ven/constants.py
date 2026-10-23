@@ -133,10 +133,12 @@ N_I = 150
 N_HVC = 60
 N_RENDITIONS = 600
 
-#: Auditory -> E. Each E cell connects to each encoder channel with probability ``C_B``,
-#: so it samples only a few channels. The mean weight per connection is
-#: ``B_SCALE / n_aud`` (n_aud = the encoder's channel count).
-B_SCALE = 16.0
+#: Auditory -> E, fast (AMPA-like) component. Each E cell connects to each encoder channel
+#: with probability ``C_B``, so it samples only a few channels. The mean weight per
+#: connection is ``B_SCALE / n_aud`` (n_aud = the encoder's channel count). Set together
+#: with ``G_NMDA``: the slow NMDA component carries part of the drive, so the fast weights
+#: are lower (16 without NMDA).
+B_SCALE = 10.0
 C_B = 0.05
 
 #: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
@@ -157,13 +159,16 @@ TAU_E = 30.0
 TAU_I = 10.0
 
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
-#: Wang (2001). Off by default (``G_NMDA = 0``). It uses the same connections as the fast
-#: weights ``B``; ``G_NMDA`` is its conductance relative to them, in units of the leak.
+#: Wang (2001). It uses the same connections as the fast weights ``B``; ``G_NMDA`` is its
+#: conductance relative to them, in units of the leak. At 60 it carries ~3.3x the fast
+#: component's charge per isolated spike at threshold (less at rest, where Mg2+ blocks it).
+#: Chosen with ``B_SCALE`` to lengthen and weaken the DAF response (docs/design-notes.md);
+#: 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
 #: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
 #: Current: G_NMDA (B s) B(V) (E_NMDA - V).
-G_NMDA = 0.0
+G_NMDA = 60.0
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5

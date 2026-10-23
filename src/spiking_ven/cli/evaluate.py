@@ -1,8 +1,11 @@
 """``sven-evaluate`` -- recompute the error metrics for a saved model.
 
-Loads a trained network and re-derives the Mandelblat-Cerf metrics (K1, K4 and the DAF
-response) without retraining. Fully seeded: the same model file and seed give the same
-numbers every time.
+Loads a trained network and re-derives the Mandelblat-Cerf metrics (the E rate per
+rendition for the trained and the reversed song, and the DAF response) without
+retraining. Fully seeded: the same model file and seed give the same numbers every time.
+
+The stimuli are rebuilt with the settings the model recorded at training time; a
+stimulus flag given explicitly overrides that, with a warning if it disagrees.
 
 Expect them to differ slightly from the metrics printed at the end of training: those are
 computed with the simulation noise stream already advanced by hundreds of renditions,
@@ -16,16 +19,15 @@ import argparse
 import json
 
 from ..causal_filters import CausalFilterEncoder
-from ..constants import AUD_MEAN_RATE_HZ, N_HVC, N_ISTA, SR, T_BURN, T_POST
-from ..evaluate import (
-    build_stimuli,
-    daf_metrics,
+from ..metrics import (
     daf_response,
-    format_metrics,
+    format_rendition_rates,
     format_responders,
+    rendition_rates,
 )
 from ..paths import encoder_npz, motifs_npz, ven_model_npz
-from ..vocal_error_net import VocalErrorNetV2
+from ..vocal_error_net import VocalErrorNet
+from ._stimulus_args import add_stimulus_flags, stimuli_for_model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,13 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="trained VEN .npz")
     p.add_argument("--encoder", default=None, help="trained causal filter bank .npz")
     p.add_argument("--motifs", default=None, help="motifs .npz")
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--sr", type=int, default=SR)
-    p.add_argument("--n-hvc", type=int, default=N_HVC)
-    p.add_argument("--t-post", type=int, default=T_POST)
-    p.add_argument("--t-burn", type=int, default=T_BURN)
-    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ)
-    p.add_argument("--n-ista", type=int, default=N_ISTA)
+    p.add_argument("--seed", type=int, default=42,
+                   help="seed for the simulation noise and the DAF trials")
+    add_stimulus_flags(p)
     p.add_argument("--n-trials", type=int, default=20,
                    help="renditions with independent noise draws for the DAF response")
     p.add_argument("--json", action="store_true", help="emit the metrics as JSON")
@@ -58,20 +56,17 @@ def main(argv: list[str] | None = None) -> None:
         print(f"encoder: {enc_path}")
 
     encoder = CausalFilterEncoder.load(enc_path)
-    ven = VocalErrorNetV2.load(model_path, seed=args.seed)
-    st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
-                       t_post=args.t_post,
-                       t_burn=args.t_burn, n_hvc=args.n_hvc,
-                       mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista,
-                       verbose=not args.json)
+    ven = VocalErrorNet.load(model_path, seed=args.seed)
+    st = stimuli_for_model(ven, encoder, args, encoder_path=enc_path,
+                           motifs_path=motifs_path, verbose=not args.json)
 
-    m = daf_metrics(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
-                    aud_correct=st["aud_correct"], aud_daf=st["aud_daf"],
-                    aud_reversed=st["aud_reversed"])
+    m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
+                        aud_trained=st["aud_correct"], aud_daf=st["aud_daf"],
+                        aud_reversed=st["aud_reversed"])
 
     # The DAF number that means something: a windowed, per-neuron responder measurement
     # rather than an excitatory rate averaged over a whole rendition, which cannot see a
-    # 50 ms burst.
+    # brief burst.
     r = daf_response(ven, encoder, st, n_trials=args.n_trials, seed=args.seed)
 
     if args.json:
@@ -79,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
                           "train_idx": st["train_idx"], "model": model_path}, indent=2))
     else:
         print()
-        print(format_metrics(m))
+        print(format_rendition_rates(m))
         print()
         print(format_responders(r))
         print(f"\n  encoder forward/reversed correlation: {st['fwd_rev_corr']:.4f}")

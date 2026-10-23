@@ -16,6 +16,10 @@ example units' kernels over their spikes to every motif in the corpus, and
 spectrogram, gammatone filters, cochleagram and spike output. ``filters``, ``units`` and
 ``gammatone`` need no VEN model, so they can be drawn before a network has been trained.
 
+The ``raster`` and ``psth`` views rebuild the stimuli with the settings the model recorded
+at training time; a stimulus flag given explicitly overrides that, with a warning if it
+disagrees. The other views have no model, so the flags fall back to the constants.
+
 Requires the ``plots`` extra (matplotlib).
 """
 
@@ -26,10 +30,10 @@ import re
 from pathlib import Path
 
 from ..causal_filters import CausalFilterEncoder
-from ..constants import AUD_MEAN_RATE_HZ, SR, T_POST
-from ..evaluate import build_stimuli
+from ..constants import AUD_MEAN_RATE_HZ, N_ISTA, SR, T_POST
 from ..paths import encoder_npz, motifs_npz, output_dir, ven_model_npz
-from ..vocal_error_net import VocalErrorNetV2
+from ..vocal_error_net import VocalErrorNet
+from ._stimulus_args import add_stimulus_flags, stimuli_for_model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,13 +56,23 @@ def build_parser() -> argparse.ArgumentParser:
                    help="unit indices for --view units (default: the most reliable unit "
                         "in each third of the peak-frequency range)")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--sr", type=int, default=SR)
-    p.add_argument("--t-post", type=int, default=T_POST)
-    p.add_argument("--mean-rate-hz", type=float, default=AUD_MEAN_RATE_HZ,
-                   help="auditory spike-rate calibration; MUST match what the model was "
-                        "trained with, or the figure encodes a different stimulus than "
-                        "the metrics beside it")
+    add_stimulus_flags(p)
     return p
+
+
+def _or(value, default):
+    return default if value is None else value
+
+
+def _corpus_sr(motifs_path, sr):
+    """The corpus's sample rate, checked against an explicit ``sr``."""
+    from ..corpus import load_corpus
+
+    corpus_sr = int(load_corpus(motifs_path).sr)
+    if sr is not None and int(sr) != corpus_sr:
+        raise ValueError(f"--sr {sr} does not match the corpus's {corpus_sr} Hz "
+                         f"({motifs_path})")
+    return corpus_sr
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -67,21 +81,25 @@ def main(argv: list[str] | None = None) -> None:
     motifs_path = args.motifs or str(motifs_npz())
     out_dir = args.out_dir or str(output_dir())
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    enc = CausalFilterEncoder.load(args.encoder or str(encoder_npz()))
+    enc_path = args.encoder or str(encoder_npz())
+    enc = CausalFilterEncoder.load(enc_path)
 
     if args.view == "filters":
         from ..figures.causal_filters import make_filter_figures
 
-        for path in make_filter_figures(enc, out_dir, sr=args.sr):
+        for path in make_filter_figures(enc, out_dir, sr=_or(args.sr, SR)):
             print(f"  wrote {path}")
         return
 
     if args.view == "units":
         from ..figures.unit_strfs import make_unit_figure
 
-        paths, units = make_unit_figure(enc, motifs_path, out_dir, units=args.units,
-                                        sr=args.sr, seed=args.seed, t_post=args.t_post,
-                                        mean_rate_hz=args.mean_rate_hz)
+        paths, units = make_unit_figure(
+            enc, motifs_path, out_dir, units=args.units,
+            sr=_corpus_sr(motifs_path, args.sr), seed=_or(args.stimulus_seed, args.seed),
+            t_post=_or(args.t_post, T_POST),
+            mean_rate_hz=_or(args.mean_rate_hz, AUD_MEAN_RATE_HZ),
+            n_ista=_or(args.n_ista, N_ISTA))
         print(f"  units {units}")
         for path in paths:
             print(f"  wrote {path}")
@@ -91,16 +109,20 @@ def main(argv: list[str] | None = None) -> None:
         from ..corpus import load_corpus
         from ..figures.gammatone import make_gammatone_figure
 
-        for path in make_gammatone_figure(enc, load_corpus(motifs_path), out_dir,
-                                          seed=args.seed, mean_rate_hz=args.mean_rate_hz):
+        _corpus_sr(motifs_path, args.sr)
+        for path in make_gammatone_figure(
+                enc, load_corpus(motifs_path), out_dir,
+                seed=_or(args.stimulus_seed, args.seed),
+                mean_rate_hz=_or(args.mean_rate_hz, AUD_MEAN_RATE_HZ),
+                n_ista=_or(args.n_ista, N_ISTA)):
             print(f"  wrote {path}")
         return
 
     print(f"Loading model: {model_path}")
     # Pin the seed so the rendered figure is reproducible, not just the training.
-    ven = VocalErrorNetV2.load(model_path, seed=args.seed)
-    st = build_stimuli(enc, motifs_path, sr=args.sr, seed=args.seed, t_post=args.t_post,
-                       mean_rate_hz=args.mean_rate_hz, verbose=False)
+    ven = VocalErrorNet.load(model_path, seed=args.seed)
+    st = stimuli_for_model(ven, enc, args, encoder_path=enc_path, motifs_path=motifs_path,
+                           verbose=False)
     print(f"T_song={st['T_song']} ms  train_motif={st['train_idx']}  "
           f"delays: aud={ven.aud_delay_ms} ms  hvc={ven.hvc_delay_ms} ms")
 

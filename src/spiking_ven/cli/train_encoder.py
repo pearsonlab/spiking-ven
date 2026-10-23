@@ -23,13 +23,19 @@ from ..cochleagram import cochleagram
 from ..constants import (
     AUD_MEAN_RATE_HZ,
     CAUSAL_EPOCHS,
+    CAUSAL_FRAME_RATE,
+    CAUSAL_HI_HZ,
+    CAUSAL_K_FRAMES,
     CAUSAL_L1,
     CAUSAL_LAMBDA,
+    CAUSAL_LO_HZ,
     CAUSAL_LR,
     CAUSAL_MP_STRENGTH,
+    CAUSAL_N_BASES,
+    CAUSAL_N_COCH_CH,
     CAUSAL_N_ISTA,
+    CAUSAL_RMS_REF,
     CAUSAL_SMOOTH,
-    SR,
 )
 from ..corpus import load_corpus
 from ..causal_filters import CausalFilterEncoder, causal_meansub, prune_silent
@@ -45,15 +51,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, help="output encoder .npz")
     p.add_argument("--seed", type=int, default=42)
     # cochleagram front-end
-    p.add_argument("--sr", type=int, default=SR)
-    p.add_argument("--n-coch-ch", type=int, default=40, help="cochleagram frequency channels")
-    p.add_argument("--frame-rate", type=int, default=500, help="Hz (500 -> 2 ms per frame)")
-    p.add_argument("--lo-hz", type=float, default=200.0)
-    p.add_argument("--hi-hz", type=float, default=8000.0)
-    p.add_argument("--k-frames", type=int, default=16, help="context window (16 x 2 ms = 32 ms)")
-    p.add_argument("--rms-ref", type=float, default=0.1, help="RMS normalisation before cochleagram")
+    p.add_argument("--sr", type=int, default=None,
+                   help="corpus sample rate (Hz); must match the corpus. "
+                        "Default: the corpus's own rate")
+    p.add_argument("--n-coch-ch", type=int, default=CAUSAL_N_COCH_CH,
+                   help="cochleagram frequency channels")
+    p.add_argument("--frame-rate", type=int, default=CAUSAL_FRAME_RATE,
+                   help="Hz (500 -> 2 ms per frame)")
+    p.add_argument("--lo-hz", type=float, default=CAUSAL_LO_HZ)
+    p.add_argument("--hi-hz", type=float, default=CAUSAL_HI_HZ)
+    p.add_argument("--k-frames", type=int, default=CAUSAL_K_FRAMES,
+                   help="context window in frames (16 x 2 ms = 32 ms)")
+    p.add_argument("--rms-ref", type=float, default=CAUSAL_RMS_REF,
+                   help="RMS normalisation before cochleagram")
     # dictionary learning
-    p.add_argument("--n-bases", type=int, default=64)
+    p.add_argument("--n-bases", type=int, default=CAUSAL_N_BASES)
     p.add_argument("--epochs", type=int, default=CAUSAL_EPOCHS)
     p.add_argument("--lambda", dest="lam", type=float, default=CAUSAL_LAMBDA,
                    help="code sparsity; also sets how many filters survive")
@@ -87,13 +99,16 @@ def main(argv: list[str] | None = None) -> None:
 
     print("Loading motifs...")
     corpus = load_corpus(motifs_path)
-    print(f"  {corpus.n_motifs} motifs  T_song={corpus.T_song} ms")
+    sr = int(corpus.sr)
+    if args.sr is not None and args.sr != sr:
+        raise ValueError(f"--sr {args.sr} does not match the corpus's {sr} Hz ({motifs_path})")
+    print(f"  {corpus.n_motifs} motifs  T_song={corpus.T_song} ms  sr={sr} Hz")
 
     print("\nComputing cochleagrams...")
     all_cochs = []
     for sig in corpus.signals():
         sig = sig / max(float(np.sqrt(np.mean(sig**2))), 1e-12) * args.rms_ref
-        all_cochs.append(cochleagram(sig, args.sr, n_channels=args.n_coch_ch,
+        all_cochs.append(cochleagram(sig, sr, n_channels=args.n_coch_ch,
                                      frame_rate=args.frame_rate,
                                      lo_hz=args.lo_hz, hi_hz=args.hi_hz))
 
@@ -124,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  kernel energy centroid {cen.mean():.1f}/{args.k_frames} "
           f"(sd {cen.std():.1f}); newest 4 frames hold "
           f"{E[:, -4:].sum(axis=1).mean():.3f} of the energy")
-    act0 = enc.encode_signal(corpus.signal(0), sr=args.sr, n_ista=args.n_ista)
+    act0 = enc.encode_signal(corpus.signal(0), sr=sr, n_ista=args.n_ista)
     spk = acts_to_spikes(act0, mean_rate_hz=AUD_MEAN_RATE_HZ,
                        frame_rate=args.frame_rate, seed=args.seed + 200)
     print(f"  active fraction (motif 0): {(act0 != 0).mean() * 100:.1f}%"

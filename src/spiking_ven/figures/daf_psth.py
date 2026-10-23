@@ -1,7 +1,7 @@
 """Responder-averaged DAF PSTH, against what Figure 8E of the paper shows.
 
 The raster figure shows that a DAF response exists; it does not show its time course,
-which is what the shape assertions in ``evaluate.daf_response`` are about. This draws it.
+which is what the shape assertions in ``metrics.daf_response`` are about. This draws it.
 
 Mandelblat-Cerf et al. 2014 Fig. 8E is NOT reproduced here. Their data is not in this
 repository, so the panel would have to be invented. What is drawn instead are the three
@@ -22,29 +22,25 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from ..constants import DAF_WINDOW_S  # noqa: E402
-from ..evaluate import (  # noqa: E402
-    BIOLOGICAL_TARGETS,
-    PEAK_BIN_MS,
-    daf_responders,
-    daf_trials,
-)
+from ..metrics import daf_responders, daf_trials  # noqa: E402
+from ..stimuli import daf_window_ms  # noqa: E402
+from ..targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS  # noqa: E402
 
 __all__ = ["make_psth_figure"]
 
 
 def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=400,
                      n_trials=20, seed=42):
-    # Stay inside the motif. The burst is at DAF_WINDOW_S[0]; running past T_song reaches
-    # song offset, where HVC drive stops and E is released from inhibition -- a large
-    # rise that has nothing to do with DAF and only invites misreading.
-    onset = int(DAF_WINDOW_S[0] * 1000)
+    # Stay inside the motif. The burst is at st["daf_window_s"]; running past T_song
+    # reaches song offset, where HVC drive stops and E is released from inhibition -- a
+    # large rise that has nothing to do with DAF and only invites misreading.
+    onset, burst_ms = daf_window_ms(st["daf_window_s"])
     post_ms = min(post_ms, int(st["T_song"]) - onset - PEAK_BIN_MS)
     pre_ms = min(pre_ms, onset)
 
-    # The same trials and responder criterion as evaluate.daf_response.
+    # The same trials and responder criterion as metrics.daf_response.
     trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed)
-    resp, _, _ = daf_responders(trials)
+    resp, _, _ = daf_responders(trials, onset_ms=onset)
     n_resp = int(resp.sum())
 
     # Per-neuron change from its own pre-onset mean, binned at PEAK_BIN_MS, averaged over
@@ -67,7 +63,7 @@ def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=4
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.2))
     for ax, zoom in zip(axes, (False, True)):
         ax.axhline(0.0, color="0.6", lw=0.8)
-        ax.axvspan(0, 50, color="0.9", zorder=0)                    # the 50 ms burst
+        ax.axvspan(0, burst_ms, color="0.9", zorder=0)              # the noise burst
         ax.fill_between(t_ms, mean - sem, mean + sem, color="C0", alpha=0.25, lw=0)
         ax.plot(t_ms, mean, color="C0", lw=1.4,
                 label=f"model, responder average (n = {n_resp})")
@@ -87,7 +83,7 @@ def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=4
             ax.set_title(f"model peak {peak_hz:.0f} Hz at +{peak_at} ms", fontsize=10)
             ax.legend(fontsize=7.5, frameon=False, loc="upper right")
     fig.suptitle(
-        "DAF response time course — shaded band is the 50 ms noise burst, "
+        f"DAF response time course — shaded band is the {burst_ms:.0f} ms noise burst, "
         f"{PEAK_BIN_MS} ms bins\n"
         "Fig. 8E is not redrawn: only the values readable from the published panel are "
         "marked, and the paper states no bin width for it.\n"

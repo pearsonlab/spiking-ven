@@ -68,11 +68,10 @@ PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
 
 #: DAF white noise is mixed at this multiple of song RMS: ~95 dBSPL WN vs ~80 dBSPL song.
 #:
-#: This scales the *figure's* DAF column, where the noise is added into a window of the
-#: song and the relative level therefore matters. It does NOT affect the K2/K3 metrics:
-#: ``evaluate.build_stimuli`` sends its white noise through the same RMS-normalising
-#: encoder path as every other stimulus, so the amplitude divides straight back out.
-#: See the note in :mod:`spiking_ven.evaluate`.
+#: It sets the DAF stimulus wherever one is built -- the figure's DAF column and the
+#: responder metrics alike. The noise is mixed into a window of the song, and both
+#: normalisation stages take the song as their reference, so this relative level is what
+#: reaches the network.
 DAF_WN_AMPLITUDE = 5.6
 
 #: Auditory population mean firing rate during song (Hz), the encoder's spike-rate
@@ -124,9 +123,9 @@ N_I = 150
 N_HVC = 60
 N_RENDITIONS = 600
 
-#: Auditory -> E. ``C_B`` is sparse enough that each E cell samples only a few encoder
-#: channels, so ``B_SCALE`` is the mean weight per surviving connection rather than a
-#: population gain.
+#: Auditory -> E. Each E cell connects to each encoder channel with probability ``C_B``,
+#: so it samples only a few channels. The mean weight per connection is
+#: ``B_SCALE / n_aud`` (n_aud = the encoder's channel count).
 B_SCALE = 16.0
 C_B = 0.05
 

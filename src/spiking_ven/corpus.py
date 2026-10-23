@@ -1,8 +1,10 @@
 """Loading the song corpus and choosing the template rendition.
 
-The "template" is the highest-RMS rendition. That single rule decides which motif the
-network trains on, which one the metrics score, and which one the figure draws -- so it
-lives here once.
+The "template" is the rendition every other one is DTW-aligned to: the highest-RMS raw
+rendition, chosen by the preprocessing stage. It decides which motif the network trains
+on, which one the metrics score, and which one the figure draws -- so it lives here once.
+A ``motifs.npz`` that records ``template_index`` supplies it directly; one that does not
+falls back to the highest-RMS aligned rendition.
 """
 
 from __future__ import annotations
@@ -35,6 +37,14 @@ class Corpus:
     lengths: np.ndarray        # (n_motifs,) valid samples per rendition
     song_Ts: np.ndarray        # (n_motifs,) rendition duration in ms
     sr: int
+    # DTW reference recorded by the preprocessing stage; None means "compute from audio".
+    stored_template_index: int | None = None
+
+    def __post_init__(self):
+        i = self.stored_template_index
+        if i is not None and not 0 <= i < self.n_motifs:
+            raise ValueError(
+                f"stored template_index {i} out of range for {self.n_motifs} motifs")
 
     @property
     def n_motifs(self) -> int:
@@ -55,7 +65,13 @@ class Corpus:
 
     @property
     def template_index(self) -> int:
-        """Index of the template (highest-RMS) rendition."""
+        """Index of the template rendition.
+
+        The stored DTW reference when the corpus records one; otherwise the highest-RMS
+        aligned rendition.
+        """
+        if self.stored_template_index is not None:
+            return self.stored_template_index
         return highest_rms_index(self.signals())
 
     def template(self) -> tuple[np.ndarray, int]:
@@ -65,7 +81,11 @@ class Corpus:
 
 
 def load_corpus(path: str | Path) -> Corpus:
-    """Load a ``motifs.npz`` written by ``sven-prep-data``."""
+    """Load a ``motifs.npz`` written by ``sven-prep-data``.
+
+    Reads the stored ``template_index`` when the file has one.
+    """
     d = np.load(str(path))
+    tpl = int(d["template_index"]) if "template_index" in d.files else None
     return Corpus(audio=d["audio"], lengths=d["lengths"], song_Ts=d["song_Ts"],
-                  sr=int(d["sr"]))
+                  sr=int(d["sr"]), stored_template_index=tpl)

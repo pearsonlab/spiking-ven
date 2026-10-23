@@ -4,7 +4,7 @@ Three stimulus columns -- training song, time-reversed motif, distorted auditory
 (the song with a noise burst) -- by six rows: waveform, spectrogram, auditory neurons,
 inhibitory interneurons, excitatory projection neurons, and the E population rate.
 
-The stimuli are the arrays :func:`spiking_ven.evaluate.build_stimuli` returns, so the
+The stimuli are the arrays :func:`spiking_ven.stimuli.build_stimuli` returns, so the
 figure draws exactly the spikes the metrics score.
 
 Public API
@@ -48,7 +48,7 @@ def specgram(sig, n_samples, sr):
 def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
     """Run the network on each column's stimulus and save the figure.
 
-    ``ven`` is a VocalErrorNetV2; ``st`` is ``evaluate.build_stimuli``'s output. The
+    ``ven`` is a VocalErrorNet; ``st`` is ``stimuli.build_stimuli``'s output. The
     conduction delays are properties of the trained model and are applied inside its
     own inference pass.
     """

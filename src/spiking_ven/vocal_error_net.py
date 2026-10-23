@@ -356,28 +356,62 @@ class VocalErrorNet:
             stimulus_json=np.array(json.dumps(self.stimulus, sort_keys=True)),
         )
 
+    #: Keys every saved model must contain. ``load`` refuses a file missing any of them.
+    _REQUIRED_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud")
+    _REQUIRED_FLOAT_KEYS = (
+        "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
+        "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
+        "drive_e", "drive_i", "noise_e", "noise_i",
+        "target_rate", "target_rate_i", "theta_i",
+    )
+    _REQUIRED_ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE", "theta_e")
+
+    #: Keys added with later features, and the value a file saved before the feature
+    #: existed loads with. Each default switches the feature off, so such a model reloads
+    #: with the dynamics it was trained with: no refractory period, no adaptation, no
+    #: conduction delay, and an STDP window equal to ``tau_s``.
+    OPTIONAL_KEY_DEFAULTS = {
+        "t_refr_ms": 0.0,
+        "a_sfa": 0.0,
+        "tau_sfa": 0.0,
+        "aud_delay_ms": 0,
+        "hvc_delay_ms": 0,
+        "tau_stdp": 0.0,
+        "stimulus_json": {},
+    }
+
     @classmethod
     def load(cls, path: str, seed: int | None = None) -> "VocalErrorNet":
+        """Load a model written by :meth:`save`.
+
+        Raises ``ValueError`` naming every missing required key. Keys in
+        :attr:`OPTIONAL_KEY_DEFAULTS` may be absent and load with the listed default;
+        keys not listed anywhere are ignored. ``seed`` seeds the simulation noise.
+        """
         d = np.load(path)
+        required = cls._REQUIRED_INT_KEYS + cls._REQUIRED_FLOAT_KEYS + cls._REQUIRED_ARRAY_KEYS
+        missing = [k for k in required if k not in d]
+        if missing:
+            raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
+                             f"{', '.join(missing)}")
+
         obj = cls.__new__(cls)
         obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
-        for k in ("n_e", "n_i", "n_hvc", "n_aud"):
+        for k in cls._REQUIRED_INT_KEYS:
             setattr(obj, k, int(d[k]))
-        scalar_keys = (
-            "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
-            "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
-            "drive_e", "drive_i", "noise_e", "noise_i",
-            "target_rate", "target_rate_i",
-            "tau_stdp", "theta_i", "t_refr_ms", "a_sfa", "tau_sfa",
-        )
-        # Keys not listed here are ignored. A missing key loads as 0.0, which for
-        # ``t_refr_ms`` means a model saved without a refractory period reloads without
-        # one, as it was trained.
-        for k in scalar_keys:
-            setattr(obj, k, float(d[k]) if k in d else 0.0)
-        obj.aud_delay_ms  = int(d["aud_delay_ms"]) if "aud_delay_ms" in d else 0
-        obj.hvc_delay_ms  = int(d["hvc_delay_ms"]) if "hvc_delay_ms" in d else 0
-        raw_theta = d["theta_e"] if "theta_e" in d else np.array(0.0)
+        for k in cls._REQUIRED_FLOAT_KEYS:
+            setattr(obj, k, float(d[k]))
+
+        opt = cls.OPTIONAL_KEY_DEFAULTS
+        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_stdp"):
+            setattr(obj, k, float(d[k]) if k in d else opt[k])
+        for k in ("aud_delay_ms", "hvc_delay_ms"):
+            setattr(obj, k, int(d[k]) if k in d else opt[k])
+        obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
+                        else dict(opt["stimulus_json"]))
+
+        # theta_e is saved per neuron; a scalar is broadcast to every E cell.
+        raw_theta = d["theta_e"]
         obj.theta_e = (raw_theta.copy() if raw_theta.ndim > 0
                        else np.full(obj.n_e, float(raw_theta), dtype=np.float64))
         obj.B        = d["B"]
@@ -385,7 +419,6 @@ class VocalErrorNet:
         obj.JEI      = d["JEI"]
         obj.JIE      = d["JIE"]
         obj.v_reset  = 0.0
-        obj.stimulus = json.loads(str(d["stimulus_json"])) if "stimulus_json" in d else {}
         return obj
 
     def to_brian_weights(self) -> dict:

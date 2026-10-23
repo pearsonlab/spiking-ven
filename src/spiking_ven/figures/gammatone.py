@@ -10,7 +10,7 @@ One row, four panels, following the signal through the encoder:
    kernel's peak channel.
 
 The rendition is the template (:attr:`spiking_ven.corpus.Corpus.template_index`), the one
-the network trains on, and the spikes go through :func:`spiking_ven.evaluate.encode_stimulus`
+the network trains on, and the spikes go through :func:`spiking_ven.stimuli.encode_stimulus`
 -- the same path ``sven-train-ven`` uses -- so the raster is a sample of what the network
 actually hears, not a re-derivation of it.
 
@@ -32,7 +32,7 @@ from scipy import signal as sgn  # noqa: E402
 
 from ..cochleagram import cochleagram  # noqa: E402
 from ..constants import AUD_MEAN_RATE_HZ, N_ISTA  # noqa: E402
-from ..evaluate import encode_acts, encode_stimulus  # noqa: E402
+from ..stimuli import encode_acts, encode_stimulus  # noqa: E402
 from ..filterbank import centre_frequencies, erb_filterbank, make_erb_filters  # noqa: E402
 
 __all__ = ["make_gammatone_figure"]

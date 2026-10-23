@@ -100,7 +100,7 @@ def generate_hvc_spikes(
 
     The ``peak_rate``/``kernel_width`` defaults here are NOT the calibrated operating
     point. Pass ``constants.PEAK_RATE_HZ`` and
-    ``constants.KERNEL_WIDTH_MS`` (as ``evaluate.build_stimuli`` and the figures do) to
+    ``constants.KERNEL_WIDTH_MS`` (as ``stimuli.build_stimuli`` and the figures do) to
     get the drive the shipped model was trained with.
 
     Returns

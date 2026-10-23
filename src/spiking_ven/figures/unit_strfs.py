@@ -6,8 +6,8 @@ the right edge. Bottom row, one spike train per rendition in the corpus, motif o
 a unit whose kernel matches a syllable fires at that syllable on every rendition.
 
 The rasters are the auditory input the VEN trains on, not a re-encoding of it: every
-rendition goes through :func:`~spiking_ven.evaluate.encode_stimulus` on the template's
-reference, with the seeds :func:`~spiking_ven.evaluate.build_stimuli` gives its
+rendition goes through :func:`~spiking_ven.stimuli.encode_stimulus` on the template's
+reference, with the seeds :func:`~spiking_ven.stimuli.build_stimuli` gives its
 training pool.
 
 Public API
@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from ..constants import AUD_MEAN_RATE_HZ, N_ISTA, SR, T_POST  # noqa: E402
 from ..corpus import load_corpus  # noqa: E402
-from ..evaluate import encode_acts, encode_stimulus  # noqa: E402
+from ..stimuli import encode_acts, encode_stimulus  # noqa: E402
 from ..filterbank import centre_frequencies  # noqa: E402
 
 __all__ = ["pick_units", "make_unit_figure"]

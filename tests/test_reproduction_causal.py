@@ -21,13 +21,10 @@ import pytest
 
 from spiking_ven.causal_filters import CausalFilterEncoder
 from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS
-from spiking_ven.evaluate import (
-    BIOLOGICAL_TARGETS,
-    PEAK_BIN_MS,
-    build_stimuli,
-    daf_response,
-)
-from spiking_ven.vocal_error_net import VocalErrorNetV2
+from spiking_ven.metrics import daf_response
+from spiking_ven.stimuli import build_stimuli
+from spiking_ven.targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
+from spiking_ven.vocal_error_net import VocalErrorNet
 
 OUT = Path("outputs")
 MOTIFS = OUT / "motifs.npz"
@@ -50,7 +47,7 @@ def setup():
     enc = CausalFilterEncoder.load(str(ENCODER))
     st = build_stimuli(enc, str(MOTIFS), sr=16000, seed=SEED, n_hvc=60, n_ista=50,
                        verbose=False)
-    ven = VocalErrorNetV2.load(str(MODEL), seed=SEED)
+    ven = VocalErrorNet.load(str(MODEL), seed=SEED)
     return enc, st, ven
 
 

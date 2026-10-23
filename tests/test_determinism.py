@@ -7,11 +7,11 @@ exactly, in training and in inference.
 
 import numpy as np
 
-from spiking_ven import VocalErrorNetV2, generate_hvc_spikes
+from spiking_ven import VocalErrorNet, generate_hvc_spikes
 
 
-def _tiny_net(seed: int) -> VocalErrorNetV2:
-    return VocalErrorNetV2(n_e=30, n_i=8, n_hvc=6, n_aud=10, seed=seed)
+def _tiny_net(seed: int) -> VocalErrorNet:
+    return VocalErrorNet(n_e=30, n_i=8, n_hvc=6, n_aud=10, seed=seed)
 
 
 def _tiny_inputs(n_aud: int = 10, n_hvc: int = 6, T_song: int = 120, T_post: int = 30):
@@ -60,6 +60,6 @@ def test_loaded_model_can_be_pinned(tmp_path):
     hvc, aud, _, _ = _tiny_inputs()
     path = tmp_path / "ven.npz"
     _tiny_net(3).save(str(path))
-    r1 = float(VocalErrorNetV2.load(str(path), seed=99).transform(hvc, aud).mean())
-    r2 = float(VocalErrorNetV2.load(str(path), seed=99).transform(hvc, aud).mean())
+    r1 = float(VocalErrorNet.load(str(path), seed=99).transform(hvc, aud).mean())
+    r2 = float(VocalErrorNet.load(str(path), seed=99).transform(hvc, aud).mean())
     assert r1 == r2

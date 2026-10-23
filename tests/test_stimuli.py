@@ -105,7 +105,7 @@ def test_responder_windows_must_fit_in_the_rendition():
 class _FakeVen:
     n_e = 20
 
-    def transform(self, hvc, aud):
+    def transform(self, hvc, aud, hvc_prelude=None):
         return np.zeros((self.n_e, aud.shape[1]), dtype=np.float32)
 
 
@@ -145,14 +145,15 @@ def test_daf_window_ms():
 # ------------------------------------------------------------------- provenance
 
 _ALL_NONE = {"sr": None, "seed": None, "t_post": None, "t_burn": None,
-             "mean_rate_hz": None, "n_ista": None, "daf_window_s": None}
+             "mean_rate_hz": None, "n_ista": None, "daf_window_s": None,
+             "hvc_intro": None}
 
 
 def test_an_empty_record_falls_back_to_the_constants(capsys):
     s = resolve_stimulus_settings({}, dict(_ALL_NONE))
     assert s == {"sr": None, "seed": None, "t_post": C.T_POST, "t_burn": C.T_BURN,
                  "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
-                 "daf_window_s": tuple(C.DAF_WINDOW_S)}
+                 "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO)}
     assert capsys.readouterr().err == ""
 
 
@@ -186,9 +187,43 @@ def test_a_record_round_trips_through_json(tmp_path, capsys):
     enc = tmp_path / "enc.npz"
     enc.write_bytes(b"encoder")
     st = {"sr": SR, "seed": 3, "t_post": 120, "t_burn": 400, "n_hvc": 6,
-          "mean_rate_hz": 2.5, "n_ista": 20, "daf_window_s": (0.3, 0.35)}
+          "mean_rate_hz": 2.5, "n_ista": 20, "daf_window_s": (0.3, 0.35),
+          "hvc_intro": (2, 60, 30)}
     rec = json.loads(json.dumps(stimulus_record(st, encoder_path=enc)))
     assert rec["encoder_sha256"] == sha256_file(enc) and "motifs_sha256" not in rec
     s = resolve_stimulus_settings(rec, dict(_ALL_NONE), encoder_path=enc)
     assert s == {k: st[k] for k in _ALL_NONE}
     assert capsys.readouterr().err == ""
+
+
+# ------------------------------------------------------------------- HVC intro notes
+
+
+def test_intro_notes_repeat_one_sparse_sequence_at_the_motif_density():
+    from spiking_ven.common import generate_hvc_intro
+
+    pre = generate_hvc_intro(60, 840, n_notes=2, note_ms=84, gap_ms=20, peak_rate=300.0,
+                             kernel_width=10.0, seed=1)
+    assert pre.shape == (60, 2 * 104)
+    active = np.flatnonzero(pre.any(axis=1))
+    assert len(active) == 6                       # 60 * 84 / 840 neurons, as in the motif
+    np.testing.assert_array_equal(pre[:, :104], pre[:, 104:])      # the same note twice
+    assert not pre[:, 84:104].any() and not pre[:, 188:].any()     # silent gaps
+    assert generate_hvc_intro(60, 840, 0, 80, 20).shape == (60, 0)
+
+
+def test_a_record_without_intro_notes_means_none_and_no_record_means_the_default():
+    rec = {"t_post": 200}                         # recorded, but before intro notes existed
+    assert resolve_stimulus_settings(rec, {"hvc_intro": None})["hvc_intro"] == (0, 0, 0)
+    assert resolve_stimulus_settings({}, {"hvc_intro": None})["hvc_intro"] == tuple(
+        C.HVC_INTRO)
+
+
+def test_build_stimuli_puts_the_intro_notes_before_the_motif(encoder, motifs):
+    st = build_stimuli(encoder, motifs, hvc_intro=(2, 40, 10), t_burn=300, verbose=False)
+    pre = st["hvc_prelude"]
+    assert pre.shape[1] == 100 and pre.any()
+    np.testing.assert_array_equal(st["hvc_burn"][:, 200:300], pre)  # ends the burn-in
+    assert not st["hvc_burn"][:, :200].any()
+    none = build_stimuli(encoder, motifs, hvc_intro=(0, 0, 0), verbose=False)
+    assert none["hvc_prelude"].shape[1] == 0

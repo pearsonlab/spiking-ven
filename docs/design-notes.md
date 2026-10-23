@@ -148,6 +148,17 @@ The bird's response is long and weak (~1 extra spike over ~90 ms); the model's i
   than the linear trace's because the Mg2+ block self-limits: once the burst ends and the membrane
   falls toward reset, the NMDA current shuts off. Larger `g_nmda` is untested.
 
+## Onset of each motif
+
+- **Intro notes, not a burn-in.** E fired at ~5 Hz (peak ~12 Hz in 5 ms bins) through the first
+  60 ms of every motif against 2.5 Hz later. A silent burn-in of 0-500 ms did not change it: the
+  bump appeared with HVC alone and no sound, and without HVC E sits at ~10 Hz on tonic drive. It
+  is the HVC-driven inhibition switching on: I fired at ~17 Hz in the first 30 ms against 33 Hz
+  later, while the filtered HVC input builds up. Two 80 ms intro notes of HVC activity before the
+  motif (`HVC_INTRO`) cut it to 3.6 Hz (peak 7.1 Hz) and left every DAF metric within its noise.
+  The 20 ms gap before the motif lets inhibition sag again; with no gap the onset rate fell to
+  2.9 Hz, on a model trained without intro notes.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst

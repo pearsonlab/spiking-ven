@@ -47,7 +47,7 @@ def daf_trials(ven, encoder, st: dict, *, n_trials: int = 20, seed: int = 42):
             rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
             n_ista=st["n_ista"], seed=seed + 2000 + t,
         )
-        out[t] = ven.transform(st["hvc_on"], aud)
+        out[t] = ven.transform(st["hvc_on"], aud, hvc_prelude=st.get("hvc_prelude"))
     return out
 
 
@@ -230,12 +230,13 @@ def format_responders(r: dict) -> str:
     ])
 
 
-def _rate_hz(ven, hvc, aud) -> float:
+def _rate_hz(ven, hvc, aud, hvc_prelude=None) -> float:
     """Mean E-population rate in Hz for one rendition of (hvc, aud) input."""
-    return float(ven.transform(hvc, aud).mean() * 1000)
+    return float(ven.transform(hvc, aud, hvc_prelude=hvc_prelude).mean() * 1000)
 
 
-def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed) -> dict:
+def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed,
+                    hvc_prelude=None) -> dict:
     """Mean E rate over one rendition, per condition, for a trained network.
 
     Parameters
@@ -253,9 +254,9 @@ def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed)
     ``daf_not_singing_hz`` (all Hz), and ``reversed_over_trained``, the ratio of the
     first two -- above 1 when cancellation is specific to the trained song.
     """
-    trained_hz = _rate_hz(ven, hvc_on, aud_trained)
+    trained_hz = _rate_hz(ven, hvc_on, aud_trained, hvc_prelude)
     daf_not_singing_hz = _rate_hz(ven, hvc_off, aud_daf)
-    reversed_hz = _rate_hz(ven, hvc_on, aud_reversed)
+    reversed_hz = _rate_hz(ven, hvc_on, aud_reversed, hvc_prelude)
     nan = float("nan")
     return {
         "trained_hz": trained_hz,

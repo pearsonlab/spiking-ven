@@ -16,11 +16,12 @@ import sys
 
 import numpy as np
 
-from .common import acts_to_spikes, generate_hvc_spikes
+from .common import acts_to_spikes, generate_hvc_intro, generate_hvc_spikes
 from .constants import (
     AUD_MEAN_RATE_HZ,
     DAF_WINDOW_S,
     DAF_WN_AMPLITUDE,
+    HVC_INTRO,
     KERNEL_WIDTH_MS,
     N_HVC,
     N_ISTA,
@@ -51,7 +52,12 @@ STIMULUS_DEFAULTS = {
     "mean_rate_hz": AUD_MEAN_RATE_HZ,
     "n_ista": N_ISTA,
     "daf_window_s": tuple(DAF_WINDOW_S),
+    "hvc_intro": tuple(HVC_INTRO),
 }
+
+#: What a model that records its stimuli but not a setting was trained with: the setting
+#: did not exist yet, so neither did the feature.
+UNRECORDED_MEANS = {"hvc_intro": (0, 0, 0)}
 
 
 def daf_window_ms(window_s) -> tuple[int, float]:
@@ -123,6 +129,7 @@ def build_stimuli(
     mean_rate_hz: float = AUD_MEAN_RATE_HZ,
     n_ista: int = N_ISTA,
     daf_window_s: tuple[float, float] = DAF_WINDOW_S,
+    hvc_intro: tuple[int, int, int] = HVC_INTRO,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -219,6 +226,19 @@ def build_stimuli(
                                  kernel_width=KERNEL_WIDTH_MS, seed=seed)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
 
+    # Introductory notes: HVC activity before each motif, with no sound. Passed to the
+    # network as a prelude, so every array here stays aligned to motif onset; in the
+    # burn-in rendition it sits at the end of the silence instead.
+    n_notes, note_ms, gap_ms = (int(x) for x in hvc_intro)
+    hvc_prelude = generate_hvc_intro(n_hvc, T_song, n_notes, note_ms, gap_ms,
+                                     peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
+                                     seed=seed + 1).astype(np.float32)
+    n_pre = hvc_prelude.shape[1]
+    if n_pre > t_burn:
+        raise ValueError(f"the {n_pre} ms of intro notes do not fit in the {t_burn} ms burn-in")
+    hvc_burn = hvc_burn.astype(np.float32)
+    hvc_burn[:, t_burn - n_pre:t_burn] = hvc_prelude
+
     return {
         "aud_correct": aud_correct,
         "aud_reversed": aud_reversed,
@@ -228,6 +248,8 @@ def build_stimuli(
         "hvc_off": hvc_off,
         "hvc_burn": hvc_burn,
         "aud_burn": aud_burn,
+        "hvc_prelude": hvc_prelude,
+        "hvc_intro": (n_notes, note_ms, gap_ms),
         "T_song": T_song,
         "T_rend": T_rend,
         "train_idx": train_idx,
@@ -270,6 +292,7 @@ def stimulus_record(st: dict, *, encoder_path=None, motifs_path=None) -> dict:
         "mean_rate_hz": float(st["mean_rate_hz"]),
         "n_ista": int(st["n_ista"]),
         "daf_window_s": [float(x) for x in st["daf_window_s"]],
+        "hvc_intro": [int(x) for x in st["hvc_intro"]],
     }
     if encoder_path is not None:
         rec["encoder_sha256"] = sha256_file(encoder_path)
@@ -284,6 +307,8 @@ def _normalise(key, value):
         return None
     if key == "daf_window_s":
         return (float(value[0]), float(value[1]))
+    if key == "hvc_intro":
+        return tuple(int(x) for x in value)
     return value
 
 
@@ -309,7 +334,10 @@ def resolve_stimulus_settings(recorded: dict | None, given: dict, *,
     recorded = recorded or {}
     out = {}
     for key, value in given.items():
-        rec = _normalise(key, recorded.get(key))
+        raw = recorded.get(key)
+        if raw is None and recorded and key in UNRECORDED_MEANS:
+            raw = UNRECORDED_MEANS[key]
+        rec = _normalise(key, raw)
         value = _normalise(key, value)
         if value is None:
             out[key] = rec if rec is not None else STIMULUS_DEFAULTS.get(key)

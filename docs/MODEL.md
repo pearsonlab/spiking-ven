@@ -217,11 +217,19 @@ song does not reach keep zero rows and respond fully to novel sound.
 - **HVC** (`common.generate_hvc_spikes`): neuron `i` of `n_hvc` has a Gaussian rate envelope
   centred at the `i`-th of `n_hvc` evenly spaced times across the motif, width `KERNEL_WIDTH_MS`
   (10 ms) and peak `PEAK_RATE_HZ` (300 Hz). Each 1 ms bin spikes with probability `rate * 1e-3`.
+- **Intro notes** (`common.generate_hvc_intro`, `HVC_INTRO = (2, 80, 20)`): before each motif,
+  two 80 ms introductory notes of HVC activity, each followed by 20 ms of silence, with no
+  sound. Each note is one sparse HVC sequence at the motif's burst density (about 6 of 60 neurons
+  bursting at evenly spaced times), repeated identically. They are passed to `fit`/`transform` as
+  `hvc_prelude`: the network runs them first, with zero auditory input, and the returned spikes
+  start at motif onset. No learning happens during them, because the STDP gate needs auditory
+  drive. Their purpose is to have I active when the song starts.
 - Both are passed through `apply_refractory` (2 ms), which keeps at most one spike per bin and
   drops spikes closer than 2 ms to the previous kept one.
 
 **Training** (`cli/train_ven.py`): `N_RENDITIONS = 600` calls to `fit`, one per rendition of the
-motif plus `T_POST = 200` ms of silence; the first is preceded by `T_BURN = 500` ms of silence.
+motif plus `T_POST = 200` ms of silence, each preceded by the intro notes; the first is preceded
+by `T_BURN = 500` ms of silence, which ends with them.
 Each call starts the membranes from zero; only `JIE` carries over. The HVC spike train is the same
 every rendition, and the auditory input cycles through encodings of the template motif and the
 corpus's other renditions of the song.

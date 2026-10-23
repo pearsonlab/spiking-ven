@@ -74,6 +74,39 @@ def test_inference_is_causal_under_truncation(toy):
         )
 
 
+@pytest.mark.parametrize("divisive_gain", [True, False])
+@pytest.mark.parametrize("t0_ms", [150.0, 150.5, 151.0])
+def test_encode_signal_is_causal_from_the_waveform(rng, divisive_gain, t0_ms):
+    """Waveform in, activations out: changing the audio from t0 on must leave every
+    activation before t0 unchanged. This covers the cochleagram's frame timing and the
+    divisive gain, which ``infer`` alone does not see.
+
+    ``rms_from`` is the unperturbed signal for both encodes. It sets one fixed input gain
+    -- the sound level -- and the pipeline always passes it, so the gain is not allowed
+    to depend on the perturbation. t0 is placed on, between and off frame boundaries
+    (2 ms frames), since a lookahead shorter than a frame only shows at some offsets.
+    """
+    sr, C, L, K = 16000, 8, 6, 12
+    V = rng.standard_normal((K, C, L))
+    V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
+    cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
+          "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
+    enc = CausalFilterEncoder(V, np.zeros(K), 0.01, cp)
+
+    x = rng.standard_normal(int(0.3 * sr)) * 0.05
+    y = x.copy()
+    s0 = int(t0_ms * sr / 1000)
+    y[s0:] += rng.standard_normal(len(y) - s0) * 0.5
+    kw = dict(sr=sr, upsample_to_ms=True, rms_from=x, divisive_gain=divisive_gain)
+    a, b = enc.encode_signal(x, **kw), enc.encode_signal(y, **kw)
+
+    t0 = int(np.ceil(t0_ms))
+    assert np.abs(a[:, :t0]).max() > 0, "no activations before t0: the test is vacuous"
+    assert np.abs(a[:, t0:] - b[:, t0:]).max() > 0, "the perturbation must register"
+    leak = np.abs(a[:, :t0] - b[:, :t0]).max(axis=0)
+    assert np.all(leak <= 1e-9), f"audio at {t0_ms} ms reached ms {np.flatnonzero(leak > 1e-9)[0]}"
+
+
 def test_causal_meansub_is_causal(toy):
     _, X, _, _, L = toy
     full = causal_meansub(X, L)

@@ -1,8 +1,12 @@
 """Causal minimum-phase filter bank -- strictly past in, sparse code out.
 
 Each filter is one spacetime kernel ``V[k]`` of shape (C, L), spanning the L frames
-before now. Inference at time t touches only frames < t, so an activation depends on
-nothing at or after t.
+before now. Inference at time t touches only frames < t, and the cochleagram frames are
+timed so that those end by t (see :func:`spiking_ven.filterbank.gammatone_spectrogram`),
+so an activation depends on no audio at or after t. The one input gain applied before
+the cochleagram, :meth:`CausalFilterEncoder.encode_signal`'s ``rms_from``, is a fixed
+sound-level calibration; pass a reference signal, as the pipeline does, rather than
+letting each stimulus set its own level.
 
     drive:       a_k(t) = <V[k], X[:, t-L:t]>                one matmul, all t at once
     competition: s(t) = argmin_s 0.5||P_t - sum_k s_k V_k||^2 + sum_k (lam+b_k)|s_k|
@@ -273,9 +277,11 @@ class CausalFilterEncoder:
         if divisive_gain:
             # Divide by the norm of the reconstructed past window so magnitude stops
             # reporting how well the filters matched, then restore level with the window
-            # mean that causal_meansub removed.
+            # mean that causal_meansub removed. That mean is taken from frame t - 1, the
+            # newest frame the code at t was inferred from; frame t itself extends past t.
             recon = np.linalg.norm(acts.T @ self.V.reshape(self.V.shape[0], -1), axis=1)
             mu = (X - Xc).mean(axis=0)
+            mu = np.concatenate([[0.0], mu[:-1]])
             acts = acts * (mu / (1e-6 + recon))[None, :]
 
         if upsample_to_ms:

@@ -213,6 +213,8 @@ def test_v2_legacy_defaults_are_pinned():
     for k, v in legacy.items():
         if k != "seed":
             assert getattr(net, k) == v, k
+    # Inherited, not in the signature: operating-point features added later stay off.
+    assert net.g_nmda == 0.0
 
 
 # ---------------------------------------------------------------------------

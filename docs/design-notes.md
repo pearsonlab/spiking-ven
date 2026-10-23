@@ -15,7 +15,18 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
 - **The template rendition** (highest RMS) was once chosen separately in four places. It now lives in
   `corpus.py`, so training, scoring and the figure cannot pick different motifs.
 - **Stimuli are built once, by `stimuli.build_stimuli`**, for the trainer, the CLIs, the tests and
-  the figures alike.
+  the figures alike. A trained model also records the settings and input checksums its stimuli
+  were built with (`ven.stimulus`), because a figure rendered at a different auditory rate than
+  its model was trained at encodes a different stimulus, with nothing to show it.
+- **`VocalErrorNet` defaults are the operating point; `VocalErrorNetV2` keeps the old ones.** The
+  class's constructor defaults once differed from `constants.py` in 12 places (no adaptation, no
+  delay, `n_hvc = 15`, ...). finchsim builds networks from those old defaults in its tests, so the
+  old name stays as a subclass with them.
+- **Monitoring draws its own noise.** `sven-train-ven`'s per-rendition snapshots once used the
+  training noise stream, so the trained weights depended on how often progress was logged.
+- **The template is the DTW reference.** `motifs.npz` stores `template_index`, the rendition the
+  others were aligned to. Recomputing highest RMS after alignment could pick a different one (the
+  top two aligned renditions differ by <1% in RMS).
 - **Simulation noise is seeded.** It was originally drawn from the global `np.random`, so `seed=`
   fixed only the initial weights, and two identical runs differed by ~1% in E rate.
 - **Version.** v0.5.0 shipped with `__version__` and `pyproject.toml` disagreeing (0.4.0 vs 0.5.0);
@@ -80,7 +91,8 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
 
 - **Conduction delay (`AUD_DELAY_MS`).** It was once set to the bird's 23 ms response *latency*,
   which double-counts: the network then integrates for a further ~43 ms (modelled latency ~66 ms)
-  and the comparison with 23 ms becomes circular.
+  and the comparison with 23 ms becomes circular. finchsim's driver scripts carried the same 23 ms
+  as their default until finchsim PR #27; they now use the trained model's delay.
 - **`tau_s` and the STDP window** were once the same constant, which tied the coincidence window to
   the synaptic time course; `tau_stdp` now sets it separately.
 - **Membrane refractory period.** Without it the ceiling was 1000 Hz and was reached: during a DAF
@@ -113,6 +125,29 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   duration is a z-test against pre-onset variability, so a weaker response stays detectable for less
   time.
 
+## Lengthening the DAF response
+
+The bird's response is long and weak (~1 extra spike over ~90 ms); the model's is short and strong
+(~1.8 spikes over ~46 ms). Numbers below are 5-seed means on the model after PR #14.
+
+- **Adaptation trades one for the other.** At `tau_sfa = 10 ms`, `a_sfa` 0 / 0.5 / 1.0 / 1.5 gave
+  durations of 68 / 51 / 46 / 43 ms and 6.1 / 2.6 / 1.8 / 1.4 extra spikes. No single value fixes
+  duration without making magnitude worse.
+- **E -> I feedback is too weak to delay usefully.** During the burst, I rises only ~1-2 Hz (22.7 ->
+  23.7 Hz), and the extra E -> I input is under 10% of `theta_i`: I is driven by HVC. A delay on
+  that loop would only postpone inhibition, adding spikes.
+- **A linear slow synaptic trace works, but is not a mechanism.** Moving a fraction `f` of each
+  auditory spike's drive to an 80 ms exponential, total charge unchanged, gave 68 ms and 1.8 spikes
+  at `f = 0.5`, with every other metric inside the bird's range. It was rejected as unprincipled:
+  nothing in a real synapse redistributes charge that way.
+- **Standard NMDA (`G_NMDA`, off by default).** Wang (2002) kinetics and Mg2+ block on the
+  auditory -> E synapses. Duration grows with `g_nmda` (46 -> 59 ms at 40, an NMDA:AMPA charge
+  ratio of ~2.2 at threshold), but alone it adds spikes. Shifting drive from the fast weights to
+  NMDA helped on every axis but latency: at `g_nmda = 40`, `B_SCALE = 10`, duration 60 ms, extra
+  spikes 1.57, peak 35 Hz, latency 34 ms (bound 35), reversed/trained 1.15. The effect is weaker
+  than the linear trace's because the Mg2+ block self-limits: once the burst ends and the membrane
+  falls toward reset, the NMDA current shuts off. Larger `g_nmda` is untested.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst
@@ -124,6 +159,13 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   inflated it ~7%. 2 ms is now part of the metric's definition (`PEAK_BIN_MS`).
 - **Onset, not argmax.** The 23 +/- 12 ms latency is an onset; the PSTH argmax (~50 ms) was once
   printed against it.
+- **Duration is timed to +300 ms.** Responses still running at the end of the 150 ms responder
+  window were once dropped from the mean, biasing it short; that changed the mean by ~1 ms. On
+  synthetic responses of known length, the paper's rule reads ~8 ms long (1-18 ms over 20 draws):
+  at p < 0.05 about one baseline bin in twenty is significant by chance and postpones the ten-bin
+  end run. The bird's number was measured with the same rule.
+- **Only ~1/4 of responders are timed.** Latency and duration come from responders whose
+  trial-averaged PSTH has five consecutive significant 2 ms bins: ~84 of ~312 at the test seed.
 
 ## Testing
 
@@ -131,5 +173,9 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   every thread count but failed intermittently on Linux CI, because truncating the signal changes the
   shape of the drive matmul and BLAS may round it differently. A genuinely non-causal solver tested
   the same way moved earlier coefficients by up to 0.549.
+- **Pinned tolerances are ~3 SD of the noise.** Each DAF metric in
+  `test_reproduction_causal.py` allows about three standard deviations of its spread across ten
+  evaluation seeds. Evaluating the same model after other simulations have advanced the noise
+  stream moved duration by up to ~6 ms, more than the earlier fixed tolerances allowed.
 - **Brian2 port gaps that tests now pin:** `noise_i` was accepted and dropped (no noise term in the
   I equation), and the port once lacked the refractory period and adaptation entirely.

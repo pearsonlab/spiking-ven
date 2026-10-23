@@ -6,6 +6,8 @@ Architecture
 - E neurons        →  JEI (n_i × n_e)                 →  I neurons  [fixed]
 - HVC spikes       (n_hvc, T) →  B_hvc (n_i × n_hvc) →  I neurons  [fixed sparse]
 - I neurons        →  JIE (n_e × n_i)                 →  E neurons  [plastic — causal Hebbian]
+- Optional: an NMDA conductance on the auditory → E synapses (``g_nmda > 0``; off at the
+  shipped operating point). See ``docs/MODEL.md``.
 
 Plasticity
 ----------
@@ -224,6 +226,11 @@ class VocalErrorNet:
     noise_i      : std of additive Gaussian noise on I input
     target_rate  : E firing rate used to analytically initialise theta_e (Hz-like units)
     target_rate_i: I firing rate used to analytically initialise theta_i
+    g_nmda       : NMDA conductance of the aud->E synapses, relative to ``B`` (0 = off)
+    nmda_tau_rise, nmda_tau_decay, nmda_alpha : NMDA gating kinetics (ms, ms, 1/ms)
+    mg_mm, e_nmda_mv : Mg2+ concentration (mM) and NMDA reversal potential (mV)
+    e_l_mv, v_th_mv  : mV values the dimensionless membrane's reset and threshold map to,
+                   for the Mg2+ block and the NMDA driving force
     seed         : RNG seed
 
     Every default is the shipped operating point (:mod:`spiking_ven.constants`), except

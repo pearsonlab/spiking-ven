@@ -17,3 +17,6 @@ outputs_*
 
 # Agent worktrees and session state live here; never part of the repo.
 .claude/
+
+# ignore papers
+papers/

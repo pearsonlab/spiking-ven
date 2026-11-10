@@ -7,6 +7,12 @@ on:
 jobs:
   lint-and-unit:
     runs-on: ubuntu-latest
+    env:
+      # Pin the interpreter rather than taking the runner's system Python. uv.lock pins
+      # scipy 1.15.3 (the newest supporting Python 3.10), which has wheels only up to
+      # 3.13; on the runner's 3.14 uv falls back to building scipy from source, which
+      # fails without OpenBLAS. uv downloads this version if the runner lacks it.
+      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3

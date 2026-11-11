@@ -39,7 +39,15 @@ HOP_MS = 10  # DTW feature frame hop in ms
 # ---------------------------------------------------------------------------
 
 def _mel_filterbank(sr, n_fft, n_mel=40, f_min=300.0, f_max=8000.0):
-    """Triangular mel filterbank matrix, shape (n_mel, n_fft//2+1)."""
+    """Triangular mel filterbank matrix, shape (n_mel, n_fft//2+1).
+
+    HTK-style mel scale, ``mel = 2595 * log10(1 + f / 700)`` (equivalently
+    ``1127 * ln(1 + f / 700)``; Young et al., *The HTK Book*); 2595 makes 1000 Hz map to
+    1000 mel, as in the scale's definition (Stevens, Volkmann & Newman 1937, JASA 8:185,
+    doi:10.1121/1.1915893). Mel filterbank features follow Davis & Mermelstein (1980,
+    IEEE TASSP 28:357, doi:10.1109/TASSP.1980.1163420). A human pitch scale, used here
+    only for the features that DTW-align renditions, not for the model's input.
+    """
     mel_min = 2595 * np.log10(1 + f_min / 700)
     mel_max = 2595 * np.log10(1 + f_max / 700)
     mel_pts = np.linspace(mel_min, mel_max, n_mel + 2)

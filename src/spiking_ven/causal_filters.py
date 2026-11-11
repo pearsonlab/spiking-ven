@@ -176,14 +176,23 @@ def min_phase(V, n_fft=None, eps=1e-9):
     K, C, L = V.shape
     N = int(n_fft or max(64 * L, 1024))
     g = V[:, :, ::-1]                                 # lag order: g[..., 0] = most recent
+    
+    # compute the Fourier transform of g; doing rfft and mirroring is more efficient
+    # and preserves reality of g by construction
     G = np.fft.rfft(g, N, axis=2)
     logmag = np.log(np.abs(G) + eps)
     full = np.concatenate([logmag, logmag[:, :, -2:0:-1]], axis=2)
+
+    # ensure minimum phase by constructing the imagingary part of the cepstrum
+    # as -i H[Re[cepstrum]], where H is the Hilbert transform
+    # this is equivalent to doubling the positive frequencies and zeroing out negative ones
     ceps = np.fft.ifft(full, N, axis=2).real
     fold = np.zeros_like(ceps)
     fold[:, :, 0] = ceps[:, :, 0]
     fold[:, :, 1:N // 2] = 2.0 * ceps[:, :, 1:N // 2]
     fold[:, :, N // 2] = ceps[:, :, N // 2]
+
+    # now back to the time domain
     g_mp = np.fft.irfft(np.exp(np.fft.rfft(fold, N, axis=2)), N, axis=2)[:, :, :L]
     return np.ascontiguousarray(g_mp[:, :, ::-1])     # back to oldest-first
 

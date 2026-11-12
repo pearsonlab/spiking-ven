@@ -185,7 +185,8 @@ def min_phase(V, n_fft=None, eps=1e-9):
 
     # ensure minimum phase by constructing the imagingary part of the cepstrum
     # as -i H[Re[cepstrum]], where H is the Hilbert transform
-    # this is equivalent to doubling the positive frequencies and zeroing out negative ones
+    # this is equivalent to doubling the positive elements and zeroing out negative ones
+    # in the Fourier transform of the cepstrum
     ceps = np.fft.ifft(full, N, axis=2).real
     fold = np.zeros_like(ceps)
     fold[:, :, 0] = ceps[:, :, 0]

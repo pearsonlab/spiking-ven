@@ -84,7 +84,8 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
 - **Mean subtraction.** Without `causal_meansub` the code is dominated by level and cannot tell
   forward from reversed song (forward/reversed correlation 0.998).
 - **Frame timing (PR #12).** `gtgram` labels each window by its first frame, so the code at frame t
-  read audio up to ~2 ms past t, and the divisive gain up to ~4 ms (measured lookahead 2-3 ms).
+  read audio up to ~2 ms past t, and the divisive gain (since removed) up to ~4 ms (measured
+  lookahead 2-3 ms).
   Removing that added ~4 ms of response latency, compensated by lowering `AUD_DELAY_MS` from 5 to 2.
 
 ## Network dynamics
@@ -166,6 +167,32 @@ The bird's response is long and weak (~1 extra spike over ~90 ms); the model's i
   motif (`HVC_INTRO`) cut it to 3.6 Hz (peak 7.1 Hz) and left every DAF metric within its noise.
   The 20 ms gap before the motif lets inhibition sag again; with no gap the onset rate fell to
   2.9 Hz, on a model trained without intro notes.
+
+## The encoder's loudness gain (removed)
+
+Each frame's code was once multiplied by ``level / ||reconstruction||``: divided by the norm of
+the code's reconstruction (so size stopped reporting match quality) and multiplied by the
+running level that mean subtraction removed. Variants tried, each with the network retrained
+(10-seed means, NMDA and intro notes on):
+
+| gain | `B_SCALE` | noise-burst input ÷ song | extra spikes | latency (ms) | duration (ms) | reversed/trained |
+|---|---|---|---|---|---|---|
+| level / reconstruction (removed) | 10 | 18x | 1.66 | 33.9 | 60.6 | 1.156 |
+| level only | 10 | 31x | 2.37 | 25.5 | 79.2 | 1.176 |
+| level only | 6 | 31x | 1.75 | 27.6 | 74.0 | 1.136 |
+| level^0.25 | 10 | 24.5x | 1.68 | 28.2 | 63.9 | 1.172 |
+| none (adopted) | 13 | 8.5x | 1.69 | 31.5 | 59.7 | 1.155 |
+
+- Responder magnitude barely follows the input: the burst's input drive ranged 3.6x across
+  these, extra spikes only ~1.5-2.4. The remaining ~2x excess over the bird is set by the
+  network's own dynamics, not by how loud the encoder makes the burst.
+- No gain was adopted for simplicity: at `B_SCALE` 13 it matches the divisive version on
+  magnitude and song selectivity with slightly faster onset. Level-only gains lengthen the
+  response and cut latency but raise magnitude; weaker weights trade it back at the cost of
+  selectivity.
+- Sparser aud -> E connectivity (`C_B` 0.03, level-only gain) brought responders to the bird's
+  41% but raised baseline and trained-song rates: E cells left without auditory input never
+  acquire inhibition (learning is audio-gated) and fire tonically through the song.
 
 ## DAF metrics
 

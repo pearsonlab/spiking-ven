@@ -227,7 +227,15 @@ class CausalFilterEncoder:
         return int(self.V.shape[0])
 
     def encode_signal(self, signal, *, sr, n_ista=20, upsample_to_ms=False,
-                      T_out_ms=None, rms_from=None, divisive_gain=True):
+                      T_out_ms=None, rms_from=None):
+        """Waveform -> (K, T) sparse activations.
+
+        The waveform is scaled by ``rms_ref / RMS(rms_from)`` (the stimulus's own RMS if
+        ``rms_from`` is None), turned into a cochleagram, mean-subtracted over the trailing
+        L frames, and sparse-coded by :func:`infer`. The activations are the ISTA
+        coefficients themselves: sound level reaches them only through the spectral
+        contrast that survives mean subtraction, which grows with loudness.
+        """
         from .cochleagram import cochleagram
 
         cp = self.coch_params
@@ -240,16 +248,6 @@ class CausalFilterEncoder:
                         lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
         Xc = causal_meansub(X, self.L)
         acts = infer(Xc, self.V, self.lam, n_iter=n_ista)
-
-        if divisive_gain:
-            # Divide by the norm of the reconstructed past window so magnitude stops
-            # reporting how well the filters matched, then restore level with the window
-            # mean that causal_meansub removed. That mean is taken from frame t - 1, the
-            # newest frame the code at t was inferred from; frame t itself extends past t.
-            recon = np.linalg.norm(acts.T @ self.V.reshape(self.V.shape[0], -1), axis=1)
-            mu = (X - Xc).mean(axis=0)
-            mu = np.concatenate([[0.0], mu[:-1]])
-            acts = acts * (mu / (1e-6 + recon))[None, :]
 
         if upsample_to_ms:
             acts = np.repeat(acts, 1000 // cp["frame_rate"], axis=1)

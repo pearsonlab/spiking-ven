@@ -200,7 +200,7 @@ All three are drawn from `default_rng(seed)`, in the order below, and stored as 
 
 | Matrix | Connection probability | Mean weight per connection | Std |
 |---|---|---|---|
-| `B` | `c_B` (0.05) | `B_scale / n_aud` (10 / 54 = 0.19) | half the mean |
+| `B` | `c_B` (0.05) | `B_scale / n_aud` (13 / 54 = 0.24) | half the mean |
 | `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.333), not divided by `n_hvc` | half the mean |
 | `JEI` | `c_JEI` (0.5) | `0.17 / sqrt(n_e * c_JEI)` (0.0098) | 10% of the mean |
 | `JIE` | -- | 0 (all zero) | -- |
@@ -248,10 +248,9 @@ corpus's other renditions of the song.
   coefficients `s(t)` minimise `0.5 * ||X_past(t) - sum_k s_k V_k||^2 + lam * sum_k |s_k|` by ISTA
   (`CAUSAL_N_ISTA` iterations in training, `N_ISTA = 50` when encoding stimuli for the network).
   Correlated filters explain each other away rather than firing together.
-- **Gain** (`CausalFilterEncoder.encode_signal`): each frame's code is divided by the norm of its
-  reconstruction and multiplied by the window mean removed above, taken from the previous frame
-  (the newest one the code read), so its size reports sound level rather than how well the filters
-  matched.
+- **No gain step.** The activations passed on are the ISTA coefficients themselves. Sound level
+  reaches them only through the spectral contrast that survives mean subtraction, which grows
+  with loudness; the spike-rate calibration then sets the overall scale.
 - **Filters** (`causal_filters.learn`): learned to reconstruct the past window from the sparse
   code, pulled toward minimum phase (energy as early in the window as the magnitude response
   allows, which keeps the encoder's latency short), then pruned to those that fire.

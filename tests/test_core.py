@@ -4,6 +4,7 @@ Deliberately free of downloaded data and trained artifacts, so these run in CI o
 bare checkout. The reproduction assertions that need real song live in the slow suite.
 """
 
+import re
 import subprocess
 import sys
 
@@ -34,7 +35,7 @@ def test_core_import_does_not_pull_in_brian2():
 
 
 def test_version_exposed():
-    assert sv.__version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+\S*", sv.__version__)
 
 
 @pytest.mark.parametrize("n_channels", [20, 40])

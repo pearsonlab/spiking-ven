@@ -20,10 +20,8 @@ jobs:
       - name: Lint
         run: uv run --extra dev ruff check .
 
-      # Non-blocking while the existing findings are worked through; drop
-      # continue-on-error once ty passes. All extras so the optional imports resolve.
-      - name: Type check (ty, non-blocking)
-        continue-on-error: true
+      # All extras so the optional imports (brian2, matplotlib, soundfile) resolve.
+      - name: Type check (ty)
         run: uv run --all-extras ty check
 
       # The core must import on numpy + scipy alone: no Brian2, no matplotlib, no

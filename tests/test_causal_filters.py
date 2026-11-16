@@ -161,8 +161,7 @@ def test_an_encoder_saved_with_the_old_bias_key_still_loads(tmp_path, toy):
     V, _, K, C, L = toy
     path = tmp_path / "old.npz"
     np.savez(path, V=V, bias=np.zeros(K), lam=0.05,
-             **{f"cp_{k}": v for k, v in {"n_channels": C, "K_frames": L, "frame_rate": 500,
-                                          "lo_hz": 200.0, "hi_hz": 8000.0,
-                                          "rms_ref": 0.1}.items()})
+             cp_n_channels=C, cp_K_frames=L, cp_frame_rate=500,
+             cp_lo_hz=200.0, cp_hi_hz=8000.0, cp_rms_ref=0.1)
     enc = CausalFilterEncoder.load(path)
     assert np.array_equal(enc.V, V) and enc.lam == 0.05

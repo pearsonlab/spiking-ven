@@ -21,6 +21,7 @@ before; new code should use :class:`VocalErrorNet`.
 """
 
 import json
+from typing import Any
 
 import numpy as np
 from numpy.random import default_rng
@@ -81,9 +82,9 @@ def _simulate(
     learn_weights, alpha_stdp, rng,
     aud_delay_ms: int = 0,
     hvc_delay_ms: int = 0,
-    s_nmda=None,
+    s_nmda: np.ndarray | None = None,
     g_nmda: float = 0.0,
-    nmda_v=None,
+    nmda_v: tuple | None = None,
 ):
     # Membrane noise comes from the caller's seeded generator, never the global np.random.
     # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the per-neuron map from the
@@ -128,6 +129,7 @@ def _simulate(
         if g_nmda > 0.0:
             # NMDA conductance through the same connections, Mg2+-blocked at the
             # membrane's current potential (in mV), with driving force E_NMDA - V.
+            assert s_nmda is not None and nmda_v is not None, "g_nmda > 0 needs s_nmda, nmda_v"
             e_l_mv, mv_per_unit, e_nmda_units, mg_mm = nmda_v
             s_t = s_nmda[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
             mg = mg_block(e_l_mv + V_e * mv_per_unit, mg_mm)
@@ -359,7 +361,7 @@ class VocalErrorNet:
         _decay_e  = float(np.exp(-1.0 / tau_e))
         _isi_e    = 1.0 / target_rate
         _theta_e0 = float(max(drive_e * (1.0 - _decay_e ** _isi_e), 1e-3))
-        self.theta_e = np.full(n_e, _theta_e0, dtype=np.float64)
+        self.theta_e: np.ndarray = np.full(n_e, _theta_e0, dtype=np.float64)
 
         # I threshold, from a fixed 10 ms reference so it does not move with tau_s.
         # theta_i >> drive_i, so I fires only when HVC drives it, not from tonic E
@@ -453,7 +455,7 @@ class VocalErrorNet:
     #: existed loads with. Each default switches the feature off, so such a model reloads
     #: with the dynamics it was trained with: no refractory period, no adaptation, no
     #: conduction delay, and an STDP window equal to ``tau_s``.
-    OPTIONAL_KEY_DEFAULTS = {
+    OPTIONAL_KEY_DEFAULTS: dict[str, Any] = {
         "t_refr_ms": 0.0,
         "a_sfa": 0.0,
         "tau_sfa": 0.0,
@@ -577,16 +579,14 @@ class VocalErrorNet:
 
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
-        nmda = {}
+        s_nmda, g_nmda, nmda_v = None, 0.0, None
         if self.g_nmda > 0.0:
             mv_per_unit = (self.v_th_mv - self.e_l_mv) / self.theta_e
-            nmda = dict(
-                s_nmda=nmda_gating(aud_spikes, self.nmda_tau_rise, self.nmda_tau_decay,
-                                   self.nmda_alpha, dt),
-                g_nmda=float(self.g_nmda),
-                nmda_v=(self.e_l_mv, mv_per_unit,
-                        (self.e_nmda_mv - self.e_l_mv) / mv_per_unit, self.mg_mm),
-            )
+            s_nmda = nmda_gating(aud_spikes, self.nmda_tau_rise, self.nmda_tau_decay,
+                                 self.nmda_alpha, dt)
+            g_nmda = float(self.g_nmda)
+            nmda_v = (self.e_l_mv, mv_per_unit,
+                      (self.e_nmda_mv - self.e_l_mv) / mv_per_unit, self.mg_mm)
 
         sE_mat, sI_mat, JIE = _simulate(
             h_aud, h_hvc,
@@ -603,7 +603,7 @@ class VocalErrorNet:
             learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
-            **nmda,
+            s_nmda=s_nmda, g_nmda=g_nmda, nmda_v=nmda_v,
         )
 
         if learn_weights:

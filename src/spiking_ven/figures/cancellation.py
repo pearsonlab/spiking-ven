@@ -15,6 +15,7 @@ Saves ``cancellation{out_tag}.png`` and ``.pdf`` in ``out_dir``.
 """
 
 import os
+from typing import TypedDict
 
 import matplotlib
 import numpy as np
@@ -37,6 +38,16 @@ COLUMNS = [
 N_RASTER = 64
 
 
+class _Column(TypedDict):
+    """One figure column: its title, waveform, and the three spike populations."""
+
+    title: str
+    sig: np.ndarray
+    aud: np.ndarray
+    sE: np.ndarray
+    sI: np.ndarray
+
+
 def specgram(sig, n_samples, sr):
     """STFT spectrogram of ``sig[:n_samples]`` → (freq_kHz, time_ms, logS_dB)."""
     n = min(len(sig), n_samples)
@@ -54,11 +65,11 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
     """
     os.makedirs(str(out_dir), exist_ok=True)
     T_song, sr = st["T_song"], st["sr"]
-    cols = []
+    cols: list[_Column] = []
     for title, sig_key, aud_key in COLUMNS:
         sE, sI = ven.transform_all(st["hvc_on"], st[aud_key],
                                    hvc_prelude=st.get("hvc_prelude"))
-        cols.append(dict(title=title, sig=st[sig_key], aud=st[aud_key], sE=sE, sI=sI))
+        cols.append(_Column(title=title, sig=st[sig_key], aud=st[aud_key], sE=sE, sI=sI))
 
     # ── Neuron subsets ────────────────────────────────────────────────────────
     rng_sub = np.random.default_rng(0)
@@ -196,7 +207,9 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
 
     for fmt in ("png", "pdf"):
         out = os.path.join(str(out_dir), f"cancellation{out_tag}.{fmt}")
-        fig.savefig(out, format=fmt, bbox_inches="tight",
-                    **({"dpi": 150} if fmt == "png" else {}))
+        if fmt == "png":
+            fig.savefig(out, format=fmt, bbox_inches="tight", dpi=150)
+        else:
+            fig.savefig(out, format=fmt, bbox_inches="tight")
         print(f"Saved {out}")
     plt.close(fig)

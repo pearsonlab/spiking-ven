@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             V = V_kept
             print(f"  kept {len(kept)}/{args.n_bases} filters that ever fire")
-    enc = CausalFilterEncoder(V, np.zeros(len(V)), args.lam, coch_params)
+    enc = CausalFilterEncoder(V, args.lam, coch_params)
     enc.save(out_path)
     print(f"Saved {out_path}")
     E = (V ** 2).sum(axis=1)

@@ -30,7 +30,7 @@ def encoder():
     V = np.random.default_rng(0).standard_normal((K, Ch, L))
     cp = {"n_channels": Ch, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
-    return CausalFilterEncoder(V, np.zeros(K), 0.1, cp)
+    return CausalFilterEncoder(V, 0.1, cp)
 
 
 @pytest.fixture

@@ -277,7 +277,7 @@ def test_figure_filters_view_renders_without_a_ven_model(tmp_path):
     cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
     enc_path = tmp_path / "enc.npz"
-    CausalFilterEncoder(V, np.zeros(K), 0.1, cp).save(enc_path)
+    CausalFilterEncoder(V, 0.1, cp).save(enc_path)
 
     cli_figure.main(["--view", "filters", "--encoder", str(enc_path),
                      "--model", str(tmp_path / "absent.npz"), "--out-dir", str(tmp_path)])
@@ -297,7 +297,7 @@ def test_figure_units_view_renders_without_a_ven_model(tmp_path):
     cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
     enc_path = tmp_path / "enc.npz"
-    CausalFilterEncoder(V, np.zeros(K), 0.1, cp).save(enc_path)
+    CausalFilterEncoder(V, 0.1, cp).save(enc_path)
     sr, n = 16000, 1600                                  # 100 ms renditions
     audio = np.random.default_rng(1).standard_normal((3, n)).astype(np.float32)
     motifs = tmp_path / "motifs.npz"
@@ -321,7 +321,7 @@ def test_figure_gammatone_view_renders_without_a_ven_model(tmp_path):
     cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
     enc_path = tmp_path / "enc.npz"
-    CausalFilterEncoder(V, np.zeros(K), 0.1, cp).save(enc_path)
+    CausalFilterEncoder(V, 0.1, cp).save(enc_path)
     n = SR // 5                                        # two 200 ms renditions of noise
     audio = np.random.default_rng(1).standard_normal((2, n)) * [[0.1], [0.2]]
     motifs_path = tmp_path / "motifs.npz"

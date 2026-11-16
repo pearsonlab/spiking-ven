@@ -82,7 +82,7 @@ def test_encode_signal_is_causal_from_the_waveform(rng, divisive_gain, t0_ms):
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
-    enc = CausalFilterEncoder(V, np.zeros(K), 0.01, cp)
+    enc = CausalFilterEncoder(V, 0.01, cp)
 
     x = rng.standard_normal(int(0.3 * sr)) * 0.05
     y = x.copy()
@@ -148,10 +148,22 @@ def test_encoder_roundtrip_and_width(tmp_path, toy):
     V, _, K, C, L = toy
     cp = {"n_channels": C, "K_frames": L, "frame_rate": 500,
           "lo_hz": 200.0, "hi_hz": 8000.0, "rms_ref": 0.1}
-    enc = CausalFilterEncoder(V, np.zeros(K), 0.05, cp)
+    enc = CausalFilterEncoder(V, 0.05, cp)
     assert enc.n_channels == K and enc.L == L
     path = tmp_path / "enc.npz"
     enc.save(path)
     back = CausalFilterEncoder.load(path)
     assert np.array_equal(back.V, enc.V) and back.lam == enc.lam
     assert back.coch_params == cp
+
+
+def test_an_encoder_saved_with_the_old_bias_key_still_loads(tmp_path, toy):
+    """Encoders saved before the per-filter bias was removed carry a zero ``bias``."""
+    V, _, K, C, L = toy
+    path = tmp_path / "old.npz"
+    np.savez(path, V=V, bias=np.zeros(K), lam=0.05,
+             **{f"cp_{k}": v for k, v in {"n_channels": C, "K_frames": L, "frame_rate": 500,
+                                          "lo_hz": 200.0, "hi_hz": 8000.0,
+                                          "rms_ref": 0.1}.items()})
+    enc = CausalFilterEncoder.load(path)
+    assert np.array_equal(enc.V, V) and enc.lam == 0.05

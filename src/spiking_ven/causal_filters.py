@@ -9,7 +9,7 @@ sound-level calibration; pass a reference signal, as the pipeline does, rather t
 letting each stimulus set its own level.
 
     drive:       a_k(t) = <V[k], X[:, t-L:t]>                one matmul, all t at once
-    competition: s(t) = argmin_s 0.5||P_t - sum_k s_k V_k||^2 + sum_k (lam+b_k)|s_k|
+    competition: s(t) = argmin_s 0.5||P_t - sum_k s_k V_k||^2 + lam sum_k |s_k|
                  by ISTA on the precomputed drive and Gram, so correlated filters
                  explain each other away rather than all firing together
 
@@ -69,19 +69,14 @@ def _roughness_grad(V):
     return g
 
 
-def infer(X, V, lam, n_iter=20, bias=None):
-    """Strictly causal sparse activations. ``V`` is (K, C, L); returns S (K, T).
-
-    ``bias`` is an optional per-filter threshold offset added to ``lam``. Encoders
-    trained here carry an all-zero bias; it is kept so saved encoders round-trip.
-    """
+def infer(X, V, lam, n_iter=20):
+    """Strictly causal sparse activations. ``V`` is (K, C, L); returns S (K, T)."""
     K, C, L = V.shape
     T = X.shape[1]
     W = V.reshape(K, C * L)
     G = W @ W.T
     step = 1.0 / max(float(np.linalg.eigvalsh(G).max()), 1e-12)
-    b = np.zeros(K) if bias is None else np.asarray(bias, dtype=float)
-    thr = np.maximum((lam + b) * step, 0.0)                 # per-filter threshold
+    thr = lam * step                                        # soft threshold
     drive = _past_windows(X, L) @ W.T                       # (T, K), all t at once
     S = np.zeros((T, K))
     for t in range(T):
@@ -220,9 +215,8 @@ class CausalFilterEncoder:
     relies on (see ``stimuli.encode_acts``).
     """
 
-    def __init__(self, V, bias, lam, coch_params):
+    def __init__(self, V, lam, coch_params):
         self.V = np.asarray(V)
-        self.bias = np.asarray(bias)
         self.lam = float(lam)
         self.coch_params = dict(coch_params)
         self.L = self.V.shape[2]
@@ -245,7 +239,7 @@ class CausalFilterEncoder:
         X = cochleagram(sig, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
                         lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
         Xc = causal_meansub(X, self.L)
-        acts = infer(Xc, self.V, self.lam, n_iter=n_ista, bias=self.bias)
+        acts = infer(Xc, self.V, self.lam, n_iter=n_ista)
 
         if divisive_gain:
             # Divide by the norm of the reconstructed past window so magnitude stops
@@ -266,7 +260,7 @@ class CausalFilterEncoder:
         return acts.astype(np.float32)
 
     def save(self, path):
-        np.savez(path, V=self.V, bias=self.bias, lam=self.lam,
+        np.savez(path, V=self.V, lam=self.lam,
                  **{f"cp_{k}": v for k, v in self.coch_params.items()})
 
     @classmethod
@@ -274,4 +268,6 @@ class CausalFilterEncoder:
         d = np.load(path, allow_pickle=False)
         cp = {k[3:]: (v.item() if v.ndim == 0 else v) for k, v in d.items()
               if k.startswith("cp_")}
-        return cls(d["V"], d["bias"], float(d["lam"]), cp)
+        # Encoders saved before the per-filter bias was removed carry an all-zero
+        # ``bias`` key; it is not read.
+        return cls(d["V"], float(d["lam"]), cp)

@@ -8,15 +8,33 @@ Mandelblat-Cerf et al. 2014 (eLife 3:e02152); the auditory input rate is from Sc
 
 from __future__ import annotations
 
-__all__ = ["BIOLOGICAL_TARGETS", "PEAK_BIN_MS"]
+from typing import TypedDict
+
+__all__ = ["BIOLOGICAL_TARGETS", "BiologicalTargets", "PEAK_BIN_MS"]
 
 #: Bin width (ms) for the responder PSTH peak. 2 ms is the only binning Mandelblat-Cerf
 #: state -- for their latency and duration z-tests -- and nothing in the paper says how
 #: the plotted PSTHs were binned or whether they were smoothed.
 PEAK_BIN_MS = 2
 
+
+class BiologicalTargets(TypedDict):
+    """Types of :data:`BIOLOGICAL_TARGETS`: ranges and (mean, SD) pairs, or one number."""
+
+    singing_rate_hz: tuple[float, float]
+    responder_fraction: float
+    responder_peak_change_hz: float
+    extra_spikes_per_burst: tuple[float, float]
+    responder_peak_latency_ms: tuple[float, float]
+    responder_late_over_peak_max: float
+    response_latency_ms: tuple[float, float]
+    response_duration_ms: tuple[float, float]
+    reversed_min_ratio: float
+    aud_song_rate_hz: tuple[float, float]
+
+
 # Verbatim targets, quoted or read off the papers' figures.
-BIOLOGICAL_TARGETS = {
+BIOLOGICAL_TARGETS: BiologicalTargets = {
     # Quoted from Mandelblat-Cerf et al. 2014 (eLife 3:e02152), pp. 10-13.
     #: "AIV single-units discharged at low rates during singing (1-10 Hz, Figure 7C)".
     #: A range for the population of 37 single units, not a mean.

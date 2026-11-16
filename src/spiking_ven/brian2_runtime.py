@@ -26,7 +26,7 @@ error signal.
 
 import numpy as np
 
-from brian2 import NeuronGroup, Synapses
+from brian2 import NeuronGroup, SpikeSource, Synapses
 from brian2.units import ms, second
 
 __all__ = [
@@ -191,8 +191,8 @@ def _wire(syn: Synapses, W: np.ndarray) -> None:
 def build_ven_synapses(
     groups: dict,
     w: dict,
-    aud_group: NeuronGroup,
-    hvc_group: NeuronGroup,
+    aud_group: SpikeSource,
+    hvc_group: SpikeSource,
     name_prefix: str = "ven",
 ) -> list:
     """Wire the trained weights: aud→E (B), HVC→I (B_hvc), E→I (JEI), I→E (JIE).

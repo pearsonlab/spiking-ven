@@ -217,16 +217,18 @@ def build_stimuli(
               f"(lower -> more room for the reversed song to stand out)")
         print("Building HVC inputs...")
 
-    shape = dict(spikes_per_burst=HVC_SPIKES_PER_BURST, intra_burst_hz=HVC_INTRA_BURST_HZ)
     T_total_burn = t_burn + T_rend
     hvc_burn = generate_hvc_bursts(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
                                    T_song=T_song, T_burn=t_burn, T_post=t_post, seed=seed,
-                                   **shape)
+                                   spikes_per_burst=HVC_SPIKES_PER_BURST,
+                                   intra_burst_hz=HVC_INTRA_BURST_HZ)
     aud_burn = np.zeros((n_kernels, T_total_burn), dtype=np.float32)
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
     hvc_on = generate_hvc_bursts(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
-                                 T_burn=0, T_post=t_post, seed=seed, **shape)
+                                 T_burn=0, T_post=t_post, seed=seed,
+                                 spikes_per_burst=HVC_SPIKES_PER_BURST,
+                                 intra_burst_hz=HVC_INTRA_BURST_HZ)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
 
     # Introductory notes: HVC activity before each motif, with no sound. Passed to the
@@ -234,7 +236,9 @@ def build_stimuli(
     # burn-in rendition it sits at the end of the silence instead.
     n_notes, note_ms, gap_ms = (int(x) for x in hvc_intro)
     hvc_prelude = generate_hvc_intro(n_hvc, T_song, n_notes, note_ms, gap_ms,
-                                     seed=seed + 1, **shape).astype(np.float32)
+                                     seed=seed + 1,
+                                     spikes_per_burst=HVC_SPIKES_PER_BURST,
+                                     intra_burst_hz=HVC_INTRA_BURST_HZ).astype(np.float32)
     n_pre = hvc_prelude.shape[1]
     if n_pre > t_burn:
         raise ValueError(f"the {n_pre} ms of intro notes do not fit in the {t_burn} ms burn-in")

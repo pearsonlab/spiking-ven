@@ -32,6 +32,7 @@ from ..constants import (
     G_NMDA,
     HVC_DELAY_MS,
     HVC_INTRO,
+    HVC_MODEL,
     J_MAX_IE,
     N_E,
     N_HVC,
@@ -105,6 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hvc-intro", type=int, nargs=3, default=list(HVC_INTRO),
                    metavar=("NOTES", "NOTE_MS", "GAP_MS"),
                    help="HVC introductory notes before each motif (no sound); 0 0 0 for none")
+    p.add_argument("--hvc-model", choices=("gaussian", "burst"), default=HVC_MODEL,
+                   help="HVC spike generator: Gaussian-envelope Poisson bursts, or "
+                        "finchsim's stereotyped HVC_RA bursts (constants.HVC_MODEL)")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
@@ -148,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
                        mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista,
-                       hvc_intro=tuple(args.hvc_intro))
+                       hvc_intro=tuple(args.hvc_intro), hvc_model=args.hvc_model)
     aud_correct, aud_reversed = st["aud_correct"], st["aud_reversed"]
     hvc_prelude = st["hvc_prelude"]
     correct_pool = st["correct_pool"]

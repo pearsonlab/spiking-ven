@@ -136,9 +136,9 @@ N_RENDITIONS = 600
 #: Auditory -> E, fast (AMPA-like) component. Each E cell connects to each encoder channel
 #: with probability ``C_B``, so it samples only a few channels. The mean weight per
 #: connection is ``B_SCALE / n_aud`` (n_aud = the encoder's channel count). Set together
-#: with ``G_NMDA``: the slow NMDA component carries part of the drive, so the fast weights
-#: are lower (16 without NMDA).
-B_SCALE = 10.0
+#: with ``G_NMDA`` (the slow NMDA component carries part of the drive) and with the
+#: encoder's output scale (raw ISTA coefficients, no loudness gain).
+B_SCALE = 13.0
 C_B = 0.05
 
 #: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:

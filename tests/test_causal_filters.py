@@ -65,12 +65,11 @@ def test_inference_is_causal_under_truncation(toy):
         )
 
 
-@pytest.mark.parametrize("divisive_gain", [True, False])
 @pytest.mark.parametrize("t0_ms", [150.0, 150.5, 151.0])
-def test_encode_signal_is_causal_from_the_waveform(rng, divisive_gain, t0_ms):
+def test_encode_signal_is_causal_from_the_waveform(rng, t0_ms):
     """Waveform in, activations out: changing the audio from t0 on must leave every
-    activation before t0 unchanged. This covers the cochleagram's frame timing and the
-    divisive gain, which ``infer`` alone does not see.
+    activation before t0 unchanged. This covers the cochleagram's frame timing, which
+    ``infer`` alone does not see.
 
     ``rms_from`` is the unperturbed signal for both encodes. It sets one fixed input gain
     -- the sound level -- and the pipeline always passes it, so the gain is not allowed
@@ -88,7 +87,7 @@ def test_encode_signal_is_causal_from_the_waveform(rng, divisive_gain, t0_ms):
     y = x.copy()
     s0 = int(t0_ms * sr / 1000)
     y[s0:] += rng.standard_normal(len(y) - s0) * 0.5
-    kw = dict(sr=sr, upsample_to_ms=True, rms_from=x, divisive_gain=divisive_gain)
+    kw = dict(sr=sr, upsample_to_ms=True, rms_from=x)
     a, b = enc.encode_signal(x, **kw), enc.encode_signal(y, **kw)
 
     t0 = int(np.ceil(t0_ms))

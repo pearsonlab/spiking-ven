@@ -33,7 +33,7 @@ data = ["soundfile>=0.13"]
 brian2 = ["brian2>=2.8.0,<2.9"]
 # Figure generation.
 plots = ["matplotlib>=3.10"]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "ty"]
 
 [project.urls]
 Homepage = "https://github.com/pearsonlab/spiking-ven"
@@ -68,3 +68,8 @@ extend-exclude = ["src/spiking_ven/filterbank.py"]
 # break CI or silently start rewriting ported research code. This is ruff's documented
 # default set: pyflakes plus the essential pycodestyle errors.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ty.src]
+# Type-checked in CI, non-blocking for now (see ci.yml). Same vendored exclusion as ruff:
+# filterbank.py stays byte-for-byte with Gammatone 1.0.3.
+exclude = ["src/spiking_ven/filterbank.py"]

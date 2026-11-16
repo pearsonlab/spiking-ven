@@ -3,7 +3,7 @@ OUT  ?= outputs
 DATA ?= data
 SEED ?= 42
 
-.PHONY: all figure psth verify manifest test test-repro smoke clean-artifacts
+.PHONY: all figure psth verify manifest test typecheck test-repro smoke clean-artifacts
 
 all: figure
 
@@ -42,6 +42,10 @@ manifest:
 
 test:
 	uv run --extra dev pytest -m "not slow"
+
+## Static type check with ty. All extras, so the optional imports resolve.
+typecheck:
+	uv run --all-extras ty check
 
 ## The full reproduction assertions (minutes) -- needs outputs/ populated.
 test-repro:

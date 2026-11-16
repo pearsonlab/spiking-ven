@@ -146,14 +146,15 @@ def test_daf_window_ms():
 
 _ALL_NONE = {"sr": None, "seed": None, "t_post": None, "t_burn": None,
              "mean_rate_hz": None, "n_ista": None, "daf_window_s": None,
-             "hvc_intro": None}
+             "hvc_intro": None, "hvc_model": None}
 
 
 def test_an_empty_record_falls_back_to_the_constants(capsys):
     s = resolve_stimulus_settings({}, dict(_ALL_NONE))
     assert s == {"sr": None, "seed": None, "t_post": C.T_POST, "t_burn": C.T_BURN,
                  "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
-                 "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO)}
+                 "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO),
+                 "hvc_model": C.HVC_MODEL}
     assert capsys.readouterr().err == ""
 
 
@@ -188,7 +189,7 @@ def test_a_record_round_trips_through_json(tmp_path, capsys):
     enc.write_bytes(b"encoder")
     st = {"sr": SR, "seed": 3, "t_post": 120, "t_burn": 400, "n_hvc": 6,
           "mean_rate_hz": 2.5, "n_ista": 20, "daf_window_s": (0.3, 0.35),
-          "hvc_intro": (2, 60, 30)}
+          "hvc_intro": (2, 60, 30), "hvc_model": "burst"}
     rec = json.loads(json.dumps(stimulus_record(st, encoder_path=enc)))
     assert rec["encoder_sha256"] == sha256_file(enc) and "motifs_sha256" not in rec
     s = resolve_stimulus_settings(rec, dict(_ALL_NONE), encoder_path=enc)
@@ -227,3 +228,74 @@ def test_build_stimuli_puts_the_intro_notes_before_the_motif(encoder, motifs):
     assert not st["hvc_burn"][:, :200].any()
     none = build_stimuli(encoder, motifs, hvc_intro=(0, 0, 0), verbose=False)
     assert none["hvc_prelude"].shape[1] == 0
+
+
+# ------------------------------------------------------------- HVC_RA burst generator
+
+
+def test_bursts_have_finchsim_hvcra_shape_and_repeat_every_rendition():
+    """One burst per neuron per motif: 4 spikes 2 ms apart (500 Hz, 6 ms long), onset
+    in the neuron's own slot of the motif, identical across renditions."""
+    from spiking_ven.common import generate_hvc_bursts
+
+    n, T_song, T_post, T_burn, n_rend = 60, 840, 160, 100, 3
+    R = T_song + T_post
+    T = T_burn + n_rend * R
+    s = generate_hvc_bursts(n, T, n_rend, T_song, T_burn, T_post=T_post, seed=0)
+    assert s.shape == (n, T) and set(np.unique(s)) <= {0.0, 1.0}
+    assert (s.sum(axis=1) == 4 * n_rend).all()
+    assert not s[:, :T_burn].any()
+    slot = T_song / n
+    for i in range(n):
+        t = np.flatnonzero(s[i, T_burn:T_burn + R])
+        np.testing.assert_array_equal(np.diff(t), [2, 2, 2])
+        assert np.floor(i * slot) <= t[0] < np.ceil((i + 1) * slot)
+    one = s[:, T_burn:T_burn + R]
+    for r in range(1, n_rend):
+        np.testing.assert_array_equal(s[:, T_burn + r * R:T_burn + (r + 1) * R], one)
+    np.testing.assert_array_equal(
+        s, generate_hvc_bursts(n, T, n_rend, T_song, T_burn, T_post=T_post, seed=0))
+    assert not np.array_equal(
+        s, generate_hvc_bursts(n, T, n_rend, T_song, T_burn, T_post=T_post, seed=1))
+    with pytest.raises(ValueError, match="too short"):
+        generate_hvc_bursts(n, T - 1, n_rend, T_song, T_burn, T_post=T_post)
+
+
+def test_hvc_drive_dispatches_and_rejects_unknown_models():
+    from spiking_ven.common import generate_hvc_spikes, hvc_drive
+
+    kw = dict(n_hvc=8, T=300, n_renditions=1, T_song=200, T_burn=0, T_post=100, seed=3,
+              peak_rate=300.0, kernel_width=10.0, spikes_per_burst=3, intra_burst_hz=400.0)
+    np.testing.assert_array_equal(
+        hvc_drive("gaussian", **kw),
+        generate_hvc_spikes(8, 300, 1, 200, 0, T_post=100, peak_rate=300.0,
+                            kernel_width=10.0, seed=3))
+    assert (hvc_drive("burst", **kw).sum(axis=1) == 3).all()
+    with pytest.raises(ValueError, match="unknown HVC model"):
+        hvc_drive("hvcx", **kw)
+
+
+def test_intro_notes_use_the_chosen_generator():
+    from spiking_ven.common import generate_hvc_intro
+
+    pre = generate_hvc_intro(60, 840, n_notes=2, note_ms=84, gap_ms=20, seed=1,
+                             model="burst", spikes_per_burst=4, intra_burst_hz=500.0)
+    active = np.flatnonzero(pre.any(axis=1))
+    assert len(active) == 6
+    assert (pre[active, :104].sum(axis=1) == 4).all()
+    np.testing.assert_array_equal(pre[:, :104], pre[:, 104:])
+
+
+def test_a_record_without_a_generator_means_gaussian():
+    assert resolve_stimulus_settings({"seed": 42},
+                                     {"hvc_model": None})["hvc_model"] == "gaussian"
+    assert resolve_stimulus_settings({}, {"hvc_model": None})["hvc_model"] == C.HVC_MODEL
+    assert resolve_stimulus_settings({"hvc_model": "burst"},
+                                     {"hvc_model": None})["hvc_model"] == "burst"
+
+
+def test_build_stimuli_records_and_uses_the_burst_generator(encoder, motifs):
+    st = build_stimuli(encoder, motifs, hvc_model="burst", verbose=False)
+    assert st["hvc_model"] == "burst"
+    assert (st["hvc_on"].sum(axis=1) == C.HVC_SPIKES_PER_BURST).all()
+    assert stimulus_record(st)["hvc_model"] == "burst"

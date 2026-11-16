@@ -194,6 +194,62 @@ running level that mean subtraction removed. Variants tried, each with the netwo
   41% but raised baseline and trained-song rates: E cells left without auditory input never
   acquire inhibition (learning is audio-gated) and fire tonically through the song.
 
+## HVC input model
+
+Measured with the encoder's former divisive gain and `B_SCALE` 10, before the no-gain change
+above.
+
+
+- **finchsim's HVC_RA bursts are available, not adopted.** `HVC_MODEL = "burst"` (`--hvc-model
+  burst`) ports finchsim's `ra.build_hvcra_spike_trains`: one burst per neuron per motif, 4
+  spikes at 500 Hz, onsets on a jittered grid, identical every rendition -- the means of the
+  HVC_RA statistics finchsim cites (Hahnloser et al. 2002; Picardo et al. 2016; Long et al.
+  2010), not their spread. It delivers 4 spikes per neuron per motif against the Gaussian
+  model's 6.2 +/- 1.6, so 64% of the HVC -> I drive. Retrained at seed 42 (Gaussian / burst at
+  `B_HVC_SCALE` 0.333 / burst at 0.518, which matches the drive):
+
+  | metric | Gaussian | burst 0.333 | burst 0.518 |
+  |---|---|---|---|
+  | baseline, all units (Hz) | 2.63 | 2.93 | 2.62 |
+  | responders | 53% | 54% | 50% |
+  | peak change (Hz) | 34.8 | 48.6 | 45.8 |
+  | latency (ms) | 36.9 | 32.8 | 39.5 |
+  | duration (ms) | 61.2 | 53.3 | 43.0 |
+  | extra spikes / neuron / burst | 1.62 | 1.45 | 1.40 |
+  | reversed / trained | 1.16 | 1.17 | 1.15 |
+
+  Matching the drive restores the baseline, so the rest is the burst structure itself: a
+  sharper, shorter DAF response (peak +9 SD, duration -6 SD of the seed-to-seed noise), with
+  duration below the 47 ms lower bound of the bird's 90 +/- 43 ms. Adopting it needs the
+  response lengthened again, as `A_SFA`/NMDA did for the Gaussian model.
+- **60 HVC units tile the motif thinly; 600 tile it densely.** At 60, one burst starts every
+  14 ms and about 0.5 neurons burst at any instant (HVC_RA: ~20,000 cells, so roughly
+  130-220). The 20 ms synaptic filter keeps the summed drive above half its mean, but each I
+  neuron has ~6 HVC inputs (`c_hvc` 0.1) and spends about half the motif below 10% of its own
+  mean drive (longest such stretch ~240 ms). At 600, with `c_hvc` unchanged (~60 inputs per I),
+  that falls to 1% (longest ~46 ms) and ~120 of 150 I neurons are driven at any ms, against
+  50-58. `B_HVC_SCALE` is per connection, so it has to shrink with `n_hvc`: 10x smaller keeps
+  the mean drive to I, but the baseline rose (Gaussian 3.04 Hz, burst 2.94 Hz), so each was
+  recalibrated to the 2.63 Hz baseline of the shipped model. Seed 42, all at that baseline:
+
+  | metric | Gaussian 60 (0.333) | Gaussian 600 (0.045) | burst 60 (0.518) | burst 600 (0.065) |
+  |---|---|---|---|---|
+  | baseline, all units (Hz) | 2.63 | 2.64 | 2.62 | 2.64 |
+  | responders | 53% | 39% | 50% | 43% |
+  | peak change (Hz) | 34.8 | 29.2 | 45.8 | 36.9 |
+  | latency (ms) | 36.9 | 38.3 | 39.5 | 35.2 |
+  | duration (ms) | 61.2 | 45.9 | 43.0 | 49.8 |
+  | peak latency (ms) | +36 | +62 | +48 | +50 |
+  | extra spikes / neuron / burst | 1.62 | 1.19 | 1.40 | 1.26 |
+  | reversed / trained | 1.16 | 1.14 | 1.15 | 1.15 |
+  | responders with a detectable onset | 82 | 36 | 74 | 48 |
+
+  A dense HVC code weakens the DAF response toward the bird (extra spikes 1.6 -> 1.2) and, for
+  the burst generator, undoes most of what it did to the response at 60 units. It also
+  shortens the Gaussian model's response below the 47 ms bound. One seed only, and latency
+  and duration rest on 36-82 units here; multi-seed evaluation is needed before adopting any of
+  these. Untuned: `c_hvc` (inputs per I) at 600.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst

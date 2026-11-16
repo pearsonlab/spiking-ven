@@ -16,12 +16,15 @@ import sys
 
 import numpy as np
 
-from .common import acts_to_spikes, generate_hvc_intro, generate_hvc_spikes
+from .common import acts_to_spikes, generate_hvc_intro, hvc_drive
 from .constants import (
     AUD_MEAN_RATE_HZ,
     DAF_WINDOW_S,
     DAF_WN_AMPLITUDE,
     HVC_INTRO,
+    HVC_INTRA_BURST_HZ,
+    HVC_MODEL,
+    HVC_SPIKES_PER_BURST,
     KERNEL_WIDTH_MS,
     N_HVC,
     N_ISTA,
@@ -53,11 +56,12 @@ STIMULUS_DEFAULTS = {
     "n_ista": N_ISTA,
     "daf_window_s": tuple(DAF_WINDOW_S),
     "hvc_intro": tuple(HVC_INTRO),
+    "hvc_model": HVC_MODEL,
 }
 
 #: What a model that records its stimuli but not a setting was trained with: the setting
 #: did not exist yet, so neither did the feature.
-UNRECORDED_MEANS = {"hvc_intro": (0, 0, 0)}
+UNRECORDED_MEANS = {"hvc_intro": (0, 0, 0), "hvc_model": "gaussian"}
 
 
 def daf_window_ms(window_s) -> tuple[int, float]:
@@ -130,6 +134,7 @@ def build_stimuli(
     n_ista: int = N_ISTA,
     daf_window_s: tuple[float, float] = DAF_WINDOW_S,
     hvc_intro: tuple[int, int, int] = HVC_INTRO,
+    hvc_model: str = HVC_MODEL,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -143,7 +148,7 @@ def build_stimuli(
     padded ``aud_burn``), the bookkeeping the caller needs (``T_song``, ``T_rend``,
     ``train_idx``, ``fwd_rev_corr``, ``n_kernels``), and every setting it was built with
     (``sr``, ``seed``, ``t_post``, ``t_burn``, ``n_hvc``, ``mean_rate_hz``, ``n_ista``,
-    ``daf_window_s``) so later encodes and analyses match.
+    ``daf_window_s``, ``hvc_intro``, ``hvc_model``) so later encodes and analyses match.
     """
     corpus = load_corpus(motifs_path)
     if sr is None:
@@ -213,17 +218,17 @@ def build_stimuli(
               f"(lower -> more room for the reversed song to stand out)")
         print("Building HVC inputs...")
 
+    # The burst-shape settings of both generators; hvc_drive drops the ones it ignores.
+    shape = dict(peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
+                 spikes_per_burst=HVC_SPIKES_PER_BURST, intra_burst_hz=HVC_INTRA_BURST_HZ)
     T_total_burn = t_burn + T_rend
-    hvc_burn = generate_hvc_spikes(n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
-                                   T_song=T_song, T_burn=t_burn, T_post=t_post,
-                                   peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
-                                   seed=seed)
+    hvc_burn = hvc_drive(hvc_model, n_hvc=n_hvc, T=T_total_burn, n_renditions=1,
+                         T_song=T_song, T_burn=t_burn, T_post=t_post, seed=seed, **shape)
     aud_burn = np.zeros((n_kernels, T_total_burn), dtype=np.float32)
     aud_burn[:, t_burn: t_burn + T_rend] = aud_correct
 
-    hvc_on = generate_hvc_spikes(n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
-                                 T_burn=0, T_post=t_post, peak_rate=PEAK_RATE_HZ,
-                                 kernel_width=KERNEL_WIDTH_MS, seed=seed)
+    hvc_on = hvc_drive(hvc_model, n_hvc=n_hvc, T=T_rend, n_renditions=1, T_song=T_song,
+                       T_burn=0, T_post=t_post, seed=seed, **shape).astype(np.float32)
     hvc_off = np.zeros((n_hvc, T_rend), dtype=np.float32)
 
     # Introductory notes: HVC activity before each motif, with no sound. Passed to the
@@ -231,8 +236,8 @@ def build_stimuli(
     # burn-in rendition it sits at the end of the silence instead.
     n_notes, note_ms, gap_ms = (int(x) for x in hvc_intro)
     hvc_prelude = generate_hvc_intro(n_hvc, T_song, n_notes, note_ms, gap_ms,
-                                     peak_rate=PEAK_RATE_HZ, kernel_width=KERNEL_WIDTH_MS,
-                                     seed=seed + 1).astype(np.float32)
+                                     seed=seed + 1, model=hvc_model,
+                                     **shape).astype(np.float32)
     n_pre = hvc_prelude.shape[1]
     if n_pre > t_burn:
         raise ValueError(f"the {n_pre} ms of intro notes do not fit in the {t_burn} ms burn-in")
@@ -250,6 +255,7 @@ def build_stimuli(
         "aud_burn": aud_burn,
         "hvc_prelude": hvc_prelude,
         "hvc_intro": (n_notes, note_ms, gap_ms),
+        "hvc_model": hvc_model,
         "T_song": T_song,
         "T_rend": T_rend,
         "train_idx": train_idx,
@@ -293,6 +299,7 @@ def stimulus_record(st: dict, *, encoder_path=None, motifs_path=None) -> dict:
         "n_ista": int(st["n_ista"]),
         "daf_window_s": [float(x) for x in st["daf_window_s"]],
         "hvc_intro": [int(x) for x in st["hvc_intro"]],
+        "hvc_model": str(st["hvc_model"]),
     }
     if encoder_path is not None:
         rec["encoder_sha256"] = sha256_file(encoder_path)

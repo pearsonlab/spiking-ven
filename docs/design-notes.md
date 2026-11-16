@@ -167,6 +167,31 @@ The bird's response is long and weak (~1 extra spike over ~90 ms); the model's i
   The 20 ms gap before the motif lets inhibition sag again; with no gap the onset rate fell to
   2.9 Hz, on a model trained without intro notes.
 
+## HVC input model
+
+- **finchsim's HVC_RA bursts are available, not adopted.** `HVC_MODEL = "burst"` (`--hvc-model
+  burst`) ports finchsim's `ra.build_hvcra_spike_trains`: one burst per neuron per motif, 4
+  spikes at 500 Hz, onsets on a jittered grid, identical every rendition -- the means of the
+  HVC_RA statistics finchsim cites (Hahnloser et al. 2002; Picardo et al. 2016; Long et al.
+  2010), not their spread. It delivers 4 spikes per neuron per motif against the Gaussian
+  model's 6.2 +/- 1.6, so 64% of the HVC -> I drive. Retrained at seed 42 (Gaussian / burst at
+  `B_HVC_SCALE` 0.333 / burst at 0.518, which matches the drive):
+
+  | metric | Gaussian | burst 0.333 | burst 0.518 |
+  |---|---|---|---|
+  | baseline, all units (Hz) | 2.63 | 2.93 | 2.62 |
+  | responders | 53% | 54% | 50% |
+  | peak change (Hz) | 34.8 | 48.6 | 45.8 |
+  | latency (ms) | 36.9 | 32.8 | 39.5 |
+  | duration (ms) | 61.2 | 53.3 | 43.0 |
+  | extra spikes / neuron / burst | 1.62 | 1.45 | 1.40 |
+  | reversed / trained | 1.16 | 1.17 | 1.15 |
+
+  Matching the drive restores the baseline, so the rest is the burst structure itself: a
+  sharper, shorter DAF response (peak +9 SD, duration -6 SD of the seed-to-seed noise), with
+  duration below the 47 ms lower bound of the bird's 90 +/- 43 ms. Adopting it needs the
+  response lengthened again, as `A_SFA`/NMDA did for the Gaussian model.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst

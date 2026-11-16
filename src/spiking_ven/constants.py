@@ -30,6 +30,9 @@ __all__ = [
     # 1. the preparation
     "SR",
     "KERNEL_WIDTH_MS",
+    "HVC_MODEL",
+    "HVC_SPIKES_PER_BURST",
+    "HVC_INTRA_BURST_HZ",
     "PEAK_RATE_HZ",
     "DAF_WN_AMPLITUDE",
     "DAF_WINDOW_S",
@@ -68,6 +71,20 @@ KERNEL_WIDTH_MS = 10.0
 #: Peak HVC burst rate (spk/s). Scales inversely with the kernel width so the integrated
 #: drive per burst is constant -- derived, never written as a literal.
 PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
+
+#: How HVC spikes are generated: ``"gaussian"`` (one Poisson burst per neuron under a
+#: Gaussian rate envelope, ``KERNEL_WIDTH_MS`` / ``PEAK_RATE_HZ``) or ``"burst"`` (one
+#: fixed burst of ``HVC_SPIKES_PER_BURST`` spikes at ``HVC_INTRA_BURST_HZ``, onsets on a
+#: jittered grid that tiles the motif -- finchsim's HVC_RA generator,
+#: ``ra.build_hvcra_spike_trains``). The burst model matches documented HVC_RA statistics:
+#: ~1 burst per motif, 3.9 +/- 1.9 spikes per burst, 6-10 ms long, 400-600 Hz within the
+#: burst, sub-ms jitter across renditions (Hahnloser et al. 2002; Picardo et al. 2016).
+HVC_MODEL = "gaussian"
+
+#: Spikes per HVC burst and the rate within it (``HVC_MODEL = "burst"``), as finchsim's
+#: ``params.HVCRA_RA``. 4 spikes at 500 Hz span 6 ms.
+HVC_SPIKES_PER_BURST = 4
+HVC_INTRA_BURST_HZ = 500.0
 
 #: DAF white noise is mixed at this multiple of song RMS: ~95 dBSPL WN vs ~80 dBSPL song.
 #:

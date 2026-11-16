@@ -28,7 +28,7 @@ __version__ = "0.6.0"
 
 from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav
-from .common import acts_to_spikes, generate_hvc_spikes, spike_to_rate
+from .common import acts_to_spikes, generate_hvc_bursts, generate_hvc_spikes, spike_to_rate
 from .filterbank import centre_frequencies, gammatone_spectrogram
 from .vocal_error_net import VocalErrorNet, VocalErrorNetV2
 
@@ -46,5 +46,6 @@ __all__ = [
     "VocalErrorNet",
     "VocalErrorNetV2",
     "generate_hvc_spikes",
+    "generate_hvc_bursts",
     "spike_to_rate",
 ]

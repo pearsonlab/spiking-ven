@@ -218,6 +218,16 @@ song does not reach keep zero rows and respond fully to novel sound.
 - **HVC** (`common.generate_hvc_spikes`): neuron `i` of `n_hvc` has a Gaussian rate envelope
   centred at the `i`-th of `n_hvc` evenly spaced times across the motif, width `KERNEL_WIDTH_MS`
   (10 ms) and peak `PEAK_RATE_HZ` (300 Hz). Each 1 ms bin spikes with probability `rate * 1e-3`.
+  This is the default, `HVC_MODEL = "gaussian"`; it gives 6.2 +/- 1.6 spikes per neuron per motif.
+- **HVC, burst model** (`common.generate_hvc_bursts`, `HVC_MODEL = "burst"`, `--hvc-model burst`):
+  finchsim's HVC_RA generator (`ra.build_hvcra_spike_trains`). The motif is cut into `n_hvc`
+  equal slots; neuron `i` starts one burst at a uniformly jittered time in slot `i` and fires
+  `HVC_SPIKES_PER_BURST` (4) spikes at `HVC_INTRA_BURST_HZ` (500 Hz), a 6 ms burst, rounded down
+  to the 1 ms grid. Nothing is random within a burst, and the same onsets repeat every rendition.
+  This matches documented HVC_RA statistics: about 1 burst per motif, 3.9 +/- 1.9 spikes per
+  burst, 6-10 ms long, 400-600 Hz within the burst, under 1 ms jitter across motifs (Hahnloser et
+  al. 2002; Picardo et al. 2016). The generator is recorded in the model's stimulus record; a
+  model that records no generator was trained on the Gaussian one.
 - **Intro notes** (`common.generate_hvc_intro`, `HVC_INTRO = (2, 80, 20)`): before each motif,
   two 80 ms introductory notes of HVC activity, each followed by 20 ms of silence, with no
   sound. Each note is one sparse HVC sequence at the motif's burst density (about 6 of 60 neurons
@@ -225,7 +235,7 @@ song does not reach keep zero rows and respond fully to novel sound.
   `hvc_prelude`: the network runs them first, with zero auditory input, and the returned spikes
   start at motif onset. No learning happens during them, because the STDP gate needs auditory
   drive. Their purpose is to have I active when the song starts.
-- Both are passed through `apply_refractory` (2 ms), which keeps at most one spike per bin and
+- The auditory and Gaussian HVC spikes are passed through `apply_refractory` (2 ms), which keeps at most one spike per bin and
   drops spikes closer than 2 ms to the previous kept one.
 
 **Training** (`cli/train_ven.py`): `N_RENDITIONS = 600` calls to `fit`, one per rendition of the

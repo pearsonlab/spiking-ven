@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from spiking_ven.causal_filters import CausalFilterEncoder
-from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS
+from spiking_ven.constants import AUD_DELAY_MS, AUD_MEAN_RATE_HZ, HVC_DELAY_MS, N_HVC
 from spiking_ven.metrics import daf_response
 from spiking_ven.stimuli import build_stimuli
 from spiking_ven.targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
@@ -47,7 +47,7 @@ SEED = 42
 @pytest.fixture(scope="module")
 def setup():
     enc = CausalFilterEncoder.load(str(ENCODER))
-    st = build_stimuli(enc, str(MOTIFS), sr=16000, seed=SEED, n_hvc=60, n_ista=50,
+    st = build_stimuli(enc, str(MOTIFS), sr=16000, seed=SEED, n_hvc=N_HVC, n_ista=50,
                        verbose=False)
     ven = VocalErrorNet.load(str(MODEL), seed=SEED)
     return enc, st, ven
@@ -56,7 +56,7 @@ def setup():
 @pytest.fixture(scope="module")
 def daf(setup):
     enc, st, ven = setup
-    return daf_response(ven, enc, st, n_trials=20, seed=SEED)
+    return daf_response(ven, enc, st, seed=SEED)
 
 
 def test_encoder_is_the_pruned_causal_bank(setup):
@@ -92,35 +92,36 @@ def test_model_carries_the_operating_point(setup):
 
 def test_daf_response_matches_the_recorded_run(daf):
     # value at seed 42, tolerance ~3 SD over seeds 42-51 (SD in the comment)
-    assert daf["responder_fraction"] == pytest.approx(0.543, abs=0.03)       # 0.005
-    assert daf["baseline_hz_all"] == pytest.approx(2.77, abs=0.11)           # 0.035 Hz
-    assert daf["peak_change_hz"] == pytest.approx(39.6, abs=4.0)             # 1.27 Hz
-    assert daf["latency_ms"] == pytest.approx(28.1, abs=5.0)                 # 1.51 ms
-    assert daf["duration_ms"] == pytest.approx(60.3, abs=7.0)                # 2.26 ms
-    assert daf["extra_spikes_responders"] == pytest.approx(1.67, abs=0.08)   # 0.025
+    assert daf["responder_fraction"] == pytest.approx(0.587, abs=0.03)       # 0.008
+    assert daf["baseline_hz_all"] == pytest.approx(2.735, abs=0.05)          # 0.007 Hz
+    assert daf["peak_change_hz"] == pytest.approx(23.9, abs=2.0)             # 0.64 Hz
+    assert daf["latency_ms"] == pytest.approx(26.7, abs=2.5)                 # 0.76 ms
+    assert daf["duration_ms"] == pytest.approx(59.8, abs=4.5)                # 1.36 ms
+    assert daf["extra_spikes_responders"] == pytest.approx(0.93, abs=0.04)   # 0.013
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(3.25, abs=0.21)          # 0.069
-    assert daf["extra_spikes_max"] == pytest.approx(7.25, abs=0.85)          # 0.279
-    assert daf["extra_spikes_sd"] == pytest.approx(1.14, abs=0.09)           # 0.028
+    assert daf["extra_spikes_p90"] == pytest.approx(1.94, abs=0.09)          # 0.028
+    assert daf["extra_spikes_max"] == pytest.approx(4.65, abs=0.18)          # 0.058
+    assert daf["extra_spikes_sd"] == pytest.approx(0.80, abs=0.02)           # 0.005
 
 
 def test_biological_targets_that_are_met(daf):
-    """Only the ones that actually pass. Response magnitude is still ~2x over the bird's
-    upper bound and deliberately has no assertion here."""
+    """Every biological target, at the paper's ~100 trials per neuron (DAF_N_TRIALS)."""
     lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
-    # Latency sits in the upper half (23 + 12 = 35 ms): 28.1 ms at this seed,
-    # 31.5 +/- 1.5 ms over seeds 42-51.
+    # 26.7 ms at this seed, 27.6 +/- 0.8 over evaluation seeds 42-51; training seeds 43
+    # and 44 give 32 ms, still inside 23 + 12.
     assert abs(daf["latency_ms"] - lat) <= lat_sd
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
     # 7/17 has a 95% CI of 21-64%, so the responder fraction only has to land inside that.
     assert 0.21 <= daf["responder_fraction"] <= 0.64
+    lo, hi = BIOLOGICAL_TARGETS["extra_spikes_per_burst"]
+    assert lo <= daf["extra_spikes_responders"] <= hi
 
 
 def test_response_shape_matches_figure_8e(daf):

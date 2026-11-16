@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 from .stimuli import daf_waveform, daf_window_ms, encode_stimulus
+from .constants import DAF_N_TRIALS
 from .targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
 
 __all__ = [
@@ -30,7 +31,7 @@ __all__ = [
 ]
 
 
-def daf_trials(ven, encoder, st: dict, *, n_trials: int = 20, seed: int = 42):
+def daf_trials(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42):
     """E spikes for ``n_trials`` DAF renditions: ``(n_trials, n_e, T_rend)`` float32.
 
     Trials are renditions with independent noise draws; the song and the HVC drive are
@@ -74,7 +75,7 @@ def daf_responders(trials, *, onset_ms: int, window_ms: int = 150, alpha: float 
     return (pval < alpha) & (tval > 0), pre, post
 
 
-def daf_response(ven, encoder, st: dict, *, n_trials: int = 20, window_ms: int = 150,
+def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window_ms: int = 150,
                  alpha: float = 0.02, seed: int = 42,
                  duration_window_ms: int = 300) -> dict:
     """The DAF response, measured the way the experiment measures it.

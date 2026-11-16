@@ -91,45 +91,53 @@ first ~50 ms of every motif while that inhibition switches on.
 ## Expected numbers (asserted in the test suite)
 
 Definitions follow Mandelblat-Cerf et al. 2014: a 50 ms noise burst during singing, spike
-counts in 150 ms windows either side of onset, compared per neuron across 20 renditions by
-paired t-test, responder at p < 0.02. Latency is an onset -- the first of five consecutive
+counts in 150 ms windows either side of onset, compared per neuron across 100 renditions by
+paired t-test, responder at p < 0.02. 100 matches the paper's ~100 bursts per neuron (the
+Fig. 7G and 7J rasters show 100 and 126 trials); the tests are per neuron, so every DAF
+metric depends on this count. Latency is an onset -- the first of five consecutive
 significant 2 ms bins -- not a PSTH peak. `tests/test_reproduction_causal.py` pins these
 against the shipped model; `make test-repro` runs it.
 
 | Metric | Model | Bird |
 |---|---|---|
 | auditory input rate, per rendition (2.66 Hz during the song itself) | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
-| baseline, all units | 2.77 Hz | 1–10 Hz (Fig. 7C) |
-| responders | 54% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 28.1 ms | 23 ± 12 ms |
-| response duration | 60.3 ms | 90 ± 43 ms |
-| **extra spikes per responder per burst** | **1.67** | **~0.8–1.0** |
-| peak change, responders | 39.6 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
-| time to peak | 36 ms | ~40–60 ms (Fig. 8E, read off the panel) |
-| late (100–150 ms) / peak | 0.099 | < 0.15 — a transient, not a step (Fig. 8E) |
+| baseline, all units | 2.74 Hz | 1–10 Hz (Fig. 7C) |
+| responders | 59% | 41% = 7/17, 95% CI 21–64% |
+| response onset latency | 26.7 ms | 23 ± 12 ms |
+| response duration | 59.8 ms | 90 ± 43 ms |
+| extra spikes per responder per burst | 0.93 | ~0.8–1.0 |
+| peak change, responders | 23.9 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| time to peak | 50 ms | ~40–60 ms (Fig. 8E, read off the panel) |
+| late (100–150 ms) / peak | 0.064 | < 0.15 — a transient, not a step (Fig. 8E) |
 
-**The open problem is response magnitude: the model is ~1.7–2.1x too strong.** It is stated
-in spikes rather than Hz because a count needs no assumption about binning: the bird's
-responder adds about one spike on hearing the distortion, on a baseline under one spike in
-the same window. (Converting the paper's ~20 Hz peak over a 90 ± 43 ms duration into a count
+**Every metric is inside the bird's range**, and stays there for training seeds 43 and 44
+(extra spikes 0.86–0.94, latency 32 ms, duration 55–60 ms). Magnitude is stated in spikes
+rather than Hz because a count needs no assumption about binning: the bird's responder adds
+about one spike on hearing the distortion, on a baseline under one spike in the same
+window. (Converting the paper's ~20 Hz peak over a 90 ± 43 ms duration into a count
 needs an assumed shape, since none is reported; triangular and rise-then-exponential shapes
 both give ~0.8–1.0 spikes, a rectangle 1.8.)
 
-Everything else is inside the bird's range. Duration is 60.3 ms at the test seed (59.7 ±
-2.3 ms over ten evaluation seeds), lengthened by the NMDA component of the auditory synapses
-(below). Latency is 28.1 ms at the test seed, 31.5 ± 1.5 ms over ten seeds, against an upper
-bound of 35. Duration follows the paper's rule -- the
+Two things brought magnitude into range, after it had sat at ~1.7–2.1x: the paper's trial
+count, and an HVC input like HVC_RA -- 600 neurons, each firing one stereotyped 4-spike burst
+per motif. With 20 trials the per-neuron tests admit only the strongest responders, which
+reads as a larger, later, shorter response; and a dense HVC code keeps inhibition on through
+the whole motif, which weakens the response (`docs/design-notes.md`).
+
+Duration is 59.8 ms at the test seed (60.8 ± 1.4 ms over ten evaluation seeds), lengthened
+by the NMDA component of the auditory synapses (below). Latency is 26.7 ms at the test seed,
+27.6 ± 0.8 ms over ten seeds. Duration follows the paper's rule -- the
 response ends at the first run of ten non-significant 2 ms bins -- searched up to 300 ms
 after onset, so long responses are timed rather than dropped.
 
 `baseline, responders` is **not** comparable to the 1–10 Hz range. Responders are selected
 by a paired t-test for post > pre, which preferentially picks neurons quiet in the
-pre-window, so their baseline is biased low by the selection (~0.6 Hz against the
-population's ~2.8 Hz). The paper applies the same criterion, so responder-vs-responder
+pre-window, so their baseline is biased low by the selection (~1.0 Hz against the
+population's ~2.7 Hz). The paper applies the same criterion, so responder-vs-responder
 comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
-interval of 21–64%, which 54% sits inside.
+interval of 21–64%, which 59% sits inside.
 
 **The peak is a diagnostic, not a target, and is not asserted.** It is bin-width dependent
 and the paper never states how its plotted PSTHs were binned; 2 ms is the only binning it

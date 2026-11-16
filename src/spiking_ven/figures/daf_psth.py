@@ -22,6 +22,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+from ..constants import DAF_N_TRIALS  # noqa: E402
 from ..metrics import daf_responders, daf_trials  # noqa: E402
 from ..stimuli import daf_window_ms  # noqa: E402
 from ..targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS  # noqa: E402
@@ -30,7 +31,7 @@ __all__ = ["make_psth_figure"]
 
 
 def make_psth_figure(ven, encoder, st, out_dir, *, tag="", pre_ms=300, post_ms=400,
-                     n_trials=20, seed=42):
+                     n_trials=DAF_N_TRIALS, seed=42):
     # Stay inside the motif. The burst is at st["daf_window_s"]; running past T_song
     # reaches song offset, where HVC drive stops and E is released from inhibition -- a
     # large rise that has nothing to do with DAF and only invites misreading.

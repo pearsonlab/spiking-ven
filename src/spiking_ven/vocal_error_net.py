@@ -28,11 +28,11 @@ from numpy.random import default_rng
 from . import constants as C
 from .common import (
     _lognormal_sparse,
-    generate_hvc_spikes,  # re-exported for convenience
+    generate_hvc_bursts,  # re-exported for convenience
     spike_to_rate,        # re-exported for convenience
 )
 
-__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_spikes", "spike_to_rate",
+__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_bursts", "spike_to_rate",
            "nmda_gating", "mg_block"]
 
 #: Saved NMDA parameters; files without them load with the NMDA component off.

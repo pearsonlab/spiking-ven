@@ -7,7 +7,7 @@ exactly, in training and in inference.
 
 import numpy as np
 
-from spiking_ven import VocalErrorNet, generate_hvc_spikes
+from spiking_ven import VocalErrorNet, generate_hvc_bursts
 
 
 def _tiny_net(seed: int) -> VocalErrorNet:
@@ -18,7 +18,7 @@ def _tiny_inputs(n_aud: int = 10, n_hvc: int = 6, T_song: int = 120, T_post: int
     T = T_song + T_post
     rng = np.random.default_rng(0)
     aud = (rng.random((n_aud, T)) < 0.02).astype(np.float32)
-    hvc = generate_hvc_spikes(n_hvc=n_hvc, T=T, n_renditions=1, T_song=T_song,
+    hvc = generate_hvc_bursts(n_hvc=n_hvc, T=T, n_renditions=1, T_song=T_song,
                               T_burn=0, T_post=T_post, seed=1)
     return hvc, aud, T_song, T_post
 

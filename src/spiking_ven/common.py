@@ -68,71 +68,6 @@ def apply_refractory(spikes, t_refr_ms: float = 2.0):
     return s
 
 
-def generate_hvc_spikes(
-    n_hvc: int,
-    T: int,
-    n_renditions: int,
-    T_song: int,
-    T_burn: int,
-    T_post: int = 200,
-    peak_rate: float = 150.0,
-    kernel_width: float = 20.0,
-    seed: int | None = None,
-    t_refr_ms: float = 2.0,
-) -> np.ndarray:
-    """Generate Poisson spike trains for a parametric HVC population.
-
-    Each of the n_hvc neurons bursts once per rendition at a linearly-spaced
-    time within the motif window, with a Gaussian rate envelope, following
-    ``generate_HVC`` and ``generate_syl_time`` in ``train_funcs.py`` of the rate-model
-    repository (pearsonlab/vocal-error-network).
-
-    Parameters
-    ----------
-    n_hvc       : number of HVC neurons
-    T           : total time steps (must equal T_burn + n_renditions*(T_song+T_post))
-    n_renditions: number of song renditions
-    T_song      : duration of one motif in ms
-    T_burn      : silent burn-in period in ms
-    T_post      : silence after each motif in ms
-    peak_rate   : peak firing rate in Hz
-    kernel_width: Gaussian σ in ms
-
-    The ``peak_rate``/``kernel_width`` defaults here are NOT the calibrated operating
-    point. Pass ``constants.PEAK_RATE_HZ`` and
-    ``constants.KERNEL_WIDTH_MS`` (as ``stimuli.build_stimuli`` and the figures do) to
-    get the drive the shipped model was trained with.
-
-    Returns
-    -------
-    spikes : (n_hvc, T) bool array
-    """
-    rng = default_rng(seed)
-    T_rend = T_song + T_post
-    # Bursts are placed at absolute times up to T_burn + n_renditions * T_rend; a shorter
-    # T would silently drop the tail renditions.
-    T_needed = T_burn + n_renditions * T_rend
-    if T < T_needed:
-        raise ValueError(
-            f"T={T} is too short for {n_renditions} rendition(s) of {T_song}+{T_post} ms "
-            f"after a {T_burn} ms burn-in; need at least {T_needed}."
-        )
-    ts = np.arange(T, dtype=np.float64)
-    rates = np.zeros((n_hvc, T), dtype=np.float64)
-
-    for r in range(n_renditions):
-        t_start = T_burn + r * T_rend
-        burst_centers = np.linspace(t_start, t_start + T_song, num=n_hvc, endpoint=False)
-        for i in range(n_hvc):
-            rates[i] += peak_rate * np.exp(
-                -(ts - burst_centers[i]) ** 2 / (2 * kernel_width ** 2)
-            )
-
-    prob = rates * 1e-3
-    spikes = rng.random((n_hvc, T)) < prob
-    return apply_refractory(spikes, t_refr_ms)
-
-
 def generate_hvc_bursts(
     n_hvc: int,
     T: int,
@@ -148,13 +83,22 @@ def generate_hvc_bursts(
 
     Ported from finchsim's ``ra.build_hvcra_spike_trains``. The motif window is cut into
     ``n_hvc`` equal slots; neuron ``i`` starts its burst at a uniformly jittered time in
-    slot ``i`` and fires ``spikes_per_burst`` spikes at ``intra_burst_hz``. Unlike
-    :func:`generate_hvc_spikes` nothing is random within a burst, and the onsets are drawn
-    once and repeated every rendition: HVC_RA bursts are stereotyped to under 1 ms across
-    motifs (Hahnloser et al. 2002). Onsets and spikes are rounded down to the 1 ms grid.
+    slot ``i`` and fires ``spikes_per_burst`` spikes at ``intra_burst_hz``. Nothing is
+    random within a burst, and the onsets are drawn once and repeated every rendition:
+    HVC_RA bursts are stereotyped to under 1 ms across motifs (Hahnloser et al. 2002).
+    Onsets and spikes are rounded down to the 1 ms grid.
 
-    Same arguments and return as :func:`generate_hvc_spikes`; the output needs no
-    refractory thinning as long as the intra-burst interval is at least 2 ms.
+    Parameters
+    ----------
+    n_hvc       : number of HVC neurons
+    T           : total time steps (at least T_burn + n_renditions*(T_song+T_post))
+    n_renditions: number of song renditions
+    T_song      : duration of one motif in ms
+    T_burn      : silent burn-in period in ms
+    T_post      : silence after each motif in ms
+
+    Returns an ``(n_hvc, T)`` float32 array of 0/1 spikes. It needs no refractory
+    thinning as long as the intra-burst interval is at least 2 ms.
     """
     rng = default_rng(seed)
     T_rend = T_song + T_post
@@ -181,44 +125,22 @@ def generate_hvc_bursts(
     return spikes
 
 
-def hvc_drive(model: str, **kw) -> np.ndarray:
-    """HVC spikes from the generator ``model`` names (see ``constants.HVC_MODEL``).
-
-    ``kw`` takes :func:`generate_hvc_spikes`' arguments; the ones the chosen generator does
-    not use (``peak_rate``/``kernel_width`` for bursts, ``spikes_per_burst``/
-    ``intra_burst_hz`` for Gaussians) are dropped.
-    """
-    if model == "gaussian":
-        for k in ("spikes_per_burst", "intra_burst_hz"):
-            kw.pop(k, None)
-        return generate_hvc_spikes(**kw)
-    if model == "burst":
-        for k in ("peak_rate", "kernel_width", "t_refr_ms"):
-            kw.pop(k, None)
-        return generate_hvc_bursts(**kw)
-    raise ValueError(f"unknown HVC model {model!r}; expected 'gaussian' or 'burst'")
-
-
 def generate_hvc_intro(
     n_hvc: int,
     T_song: int,
     n_notes: int,
     note_ms: int,
     gap_ms: int,
-    peak_rate: float = 150.0,
-    kernel_width: float = 20.0,
     seed: int | None = None,
-    t_refr_ms: float = 2.0,
-    model: str = "gaussian",
     **burst_kw,
 ) -> np.ndarray:
     """HVC spikes for ``n_notes`` introductory notes: ``(n_hvc, n_notes * (note_ms + gap_ms))``.
 
     Each note is a sparse HVC sequence with the motif's burst density: ``round(n_hvc *
     note_ms / T_song)`` neurons, spread evenly over the population, burst at evenly spaced
-    times within the note (by the generator ``model`` names, see :func:`hvc_drive`). The same
-    neurons and times repeat every note; each note is followed by ``gap_ms`` of silence.
-    Pass ``constants.PEAK_RATE_HZ`` and ``KERNEL_WIDTH_MS`` for the operating point.
+    times within the note (:func:`generate_hvc_bursts`; ``burst_kw`` sets the burst shape).
+    The same neurons and times repeat every note; each note is followed by ``gap_ms`` of
+    silence.
     """
     period = note_ms + gap_ms
     out = np.zeros((n_hvc, n_notes * period), dtype=bool)
@@ -226,9 +148,8 @@ def generate_hvc_intro(
         return out
     k = max(1, int(round(n_hvc * note_ms / T_song)))
     rows = np.unique(np.linspace(0, n_hvc - 1, k).round().astype(int))
-    note = hvc_drive(model, n_hvc=len(rows), T=period, n_renditions=1, T_song=note_ms,
-                     T_burn=0, T_post=gap_ms, peak_rate=peak_rate,
-                     kernel_width=kernel_width, seed=seed, t_refr_ms=t_refr_ms, **burst_kw)
+    note = generate_hvc_bursts(n_hvc=len(rows), T=period, n_renditions=1, T_song=note_ms,
+                               T_burn=0, T_post=gap_ms, seed=seed, **burst_kw)
     for r in range(n_notes):
         out[rows, r * period:(r + 1) * period] = note > 0
     return out

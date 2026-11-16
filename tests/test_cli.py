@@ -124,7 +124,6 @@ def test_stimulus_fallbacks_are_the_constants():
         "t_post": C.T_POST, "t_burn": C.T_BURN,
         "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
         "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO),
-        "hvc_model": C.HVC_MODEL,
     }
 
 
@@ -241,7 +240,7 @@ def test_train_ven_delays_track_the_constants():
 
 def test_evaluate_flags():
     a = cli_evaluate.build_parser().parse_args([])
-    assert a.n_trials == 20, "trial count is an evaluation choice, not a model parameter"
+    assert a.n_trials == C.DAF_N_TRIALS, "trial count is an evaluation choice, not a model parameter"
     assert a.json is False
     assert cli_evaluate.build_parser().parse_args(["--json"]).json is True
 

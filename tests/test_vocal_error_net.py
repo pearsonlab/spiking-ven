@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from spiking_ven import constants as C
-from spiking_ven import generate_hvc_spikes
+from spiking_ven import generate_hvc_bursts
 from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2
 
 SHIPPED_MODEL = Path(__file__).resolve().parent.parent / "outputs" / "ven_model.npz"
@@ -324,6 +324,9 @@ def test_e_spike_without_i_activity_depresses_and_clips_at_zero():
 # cancellation
 # ---------------------------------------------------------------------------
 
+HVC_SCALE_20 = C.B_HVC_SCALE * 600 / 20
+
+
 def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     """A small network trained on one (HVC, auditory) pairing learns to cancel it.
 
@@ -335,12 +338,13 @@ def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     n_e, n_i, n_hvc, n_aud = 120, 40, 20, 40
     T_song, T_post, n_rend = 300, 100, 40
     T = T_song + T_post
-    net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, seed=0)
-    trained = generate_hvc_spikes(n_aud, T, 1, T_song, 0, T_post=T_post, seed=100,
-                                  peak_rate=200.0, kernel_width=8.0)
+    # B_HVC_SCALE is per connection and set for 600 HVC units; 20 need ~30x the weight
+    # for the same drive to I.
+    net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, seed=0,
+                        B_hvc_scale=HVC_SCALE_20)
+    trained = generate_hvc_bursts(n_aud, T, 1, T_song, 0, T_post=T_post, seed=100)
     novel = trained[::-1].copy()
-    hvc = generate_hvc_spikes(n_hvc, T, 1, T_song, 0, T_post=T_post, seed=0,
-                              peak_rate=300.0, kernel_width=10.0)
+    hvc = generate_hvc_bursts(n_hvc, T, 1, T_song, 0, T_post=T_post, seed=0)
 
     def response(aud):
         silent = net.transform(hvc, np.zeros_like(aud)).sum()
@@ -349,8 +353,8 @@ def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     before_trained, before_novel = response(trained), response(novel)
     assert before_trained == pytest.approx(before_novel, rel=0.1), "premise: matched drive"
 
-    hvc_train = generate_hvc_spikes(n_hvc, n_rend * T, n_rend, T_song, 0, T_post=T_post,
-                                    seed=1000, peak_rate=300.0, kernel_width=10.0)
+    hvc_train = generate_hvc_bursts(n_hvc, n_rend * T, n_rend, T_song, 0, T_post=T_post,
+                                    seed=0)
     net.fit(hvc_train, np.tile(trained, (1, n_rend)))
 
     after_trained, after_novel = response(trained), response(novel)
@@ -420,10 +424,10 @@ def test_nmda_parameters_round_trip(tmp_path):
 def test_a_prelude_is_trimmed_and_changes_no_weights():
     net = VocalErrorNet(n_e=20, n_i=8, n_hvc=6, n_aud=5, seed=0)
     T = 120
-    hvc = generate_hvc_spikes(n_hvc=6, T=T, n_renditions=1, T_song=100, T_burn=0,
+    hvc = generate_hvc_bursts(n_hvc=6, T=T, n_renditions=1, T_song=100, T_burn=0,
                               T_post=20, seed=1)
     aud = (np.random.default_rng(2).random((5, T)) < 0.05).astype(np.float32)
-    pre = generate_hvc_spikes(n_hvc=6, T=60, n_renditions=1, T_song=50, T_burn=0,
+    pre = generate_hvc_bursts(n_hvc=6, T=60, n_renditions=1, T_song=50, T_burn=0,
                               T_post=10, seed=3)
     sE, sI = net.transform_all(hvc, aud, hvc_prelude=pre)
     assert sE.shape == (20, T) and sI.shape == (8, T)

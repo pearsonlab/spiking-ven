@@ -8,7 +8,7 @@ Poisson counts to at most one spike per bin.
 import numpy as np
 import pytest
 
-from spiking_ven.common import apply_refractory, generate_hvc_spikes
+from spiking_ven.common import apply_refractory, generate_hvc_bursts
 from spiking_ven.common import acts_to_spikes
 from spiking_ven.vocal_error_net import VocalErrorNet
 
@@ -61,5 +61,5 @@ def test_input_populations_respect_the_floor():
     spk = acts_to_spikes(acts, mean_rate_hz=40.0, frame_rate=1000, seed=1, t_refr_ms=2.0)
     assert spk.max() <= 1.0 and _min_isi(spk) >= 2
 
-    hvc = generate_hvc_spikes(20, 600, 1, 400, 0, T_post=200, seed=3, t_refr_ms=2.0)
+    hvc = generate_hvc_bursts(20, 600, 1, 400, 0, T_post=200, seed=3)
     assert np.asarray(hvc).max() <= 1.0 and _min_isi(hvc) >= 2

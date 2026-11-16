@@ -29,13 +29,11 @@ from __future__ import annotations
 __all__ = [
     # 1. the preparation
     "SR",
-    "KERNEL_WIDTH_MS",
-    "HVC_MODEL",
     "HVC_SPIKES_PER_BURST",
     "HVC_INTRA_BURST_HZ",
-    "PEAK_RATE_HZ",
     "DAF_WN_AMPLITUDE",
     "DAF_WINDOW_S",
+    "DAF_N_TRIALS",
     "AUD_DELAY_MS",
     "AUD_MEAN_RATE_HZ",
     "HVC_DELAY_MS",
@@ -65,24 +63,14 @@ __all__ = [
 #: Corpus sample rate (Hz). The corpus is resampled to this during preprocessing.
 SR = 16000
 
-#: Width of the Gaussian HVC burst envelope (ms).
-KERNEL_WIDTH_MS = 10.0
-
-#: Peak HVC burst rate (spk/s). Scales inversely with the kernel width so the integrated
-#: drive per burst is constant -- derived, never written as a literal.
-PEAK_RATE_HZ = 150.0 * 20.0 / KERNEL_WIDTH_MS
-
-#: How HVC spikes are generated: ``"gaussian"`` (one Poisson burst per neuron under a
-#: Gaussian rate envelope, ``KERNEL_WIDTH_MS`` / ``PEAK_RATE_HZ``) or ``"burst"`` (one
-#: fixed burst of ``HVC_SPIKES_PER_BURST`` spikes at ``HVC_INTRA_BURST_HZ``, onsets on a
-#: jittered grid that tiles the motif -- finchsim's HVC_RA generator,
-#: ``ra.build_hvcra_spike_trains``). The burst model matches documented HVC_RA statistics:
-#: ~1 burst per motif, 3.9 +/- 1.9 spikes per burst, 6-10 ms long, 400-600 Hz within the
-#: burst, sub-ms jitter across renditions (Hahnloser et al. 2002; Picardo et al. 2016).
-HVC_MODEL = "gaussian"
-
-#: Spikes per HVC burst and the rate within it (``HVC_MODEL = "burst"``), as finchsim's
-#: ``params.HVCRA_RA``. 4 spikes at 500 Hz span 6 ms.
+#: HVC input: one stereotyped burst per neuron per motif -- finchsim's HVC_RA generator
+#: (``ra.build_hvcra_spike_trains``, here ``common.generate_hvc_bursts``), onsets on a
+#: jittered grid that tiles the motif. It matches documented HVC_RA statistics: ~1 burst
+#: per motif, 3.9 +/- 1.9 spikes per burst, 6-10 ms long, 400-600 Hz within the burst,
+#: sub-ms jitter across renditions (Hahnloser et al. 2002; Picardo et al. 2016).
+#:
+#: Spikes per HVC burst and the rate within it, as finchsim's ``params.HVCRA_RA``: 4 spikes
+#: at 500 Hz span 6 ms.
 HVC_SPIKES_PER_BURST = 4
 HVC_INTRA_BURST_HZ = 500.0
 
@@ -111,6 +99,13 @@ AUD_MEAN_RATE_HZ = 2.5
 #: responder statistics come from. A much longer burst lets the modelled response keep
 #: building instead of being the transient the paper measures.
 DAF_WINDOW_S = (0.400, 0.450)
+
+#: DAF renditions per evaluation, each with an independent noise draw. The responder,
+#: latency and duration tests are per neuron, so their power -- and every DAF metric --
+#: depends on this count. Mandelblat-Cerf et al. 2014 had ~100 bursts per neuron (the
+#: Fig. 7G and 7J rasters show 100 and 126 trials); with 20, responses read later,
+#: shorter and larger per responder (docs/design-notes.md).
+DAF_N_TRIALS = 100
 
 #: Cochlea -> AIV-E conduction delay (ms), on top of the encoder's own processing time.
 #:
@@ -147,7 +142,7 @@ HVC_DELAY_MS = 0
 #: Population sizes (E projection neurons, I interneurons, HVC inputs) and training length.
 N_E = 600
 N_I = 150
-N_HVC = 60
+N_HVC = 600
 N_RENDITIONS = 600
 
 #: Auditory -> E, fast (AMPA-like) component. Each E cell connects to each encoder channel
@@ -161,7 +156,10 @@ C_B = 0.05
 #: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
 #: E -> I alone supplies 0.28 against a threshold gap of 0.37, so I is effectively an
 #: HVC-driven population. Compensating one limb without the other starves it.
-B_HVC_SCALE = 0.333
+#: ``B_HVC_SCALE`` is per connection, so it scales with ``N_HVC`` and the burst count:
+#: 0.065 at 600 burst units sets the singing baseline to that of the former 60-unit
+#: Gaussian-envelope HVC input at 0.333 (docs/design-notes.md).
+B_HVC_SCALE = 0.065
 C_HVC = 0.1
 
 #: Tonic drives. ``theta_e`` is derived from ``DRIVE_E`` inside the network, so raising

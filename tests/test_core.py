@@ -60,7 +60,7 @@ def test_centre_frequencies_are_ordered_and_in_band():
 def test_hvc_spikes_reject_a_too_short_window():
     """A T too short for the requested renditions must fail, not drop the tail bursts."""
     with pytest.raises(ValueError, match="too short"):
-        sv.generate_hvc_spikes(n_hvc=4, T=100, n_renditions=2, T_song=300,
+        sv.generate_hvc_bursts(n_hvc=4, T=100, n_renditions=2, T_song=300,
                                T_burn=50, T_post=50)
 
 
@@ -68,8 +68,8 @@ def test_hvc_spikes_are_binary_and_seed_deterministic():
     # T must equal T_burn + n_renditions * (T_song + T_post).
     kw = {"n_hvc": 10, "n_renditions": 2, "T_song": 300, "T_burn": 100, "T_post": 50}
     T = kw["T_burn"] + kw["n_renditions"] * (kw["T_song"] + kw["T_post"])
-    a = sv.generate_hvc_spikes(T=T, seed=42, **kw)
-    b = sv.generate_hvc_spikes(T=T, seed=42, **kw)
+    a = sv.generate_hvc_bursts(T=T, seed=42, **kw)
+    b = sv.generate_hvc_bursts(T=T, seed=42, **kw)
     np.testing.assert_array_equal(a, b)
     assert a.shape == (kw["n_hvc"], T)
     assert set(np.unique(a)).issubset({0, 1})

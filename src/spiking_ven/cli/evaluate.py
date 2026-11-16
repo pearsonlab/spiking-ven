@@ -19,6 +19,7 @@ import argparse
 import json
 
 from ..causal_filters import CausalFilterEncoder
+from ..constants import DAF_N_TRIALS
 from ..metrics import (
     daf_response,
     format_rendition_rates,
@@ -39,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42,
                    help="seed for the simulation noise and the DAF trials")
     add_stimulus_flags(p)
-    p.add_argument("--n-trials", type=int, default=20,
+    p.add_argument("--n-trials", type=int, default=DAF_N_TRIALS,
                    help="renditions with independent noise draws for the DAF response")
     p.add_argument("--json", action="store_true", help="emit the metrics as JSON")
     return p

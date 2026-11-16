@@ -146,20 +146,20 @@ def test_daf_window_ms():
 
 _ALL_NONE = {"sr": None, "seed": None, "t_post": None, "t_burn": None,
              "mean_rate_hz": None, "n_ista": None, "daf_window_s": None,
-             "hvc_intro": None, "hvc_model": None}
+             "hvc_intro": None}
 
 
 def test_an_empty_record_falls_back_to_the_constants(capsys):
     s = resolve_stimulus_settings({}, dict(_ALL_NONE))
     assert s == {"sr": None, "seed": None, "t_post": C.T_POST, "t_burn": C.T_BURN,
                  "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
-                 "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO),
-                 "hvc_model": C.HVC_MODEL}
+                 "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO)}
     assert capsys.readouterr().err == ""
 
 
 def test_the_record_is_used_and_an_explicit_flag_overrides_it_with_a_warning(capsys):
-    rec = {"t_post": 100, "mean_rate_hz": 3.0, "seed": 7, "daf_window_s": [0.2, 0.25]}
+    rec = {"t_post": 100, "mean_rate_hz": 3.0, "seed": 7, "daf_window_s": [0.2, 0.25],
+           "hvc_model": "burst"}
     s = resolve_stimulus_settings(rec, dict(_ALL_NONE))
     assert (s["t_post"], s["mean_rate_hz"], s["seed"]) == (100, 3.0, 7)
     assert s["daf_window_s"] == (0.2, 0.25)
@@ -177,7 +177,7 @@ def test_a_checksum_mismatch_warns(tmp_path, capsys):
     enc, mot = tmp_path / "enc.npz", tmp_path / "motifs.npz"
     enc.write_bytes(b"encoder")
     mot.write_bytes(b"motifs")
-    rec = {"encoder_sha256": sha256_file(enc), "motifs_sha256": "0" * 64}
+    rec = {"encoder_sha256": sha256_file(enc), "motifs_sha256": "0" * 64, "hvc_model": "burst"}
     resolve_stimulus_settings(rec, {}, encoder_path=enc, motifs_path=mot)
     err = capsys.readouterr().err
     assert str(mot) in err and "motifs" in err
@@ -189,7 +189,7 @@ def test_a_record_round_trips_through_json(tmp_path, capsys):
     enc.write_bytes(b"encoder")
     st = {"sr": SR, "seed": 3, "t_post": 120, "t_burn": 400, "n_hvc": 6,
           "mean_rate_hz": 2.5, "n_ista": 20, "daf_window_s": (0.3, 0.35),
-          "hvc_intro": (2, 60, 30), "hvc_model": "burst"}
+          "hvc_intro": (2, 60, 30)}
     rec = json.loads(json.dumps(stimulus_record(st, encoder_path=enc)))
     assert rec["encoder_sha256"] == sha256_file(enc) and "motifs_sha256" not in rec
     s = resolve_stimulus_settings(rec, dict(_ALL_NONE), encoder_path=enc)
@@ -203,8 +203,8 @@ def test_a_record_round_trips_through_json(tmp_path, capsys):
 def test_intro_notes_repeat_one_sparse_sequence_at_the_motif_density():
     from spiking_ven.common import generate_hvc_intro
 
-    pre = generate_hvc_intro(60, 840, n_notes=2, note_ms=84, gap_ms=20, peak_rate=300.0,
-                             kernel_width=10.0, seed=1)
+    pre = generate_hvc_intro(60, 840, n_notes=2, note_ms=84, gap_ms=20, seed=1,
+                             spikes_per_burst=4, intra_burst_hz=500.0)
     assert pre.shape == (60, 2 * 104)
     active = np.flatnonzero(pre.any(axis=1))
     assert len(active) == 6                       # 60 * 84 / 840 neurons, as in the motif
@@ -214,7 +214,7 @@ def test_intro_notes_repeat_one_sparse_sequence_at_the_motif_density():
 
 
 def test_a_record_without_intro_notes_means_none_and_no_record_means_the_default():
-    rec = {"t_post": 200}                         # recorded, but before intro notes existed
+    rec = {"t_post": 200, "hvc_model": "burst"}    # recorded, but before intro notes existed
     assert resolve_stimulus_settings(rec, {"hvc_intro": None})["hvc_intro"] == (0, 0, 0)
     assert resolve_stimulus_settings({}, {"hvc_intro": None})["hvc_intro"] == tuple(
         C.HVC_INTRO)
@@ -261,41 +261,24 @@ def test_bursts_have_finchsim_hvcra_shape_and_repeat_every_rendition():
         generate_hvc_bursts(n, T - 1, n_rend, T_song, T_burn, T_post=T_post)
 
 
-def test_hvc_drive_dispatches_and_rejects_unknown_models():
-    from spiking_ven.common import generate_hvc_spikes, hvc_drive
-
-    kw = dict(n_hvc=8, T=300, n_renditions=1, T_song=200, T_burn=0, T_post=100, seed=3,
-              peak_rate=300.0, kernel_width=10.0, spikes_per_burst=3, intra_burst_hz=400.0)
-    np.testing.assert_array_equal(
-        hvc_drive("gaussian", **kw),
-        generate_hvc_spikes(8, 300, 1, 200, 0, T_post=100, peak_rate=300.0,
-                            kernel_width=10.0, seed=3))
-    assert (hvc_drive("burst", **kw).sum(axis=1) == 3).all()
-    with pytest.raises(ValueError, match="unknown HVC model"):
-        hvc_drive("hvcx", **kw)
-
-
-def test_intro_notes_use_the_chosen_generator():
+def test_intro_notes_are_bursts():
     from spiking_ven.common import generate_hvc_intro
 
     pre = generate_hvc_intro(60, 840, n_notes=2, note_ms=84, gap_ms=20, seed=1,
-                             model="burst", spikes_per_burst=4, intra_burst_hz=500.0)
+                             spikes_per_burst=4, intra_burst_hz=500.0)
     active = np.flatnonzero(pre.any(axis=1))
-    assert len(active) == 6
     assert (pre[active, :104].sum(axis=1) == 4).all()
-    np.testing.assert_array_equal(pre[:, :104], pre[:, 104:])
 
 
-def test_a_record_without_a_generator_means_gaussian():
-    assert resolve_stimulus_settings({"seed": 42},
-                                     {"hvc_model": None})["hvc_model"] == "gaussian"
-    assert resolve_stimulus_settings({}, {"hvc_model": None})["hvc_model"] == C.HVC_MODEL
-    assert resolve_stimulus_settings({"hvc_model": "burst"},
-                                     {"hvc_model": None})["hvc_model"] == "burst"
+@pytest.mark.parametrize("rec", [{"seed": 42}, {"seed": 42, "hvc_model": "gaussian"}])
+def test_a_model_trained_on_the_removed_gaussian_input_is_rejected(rec):
+    """A record without a generator predates the burst input, so it was Gaussian too."""
+    with pytest.raises(ValueError, match="no longer exists"):
+        resolve_stimulus_settings(rec, {"seed": None})
+    assert resolve_stimulus_settings({}, {"seed": None}) == {"seed": None}
 
 
 def test_build_stimuli_records_and_uses_the_burst_generator(encoder, motifs):
-    st = build_stimuli(encoder, motifs, hvc_model="burst", verbose=False)
-    assert st["hvc_model"] == "burst"
+    st = build_stimuli(encoder, motifs, n_hvc=60, verbose=False)
     assert (st["hvc_on"].sum(axis=1) == C.HVC_SPIKES_PER_BURST).all()
     assert stimulus_record(st)["hvc_model"] == "burst"

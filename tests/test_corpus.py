@@ -7,7 +7,6 @@ template is the loudest rendition, because that is the one the network trains on
 import numpy as np
 import pytest
 
-from spiking_ven import constants
 from spiking_ven.corpus import Corpus, highest_rms_index, load_corpus
 
 
@@ -55,12 +54,6 @@ def test_T_song_rounds_up():
 def test_highest_rms_index_rejects_empty():
     with pytest.raises(ValueError):
         highest_rms_index([])
-
-
-def test_peak_rate_is_derived_not_hardcoded():
-    """Changing the kernel width must carry the peak rate with it."""
-    assert constants.PEAK_RATE_HZ == pytest.approx(
-        150.0 * 20.0 / constants.KERNEL_WIDTH_MS)
 
 
 def test_stored_template_index_wins_over_computed():

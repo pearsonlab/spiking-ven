@@ -194,14 +194,14 @@ running level that mean subtraction removed. Variants tried, each with the netwo
   41% but raised baseline and trained-song rates: E cells left without auditory input never
   acquire inhibition (learning is audio-gated) and fire tonically through the song.
 
-## HVC input model
+## HVC input model: first survey
 
-Measured with the encoder's former divisive gain and `B_SCALE` 10, before the no-gain change
-above.
+Measured with the encoder's former divisive gain, `B_SCALE` 10 and 20 DAF trials, when the
+60-unit Gaussian-envelope input (a Poisson burst under a 10 ms Gaussian, peak 300 Hz, ~6
+spikes per motif) was the default and the burst generator an option. Both are superseded by
+the next section.
 
-
-- **finchsim's HVC_RA bursts are available, not adopted.** `HVC_MODEL = "burst"` (`--hvc-model
-  burst`) ports finchsim's `ra.build_hvcra_spike_trains`: one burst per neuron per motif, 4
+- **finchsim's HVC_RA bursts.** The burst generator ports finchsim's `ra.build_hvcra_spike_trains`: one burst per neuron per motif, 4
   spikes at 500 Hz, onsets on a jittered grid, identical every rendition -- the means of the
   HVC_RA statistics finchsim cites (Hahnloser et al. 2002; Picardo et al. 2016; Long et al.
   2010), not their spread. It delivers 4 spikes per neuron per motif against the Gaussian
@@ -250,6 +250,55 @@ above.
   and duration rest on 36-82 units here; multi-seed evaluation is needed before adopting any of
   these. Untuned: `c_hvc` (inputs per I) at 600.
 
+## HVC input and DAF trial count (adopted)
+
+Redone on the no-gain encoder (`B_SCALE` 13), with `B_HVC_SCALE` carried over from the
+survey above (it still matched the 2.7 Hz singing baseline). Seed-42 networks, 5 evaluation
+seeds each.
+
+At 20 DAF trials no 600-unit configuration reached the 35 ms latency bound:
+
+| 20 trials | Gaussian 60 (was shipped) | Gaussian 600 | burst 60 | burst 600 |
+|---|---|---|---|---|
+| responders | 54% | 37% | 52% | 41% |
+| extra spikes | 1.69 | 1.15 | 1.43 | 1.21 |
+| latency (ms) | 31.5 | 46.8 | 34.2 | 41.4 |
+| duration (ms) | 59.7 | 45.6 | 39.8 | 47.2 |
+| reversed/trained | 1.155 | 1.106 | 1.133 | 1.124 |
+
+On burst 600, none of these moved latency below ~36 ms: `B_SCALE` up to 20 (adds magnitude),
+`G_NMDA` 90, `A_SFA` 0.5-0.7 (raises the baseline), `c_hvc` 0.015-0.1, `TAU_E` 15-20 (theta
+is derived from it, so the gain mostly cancels), and a higher tonic drive (`TARGET_RATE_E`
+up to 50 Hz, `DRIVE_E` up to 0.10: STDP inhibition absorbs it, raising the baseline only to
+~3.6 Hz). Retraining with another seed moved latency by up to 10 ms.
+
+The input chain is not the delay. Encoder activations change 2 ms after noise onset (the
+frame quantization) and reach ~70% of their plateau by 12 ms; `AUD_DELAY_MS` adds 2. The
+responders' population PSTH rises at the same time in every model (10% of peak at 10-13 ms,
+50% at 23-27 ms). The difference is in detection: onset is found per neuron, by five
+consecutive 2 ms bins above that neuron's pre-burst distribution, and 20 trials of a sparse
+neuron detect a weak response late. Mandelblat-Cerf had ~100 bursts per neuron (the Fig. 7G
+and 7J rasters show 100 and 126 trials). At 100 trials:
+
+| 100 trials | Gaussian 60 | burst 60 | burst 600 (adopted) | burst 600, `c_hvc` 0.03 | bird |
+|---|---|---|---|---|---|
+| responders | 71% | 69% | 58% | 64% | 41% (CI 21-64%) |
+| extra spikes | 1.36 | 1.15 | 0.94 | 1.00 | ~0.8-1.0 |
+| latency (ms) | 21.6 | 22.5 | 27.7 | 27.5 | 23 +/- 12 |
+| duration (ms) | 76.4 | 56.5 | 60.7 | 62.1 | 90 +/- 43 |
+| peak latency (ms) | 36 | 48 | 50 | 38 | ~35-75 |
+| reversed/trained | 1.155 | 1.133 | 1.124 | 1.185 | > 1 |
+
+- **Trial count moves every DAF metric**, not just latency: more power admits weaker
+  responders (lower mean magnitude, higher fraction) and detects onsets earlier and offsets
+  later. `DAF_N_TRIALS = 100` is now the evaluation default.
+- **Burst 600 adopted, `c_hvc` 0.1, `B_HVC_SCALE` 0.065**: every target inside the bird's
+  range. Training seeds 43 and 44 agree (responders 55-56%, extra spikes 0.86-0.94, latency
+  32 ms, duration 55-60 ms, reversed/trained 1.17-1.18). The Gaussian input was removed.
+- **`c_hvc` 0.03** has the best selectivity but sits at the edge on responders and
+  magnitude. `TAU_E` 20 and more tonic drive buy ~2 ms of latency and push responders past
+  the CI.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst
@@ -266,8 +315,9 @@ above.
   synthetic responses of known length, the paper's rule reads ~8 ms long (1-18 ms over 20 draws):
   at p < 0.05 about one baseline bin in twenty is significant by chance and postpones the ten-bin
   end run. The bird's number was measured with the same rule.
-- **Only ~1/4 of responders are timed.** Latency and duration come from responders whose
-  trial-averaged PSTH has five consecutive significant 2 ms bins: ~84 of ~312 at the test seed.
+- **Not every responder is timed.** Latency and duration come from responders whose
+  trial-averaged PSTH has five consecutive significant 2 ms bins: ~84 of ~312 at 20 trials
+  with the former Gaussian input, 199 of 349 at 100 trials with the current one.
 
 ## Testing
 

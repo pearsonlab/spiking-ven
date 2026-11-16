@@ -33,7 +33,7 @@ distorted auditory feedback -- is the error signal.
 | `JEI` | `n_i x n_e` | E -> I | no |
 | `JIE` | `n_e x n_i` | I -> E (inhibitory) | yes, during `fit` only |
 
-Shipped sizes (`constants.py`): `n_e = 600`, `n_i = 150`, `n_hvc = 60`; `n_aud = 54` for the
+Shipped sizes (`constants.py`): `n_e = 600`, `n_i = 150`, `n_hvc = 600`; `n_aud = 54` for the
 shipped encoder (64 filters trained, the ones that never fire pruned).
 
 ## Discrete-time dynamics
@@ -201,7 +201,7 @@ All three are drawn from `default_rng(seed)`, in the order below, and stored as 
 | Matrix | Connection probability | Mean weight per connection | Std |
 |---|---|---|---|
 | `B` | `c_B` (0.05) | `B_scale / n_aud` (13 / 54 = 0.24) | half the mean |
-| `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.333), not divided by `n_hvc` | half the mean |
+| `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.065), not divided by `n_hvc` | half the mean |
 | `JEI` | `c_JEI` (0.5) | `0.17 / sqrt(n_e * c_JEI)` (0.0098) | 10% of the mean |
 | `JIE` | -- | 0 (all zero) | -- |
 
@@ -215,28 +215,27 @@ song does not reach keep zero rows and respond fully to novel sound.
   rate over the training rendition (the song plus the silence after it) is `AUD_MEAN_RATE_HZ`
   (2.5 Hz), and sampled as Poisson counts per 1 ms bin. Every other stimulus (reversed song, DAF) is scaled by the factor from the training
   song, not its own.
-- **HVC** (`common.generate_hvc_spikes`): neuron `i` of `n_hvc` has a Gaussian rate envelope
-  centred at the `i`-th of `n_hvc` evenly spaced times across the motif, width `KERNEL_WIDTH_MS`
-  (10 ms) and peak `PEAK_RATE_HZ` (300 Hz). Each 1 ms bin spikes with probability `rate * 1e-3`.
-  This is the default, `HVC_MODEL = "gaussian"`; it gives 6.2 +/- 1.6 spikes per neuron per motif.
-- **HVC, burst model** (`common.generate_hvc_bursts`, `HVC_MODEL = "burst"`, `--hvc-model burst`):
-  finchsim's HVC_RA generator (`ra.build_hvcra_spike_trains`). The motif is cut into `n_hvc`
+- **HVC** (`common.generate_hvc_bursts`): finchsim's HVC_RA generator
+  (`ra.build_hvcra_spike_trains`), with 600 neurons. The motif is cut into `n_hvc`
   equal slots; neuron `i` starts one burst at a uniformly jittered time in slot `i` and fires
   `HVC_SPIKES_PER_BURST` (4) spikes at `HVC_INTRA_BURST_HZ` (500 Hz), a 6 ms burst, rounded down
   to the 1 ms grid. Nothing is random within a burst, and the same onsets repeat every rendition.
   This matches documented HVC_RA statistics: about 1 burst per motif, 3.9 +/- 1.9 spikes per
   burst, 6-10 ms long, 400-600 Hz within the burst, under 1 ms jitter across motifs (Hahnloser et
-  al. 2002; Picardo et al. 2016). The generator is recorded in the model's stimulus record; a
-  model that records no generator was trained on the Gaussian one.
+  al. 2002; Picardo et al. 2016). At 600 neurons a burst starts every ~1.4 ms and each I cell
+  has ~60 HVC inputs, so the HVC drive to I is nearly continuous through the motif. The model's
+  stimulus record names the generator; models trained on the earlier Gaussian-envelope input
+  (60 neurons) are rejected on load.
 - **Intro notes** (`common.generate_hvc_intro`, `HVC_INTRO = (2, 80, 20)`): before each motif,
   two 80 ms introductory notes of HVC activity, each followed by 20 ms of silence, with no
-  sound. Each note is one sparse HVC sequence at the motif's burst density (about 6 of 60 neurons
+  sound. Each note is one sparse HVC sequence at the motif's burst density (about 57 of 600 neurons
   bursting at evenly spaced times), repeated identically. They are passed to `fit`/`transform` as
   `hvc_prelude`: the network runs them first, with zero auditory input, and the returned spikes
   start at motif onset. No learning happens during them, because the STDP gate needs auditory
   drive. Their purpose is to have I active when the song starts.
-- The auditory and Gaussian HVC spikes are passed through `apply_refractory` (2 ms), which keeps at most one spike per bin and
-  drops spikes closer than 2 ms to the previous kept one.
+- The auditory spikes are passed through `apply_refractory` (2 ms), which keeps at most one spike per bin and
+  drops spikes closer than 2 ms to the previous kept one. HVC bursts need no thinning: their
+  spikes are already 2 ms apart.
 
 **Training** (`cli/train_ven.py`): `N_RENDITIONS = 600` calls to `fit`, one per rendition of the
 motif plus `T_POST = 200` ms of silence, each preceded by the intro notes; the first is preceded
@@ -279,7 +278,7 @@ corpus's other renditions of the song.
 | Mg2+ concentration | mM | `mg_mm` |
 | Filtered input `h` | spikes (a sum of decaying unit jumps) | `h_aud`, `h_hvc` |
 | Rates used for thresholds | spikes per ms | `target_rate` (0.025 = 25 Hz), `target_rate_i` |
-| Other rates | Hz | `r_i_th`, `AUD_MEAN_RATE_HZ`, `PEAK_RATE_HZ` |
+| Other rates | Hz | `r_i_th`, `AUD_MEAN_RATE_HZ`, `HVC_INTRA_BURST_HZ` |
 | Spike matrices | 0/1 per neuron per 1 ms bin | `transform` output, `(n_e, T)` |
 
 ## Glossary

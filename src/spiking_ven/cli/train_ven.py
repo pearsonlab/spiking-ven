@@ -32,7 +32,6 @@ from ..constants import (
     G_NMDA,
     HVC_DELAY_MS,
     HVC_INTRO,
-    HVC_MODEL,
     J_MAX_IE,
     N_E,
     N_HVC,
@@ -43,6 +42,7 @@ from ..constants import (
     T_BURN,
     T_POST,
     TAU_E,
+    TARGET_RATE_E,
     TAU_S,
     TAU_SFA,
     TAU_STDP,
@@ -82,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tau-e", type=float, default=TAU_E,
                    help="E membrane time constant (ms). theta_e is derived from it, so "
                         "the tonic rate stays at target_rate as this changes.")
+    p.add_argument("--target-rate-e", type=float, default=TARGET_RATE_E,
+                   help="tonic E rate (spikes/ms) that sets theta_e")
     p.add_argument("--n-rend", type=int, default=N_RENDITIONS)
     # network
     p.add_argument("--n-e", type=int, default=N_E)
@@ -106,9 +108,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hvc-intro", type=int, nargs=3, default=list(HVC_INTRO),
                    metavar=("NOTES", "NOTE_MS", "GAP_MS"),
                    help="HVC introductory notes before each motif (no sound); 0 0 0 for none")
-    p.add_argument("--hvc-model", choices=("gaussian", "burst"), default=HVC_MODEL,
-                   help="HVC spike generator: Gaussian-envelope Poisson bursts, or "
-                        "finchsim's stereotyped HVC_RA bursts (constants.HVC_MODEL)")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
@@ -152,7 +151,7 @@ def main(argv: list[str] | None = None) -> None:
     st = build_stimuli(encoder, motifs_path, sr=args.sr, seed=args.seed,
                        t_post=args.t_post, t_burn=args.t_burn, n_hvc=args.n_hvc,
                        mean_rate_hz=args.mean_rate_hz, n_ista=args.n_ista,
-                       hvc_intro=tuple(args.hvc_intro), hvc_model=args.hvc_model)
+                       hvc_intro=tuple(args.hvc_intro))
     aud_correct, aud_reversed = st["aud_correct"], st["aud_reversed"]
     hvc_prelude = st["hvc_prelude"]
     correct_pool = st["correct_pool"]
@@ -166,6 +165,7 @@ def main(argv: list[str] | None = None) -> None:
         B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
         B_hvc_scale=args.b_hvc_scale, tau_s=args.tau_s,
         tau_e=args.tau_e,
+        target_rate=args.target_rate_e,
         r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
         drive_e=args.drive_e, drive_i=args.drive_i,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> None:
                         hvc_prelude=hvc_prelude)
     print()
     print(format_rendition_rates(m))
-    r = daf_response(ven, encoder, st, n_trials=20, seed=args.seed)
+    r = daf_response(ven, encoder, st, seed=args.seed)
     print()
     print(format_responders(r))
 

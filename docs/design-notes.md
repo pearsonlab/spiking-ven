@@ -191,6 +191,33 @@ The bird's response is long and weak (~1 extra spike over ~90 ms); the model's i
   sharper, shorter DAF response (peak +9 SD, duration -6 SD of the seed-to-seed noise), with
   duration below the 47 ms lower bound of the bird's 90 +/- 43 ms. Adopting it needs the
   response lengthened again, as `A_SFA`/NMDA did for the Gaussian model.
+- **60 HVC units tile the motif thinly; 600 tile it densely.** At 60, one burst starts every
+  14 ms and about 0.5 neurons burst at any instant (HVC_RA: ~20,000 cells, so roughly
+  130-220). The 20 ms synaptic filter keeps the summed drive above half its mean, but each I
+  neuron has ~6 HVC inputs (`c_hvc` 0.1) and spends about half the motif below 10% of its own
+  mean drive (longest such stretch ~240 ms). At 600, with `c_hvc` unchanged (~60 inputs per I),
+  that falls to 1% (longest ~46 ms) and ~120 of 150 I neurons are driven at any ms, against
+  50-58. `B_HVC_SCALE` is per connection, so it has to shrink with `n_hvc`: 10x smaller keeps
+  the mean drive to I, but the baseline rose (Gaussian 3.04 Hz, burst 2.94 Hz), so each was
+  recalibrated to the 2.63 Hz baseline of the shipped model. Seed 42, all at that baseline:
+
+  | metric | Gaussian 60 (0.333) | Gaussian 600 (0.045) | burst 60 (0.518) | burst 600 (0.065) |
+  |---|---|---|---|---|
+  | baseline, all units (Hz) | 2.63 | 2.64 | 2.62 | 2.64 |
+  | responders | 53% | 39% | 50% | 43% |
+  | peak change (Hz) | 34.8 | 29.2 | 45.8 | 36.9 |
+  | latency (ms) | 36.9 | 38.3 | 39.5 | 35.2 |
+  | duration (ms) | 61.2 | 45.9 | 43.0 | 49.8 |
+  | peak latency (ms) | +36 | +62 | +48 | +50 |
+  | extra spikes / neuron / burst | 1.62 | 1.19 | 1.40 | 1.26 |
+  | reversed / trained | 1.16 | 1.14 | 1.15 | 1.15 |
+  | responders with a detectable onset | 82 | 36 | 74 | 48 |
+
+  A dense HVC code weakens the DAF response toward the bird (extra spikes 1.6 -> 1.2) and, for
+  the burst generator, undoes most of what it did to the response at 60 units. It also
+  shortens the Gaussian model's response below the 47 ms bound. One seed only, and latency
+  and duration rest on 36-82 units here; multi-seed evaluation is needed before adopting any of
+  these. Untuned: `c_hvc` (inputs per I) at 600.
 
 ## DAF metrics
 

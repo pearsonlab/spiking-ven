@@ -48,7 +48,7 @@ __all__ = [
     "C_HVC", "B_HVC_MEAN_NS", "B_HVC_SD_NS",
     "C_JEI", "J_EI_MEAN_NS", "J_EI_SD_NS",
     "G_NMDA_MEAN_NS", "NMDA_TAU_RISE", "NMDA_TAU_DECAY", "NMDA_ALPHA", "MG_MM", "E_NMDA_MV",
-    "T_REFR_MS", "TAU_STDP", "R_I_TH", "J_MAX_IE_NS", "A_SFA_PA", "TAU_SFA",
+    "T_REFR_MS", "TAU_STDP", "R_I_TH", "A_SFA_PA", "TAU_SFA",
     "T_POST", "T_BURN", "N_ISTA",
     "A_JIE_NS_AT_10MS", "a_jie_for",
     # 3. the causal encoder operating point
@@ -246,10 +246,10 @@ TAU_STDP = 20.0
 #: STDP trace is debiased against. Near the I rate during song (43.8 Hz in the shipped
 #: model), I activity unrelated to an E spike gives no net change; 46, slightly above,
 #: makes the rule mildly depressing, which keeps the learned inhibition song-specific
-#: (reversed/trained 1.04-1.10 over training seeds). ``J_MAX_IE_NS`` caps each weight;
-#: none reaches it.
+#: (reversed/trained 1.04-1.10 over training seeds). Weights have no upper bound: the
+#: rule limits itself (inhibition stops the gated E spikes that drive it), and the largest
+#: learned weight is 204 nS.
 R_I_TH = 46.0
-J_MAX_IE_NS = 503.0
 
 #: Firing-rate adaptation on E: a hyperpolarising current that steps up by ``A_SFA_PA``
 #: on every spike and decays with ``TAU_SFA``. ``TAU_SFA`` must stay shorter than the

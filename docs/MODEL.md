@@ -209,7 +209,7 @@ gate_e  = 1 where B @ n_aud > 0, else 0                 audio gate; n_aud = audi
                                                         per channel in (t - tau, t], delayed
                                                         by aud_delay_ms like the drive
 JIE    += a_jie * outer(sE[t] * gate_e, x_i - xi_th)
-JIE     = clip(JIE, 0, j_max_ie)
+JIE     = max(JIE, 0)
 xi_th   = r_i_th * tau * 1e-3
 ```
 
@@ -228,9 +228,11 @@ xi_th   = r_i_th * tau * 1e-3
   during song (43.8 Hz), which makes the rule mildly depressing; far below it (an early 6 Hz)
   nearly every gated E spike potentiates whatever I has been doing, and the inhibition loses its
   song specificity. With `r_i_th = 0` the rule only potentiates.
-- **Bounds.** Weights are clipped to `[0, j_max_ie]` (503 nS) after every step, so depression
-  stops at zero. In the shipped model 57% of the I->E weights are nonzero, with mean 14 nS, 90th
-  percentile 34 nS and maximum 204 nS; none reaches the bound.
+- **Bounds.** Weights are clipped at zero after every step, so depression stops there. They have
+  no upper bound: the rule limits itself, because the inhibition it builds stops the gated E spikes
+  that drive it. In the shipped model 57% of the I->E weights are nonzero, with mean 14 nS, 90th
+  percentile 34 nS and maximum 204 nS. (A 503 nS cap, kept from the dimensionless model, never
+  bound and was removed.)
 - **Amplitude.** `a_jie` defaults to `constants.a_jie_for(tau_stdp) = 7.55 nS * 10 / tau`, so
   the integral of the learning window stays fixed when its width changes.
 - Updates are applied online, so later steps of the same `fit` call already feel them. `JIE` is
@@ -323,7 +325,7 @@ corpus's other renditions of the song.
 | Membrane and reversal potentials | mV | `V_e`, `V_i`, `e_l_mv`, `v_th_mv`, `v_reset_mv`, `e_ampa_mv`, `e_gaba_mv`, `e_nmda_mv` |
 | Currents: drives, adaptation, noise SD | pA | `i_drive_e_pa`, `i_drive_i_pa`, `a_sfa_pa`, `noise_e_pa` |
 | Capacitance, leak conductance | pF, nS | `c_e_pf`, `c_i_pf`, `g_l_e`, `g_l_i` |
-| Synaptic weights, their mean / SD, the I->E bound and STDP step | nS (peak conductance) | `B`, `B_hvc`, `JEI`, `JIE`, `b_aud_mean_ns`, `j_max_ie_ns`, `a_jie_ns` |
+| Synaptic weights, their mean / SD, and the STDP step | nS (peak conductance) | `B`, `B_hvc`, `JEI`, `JIE`, `b_aud_mean_ns`, `a_jie_ns` |
 | NMDA conductance | nS (peak, per connection, unblocked) | `g_nmda_mean_ns`, `nmda_conductances()` |
 | NMDA gating | in [0, 1] | `s_nmda` |
 | NMDA rate constant | 1 / ms | `nmda_alpha` |

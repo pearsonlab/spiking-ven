@@ -193,7 +193,7 @@ def test_defaults_are_the_operating_point():
         "c_B": C.C_B, "b_aud_mean_ns": C.B_AUD_MEAN_NS, "b_aud_sd_ns": C.B_AUD_SD_NS,
         "c_hvc": C.C_HVC, "b_hvc_mean_ns": C.B_HVC_MEAN_NS, "b_hvc_sd_ns": C.B_HVC_SD_NS,
         "c_JEI": C.C_JEI, "j_ei_mean_ns": C.J_EI_MEAN_NS, "j_ei_sd_ns": C.J_EI_SD_NS,
-        "j_max_ie_ns": C.J_MAX_IE_NS, "a_jie_ns": C.a_jie_for(C.TAU_STDP),
+        "a_jie_ns": C.a_jie_for(C.TAU_STDP),
         "t_refr_ms": C.T_REFR_MS, "a_sfa_pa": C.A_SFA_PA, "tau_sfa": C.TAU_SFA,
         "r_i_th": C.R_I_TH, "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
         "tau_stdp": C.TAU_STDP, "g_nmda_mean_ns": C.G_NMDA_MEAN_NS,

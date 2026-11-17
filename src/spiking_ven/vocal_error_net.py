@@ -118,7 +118,7 @@ def _simulate(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
     c_e, c_i, g_l_e, g_l_i, e_l, v_th, v_reset, e_ampa, e_gaba,
     i_drive_e, i_drive_i, noise_e, noise_i, t_refr_ms, a_sfa, tau_sfa,
-    A_jie, J_max_ie, xi_th,
+    A_jie, xi_th,
     learn_weights, alpha_stdp, rng,
     aud_delay_ms: int = 0,
     hvc_delay_ms: int = 0,
@@ -232,7 +232,7 @@ def _simulate(
                             else 0.0)
             x_i = alpha_stdp * x_i + sI
             JIE += A_jie * np.outer(gate_sE, x_i - xi_th)
-            np.clip(JIE, 0.0, J_max_ie, out=JIE)
+            np.maximum(JIE, 0.0, out=JIE)         # depression stops at zero
 
         sE_prev = sE
         sI_prev = sI
@@ -250,7 +250,7 @@ _FLOAT_KEYS = (
     "e_l_mv", "v_th_mv", "v_reset_mv", "c_e_pf", "c_i_pf", "e_ampa_mv", "e_gaba_mv",
     "i_drive_e_pa", "i_drive_i_pa", "noise_e_pa", "noise_i_pa", "a_sfa_pa",
     "c_B", "b_aud_mean_ns", "b_aud_sd_ns", "c_hvc", "b_hvc_mean_ns", "b_hvc_sd_ns",
-    "c_JEI", "j_ei_mean_ns", "j_ei_sd_ns", "j_max_ie_ns", "a_jie_ns", "r_i_th",
+    "c_JEI", "j_ei_mean_ns", "j_ei_sd_ns", "a_jie_ns", "r_i_th",
     "t_refr_ms",
 ) + _NMDA_KEYS
 _INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "aud_delay_ms", "hvc_delay_ms")
@@ -296,7 +296,6 @@ class VocalErrorNet:
                    conductance mean and SD (nS)
     c_hvc, b_hvc_mean_ns, b_hvc_sd_ns : the same for HVC->I
     c_JEI, j_ei_mean_ns, j_ei_sd_ns : the same for E->I (fixed)
-    j_max_ie_ns  : upper bound on each I->E peak conductance (nS)
     a_jie_ns     : STDP step (nS); ``None`` is ``constants.a_jie_for(tau_stdp)``
     r_i_th       : I rate (Hz) the STDP trace is debiased against; x_i below it -> LTD
     tau_stdp     : STDP window (ms), > 0: the I trace's time constant and the audio
@@ -349,7 +348,6 @@ class VocalErrorNet:
         c_JEI: float = C.C_JEI,
         j_ei_mean_ns: float = C.J_EI_MEAN_NS,
         j_ei_sd_ns: float = C.J_EI_SD_NS,
-        j_max_ie_ns: float = C.J_MAX_IE_NS,
         a_jie_ns: float | None = None,
         r_i_th: float = C.R_I_TH,
         tau_stdp: float = C.TAU_STDP,
@@ -391,7 +389,6 @@ class VocalErrorNet:
         self.c_B, self.b_aud_mean_ns, self.b_aud_sd_ns = float(c_B), float(b_aud_mean_ns), float(b_aud_sd_ns)
         self.c_hvc, self.b_hvc_mean_ns, self.b_hvc_sd_ns = float(c_hvc), float(b_hvc_mean_ns), float(b_hvc_sd_ns)
         self.c_JEI, self.j_ei_mean_ns, self.j_ei_sd_ns = float(c_JEI), float(j_ei_mean_ns), float(j_ei_sd_ns)
-        self.j_max_ie_ns = float(j_max_ie_ns)
         self.a_jie_ns = float(C.a_jie_for(tau_stdp) if a_jie_ns is None else a_jie_ns)
         self.r_i_th = float(r_i_th)
         self.tau_stdp = float(tau_stdp)
@@ -595,7 +592,7 @@ class VocalErrorNet:
             self.e_l_mv, self.v_th_mv, self.v_reset_mv, self.e_ampa_mv, self.e_gaba_mv,
             self.i_drive_e_pa, self.i_drive_i_pa, self.noise_e_pa, self.noise_i_pa,
             self.t_refr_ms, self.a_sfa_pa, self.tau_sfa,
-            self.a_jie_ns, self.j_max_ie_ns, xi_th,
+            self.a_jie_ns, xi_th,
             learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,

@@ -32,7 +32,7 @@ from ..constants import (
     C_HVC,
     C_I_PF,
     E_L_MV,
-    G_NMDA,
+    G_NMDA_MEAN_NS,
     HVC_DELAY_MS,
     HVC_INTRO,
     I_DRIVE_I_PA,
@@ -152,9 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="E->I synaptic decay (ms), AMPA; 0 = one-step pulse")
     p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
                    help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
-    p.add_argument("--g-nmda", type=float, default=G_NMDA,
-                   help="NMDA current at full gating, at rest and unblocked, relative to "
-                        "the fast EPSC (0 disables it); kinetics and Mg2+ block in constants")
+    p.add_argument("--g-nmda-mean-ns", type=float, default=G_NMDA_MEAN_NS,
+                   help="mean peak NMDA conductance (nS) per aud->E connection, at full "
+                        "gating and unblocked (0 disables it); kinetics and Mg2+ block in "
+                        "constants")
     return p
 
 
@@ -205,7 +206,7 @@ def main(argv: list[str] | None = None) -> None:
         j_ei_mean_mv=args.j_ei_mean_mv, j_ei_sd_mv=args.j_ei_sd_mv,
         j_max_ie_mv=args.j_max_ie_mv, a_jie_mv=a_jie, r_i_th=args.r_i_th,
         tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
-        g_nmda=args.g_nmda,
+        g_nmda_mean_ns=args.g_nmda_mean_ns,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,
     )
 

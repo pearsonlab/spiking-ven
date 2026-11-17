@@ -85,7 +85,7 @@ def _legacy_file(path: Path, **override) -> dict:
 
 def test_psp_peak_matches_the_simulated_membrane():
     """One spike through a weight of ``w`` mV of PSP peaks at ``w`` mV above rest."""
-    net = _small_net(noise_e_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0, g_nmda=0.0,
+    net = _small_net(noise_e_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0, g_nmda_mean_ns=0.0,
                      a_sfa_pa=0.0, v_th_mv=100.0)       # never fires: read V directly
     net.B = np.zeros_like(net.B)
     net.B[0, 0] = 2.0
@@ -125,7 +125,8 @@ def test_constants_are_the_former_operating_point_converted():
     assert C.A_SFA_PA == pytest.approx(new["a_sfa_pa"], rel=rel)
     assert C.J_MAX_IE_MV == pytest.approx(new["j_max_ie_mv"], rel=rel)
     assert C.a_jie_for(20.0) == pytest.approx(new["a_jie_mv"], rel=rel)
-    assert C.G_NMDA == pytest.approx(new["g_nmda"], rel=rel)
+    assert C.G_NMDA_MEAN_NS == pytest.approx(new["nmda_ns_per_mv"] * C.B_AUD_MEAN_MV,
+                                             rel=rel)
     assert C.B_AUD_MEAN_MV == pytest.approx(15.0 / 54 * wf["B"], rel=rel)
     assert C.B_HVC_MEAN_MV == pytest.approx(0.378 * wf["B_hvc"], rel=rel)
     assert C.J_EI_MEAN_MV == pytest.approx(0.048 / np.sqrt(300) * wf["JEI"], rel=rel)
@@ -236,7 +237,7 @@ def test_legacy_files_missing_later_keys_load_with_the_features_off(tmp_path):
     _legacy_file(tmp_path / "old.npz")
     back = VocalErrorNet.load(str(tmp_path / "old.npz"))
     assert (back.t_refr_ms, back.a_sfa_pa, back.tau_sfa) == (0.0, 0.0, 0.0)
-    assert (back.tau_inh, back.tau_exc, back.g_nmda) == (0.0, 0.0, 0.0)
+    assert (back.tau_inh, back.tau_exc, back.g_nmda_mean_ns) == (0.0, 0.0, 0.0)
     assert (back.aud_delay_ms, back.hvc_delay_ms) == (0, 0)
     assert back.stimulus == {} and back.stdp_gate == "drive"
     back.transform(np.zeros((6, 20)), np.zeros((10, 20)))   # still runs
@@ -300,7 +301,7 @@ def test_defaults_are_the_operating_point():
         "j_max_ie_mv": C.J_MAX_IE_MV, "a_jie_mv": C.a_jie_for(C.TAU_STDP),
         "t_refr_ms": C.T_REFR_MS, "a_sfa_pa": C.A_SFA_PA, "tau_sfa": C.TAU_SFA,
         "r_i_th": C.R_I_TH, "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
-        "tau_stdp": C.TAU_STDP, "g_nmda": C.G_NMDA,
+        "tau_stdp": C.TAU_STDP, "g_nmda_mean_ns": C.G_NMDA_MEAN_NS,
     }
     for k, v in expected.items():
         assert getattr(net, k) == v, k
@@ -359,7 +360,7 @@ def test_v2_legacy_defaults_are_pinned():
     assert net.i_drive_e_pa == pytest.approx(0.155 * k_e * net.g_l_e)
     assert net.b_aud_mean_mv == pytest.approx(5.0 / 256 * k_e * U.psp_peak(10.0, 30.0))
     # Inherited, not in the signature: operating-point features added later stay off.
-    assert (net.g_nmda, net.tau_inh, net.tau_exc) == (0.0, 0.0, 0.0)
+    assert (net.g_nmda_mean_ns, net.tau_inh, net.tau_exc) == (0.0, 0.0, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +429,7 @@ def test_i_before_gated_e_potentiates_only_that_pair():
 
 def test_e_long_before_i_does_not_potentiate():
     """The window is causal: an I burst after E has fallen silent changes nothing."""
-    net = _stdp_net(r_i_th=0.0, g_nmda=0.0)            # no slow NMDA tail keeping E up
+    net = _stdp_net(r_i_th=0.0, g_nmda_mean_ns=0.0)    # no slow NMDA tail keeping E up
     hvc, aud = _pulses(net, aud_t=[20], hvc_t=[250])
     sE, sI = net.transform_all(hvc, aud)
     assert sE.sum() > 0 and sI.sum() > 0
@@ -567,9 +568,10 @@ def test_mg_block_follows_jahr_stevens():
     assert mg_block(-70.0) < 0.06 and mg_block(0.0) > 0.75
 
 
-def _burst_response(g_nmda):
+def _burst_response(g_nmda_mean_ns):
     net = VocalErrorNet(n_e=40, n_i=10, n_hvc=3, n_aud=4, seed=0, noise_e_pa=0.0,
-                        a_sfa_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0, g_nmda=g_nmda,
+                        a_sfa_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0,
+                        g_nmda_mean_ns=g_nmda_mean_ns,
                         b_aud_mean_mv=230.0, b_aud_sd_mv=115.0)
     aud = np.zeros((4, 400), dtype=np.float32)
     aud[:, 50:100:4] = 1.0                  # a 50 ms burst at 250 Hz per channel
@@ -579,20 +581,30 @@ def _burst_response(g_nmda):
 
 def test_nmda_sustains_firing_after_the_input_ends():
     during0, after0 = _burst_response(0.0)
-    during, after = _burst_response(2.0)
+    during, after = _burst_response(1200.0)
     assert after > after0 + 5, (after0, after)
     assert during >= during0
 
 
 def test_nmda_parameters_round_trip(tmp_path):
-    net = VocalErrorNet(n_e=8, n_i=4, n_hvc=3, n_aud=5, seed=0, g_nmda=12.0,
+    net = VocalErrorNet(n_e=8, n_i=4, n_hvc=3, n_aud=5, seed=0, g_nmda_mean_ns=12.0,
                         nmda_tau_decay=80.0)
     path = tmp_path / "nmda.npz"
     net.save(str(path))
     back = VocalErrorNet.load(str(path))
-    assert (back.g_nmda, back.nmda_tau_decay) == (12.0, 80.0)
+    assert (back.g_nmda_mean_ns, back.nmda_tau_decay) == (12.0, 80.0)
     w = back.to_brian_weights()
-    assert w["g_nmda"] == 12.0 and w["nmda_tau_decay"] == 80.0
+    assert w["g_nmda_mean_ns"] == 12.0 and w["nmda_tau_decay"] == 80.0
+    np.testing.assert_array_equal(w["G_nmda"], back.nmda_conductances())
+
+
+def test_nmda_conductances_are_b_rescaled_to_their_mean():
+    net = VocalErrorNet(n_e=400, n_i=10, n_hvc=3, n_aud=200, seed=0, g_nmda_mean_ns=900.0)
+    G = net.nmda_conductances()
+    np.testing.assert_allclose(G, net.B * (900.0 / net.b_aud_mean_mv))
+    assert G[G > 0].mean() == pytest.approx(900.0, rel=0.05)
+    assert not VocalErrorNet(n_e=4, n_i=2, n_aud=3, g_nmda_mean_ns=0.0).nmda_conductances().any()
+
 
 
 # ------------------------------------------------------------------- HVC prelude
@@ -642,3 +654,19 @@ def test_recurrent_decay_zero_is_the_instantaneous_pulse():
     from spiking_ven.vocal_error_net import _decay
     assert _decay(0.0) == 0.0
     assert _decay(5.0) == pytest.approx(np.exp(-1 / 5.0))
+
+
+def test_files_with_a_relative_nmda_convert_to_a_conductance(tmp_path):
+    """mV / pA files saved before NMDA was a conductance stored ``g_nmda``, relative to the
+    fast EPSC with the driving force normalised at rest; they load as the same current."""
+    net = _small_net(g_nmda_mean_ns=0.0)
+    path = tmp_path / "full.npz"
+    net.save(str(path))
+    d = dict(np.load(path))
+    del d["g_nmda_mean_ns"]
+    d["g_nmda"] = np.array(61.9)
+    np.savez(tmp_path / "rel.npz", **d)
+    back = VocalErrorNet.load(str(tmp_path / "rel.npz"))
+    expected = (61.9 * back._current_factors()["B"] * back.b_aud_mean_mv
+                / (back.e_nmda_mv - back.e_l_mv))
+    assert back.g_nmda_mean_ns == pytest.approx(expected)

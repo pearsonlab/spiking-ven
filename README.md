@@ -102,14 +102,14 @@ against the shipped model; `make test-repro` runs it.
 |---|---|---|
 | auditory input rate, per rendition (2.66 Hz during the song itself) | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
 | baseline, all units | 2.49 Hz | 1–10 Hz (Fig. 7C) |
-| responders | 62% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 29.5 ms | 23 ± 12 ms |
-| response duration | 64.4 ms | 90 ± 43 ms |
+| responders | 61% | 41% = 7/17, 95% CI 21–64% |
+| response onset latency | 28.7 ms | 23 ± 12 ms |
+| response duration | 68.4 ms | 90 ± 43 ms |
 | extra spikes per responder per burst | 0.90 | ~0.8–1.0 |
-| peak change, responders | 21.2 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| peak change, responders | 20.3 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
 | time to peak | 40 ms | ~40–60 ms (Fig. 8E, read off the panel) |
-| late (100–150 ms) / peak | 0.066 | < 0.15 — a transient, not a step (Fig. 8E) |
-| reversed / trained song rate | 1.11 | > 1 |
+| late (100–150 ms) / peak | 0.073 | < 0.15 — a transient, not a step (Fig. 8E) |
+| reversed / trained song rate | 1.10 | > 1 |
 
 **Every metric is inside the bird's range.** Training seeds 43 and 44 give extra spikes
 1.02 and 0.95, latency 26.6 and 33.7 ms and duration 68.5 and 70.2 ms; seed 43 is just above
@@ -126,9 +126,9 @@ per motif. With 20 trials the per-neuron tests admit only the strongest responde
 reads as a larger, later, shorter response; and a dense HVC code keeps inhibition on through
 the whole motif, which weakens the response (`docs/design-notes.md`).
 
-Duration is 64.4 ms at the test seed (66.1 ± 2.2 ms over ten evaluation seeds). With
+Duration is 68.4 ms at the test seed (65.3 ± 3.1 ms over ten evaluation seeds). With
 AMPA-fast synapses it comes from the NMDA component of the auditory synapses (below).
-Latency is 29.5 ms at the test seed, 29.1 ± 1.3 ms over ten seeds. Duration follows the paper's rule -- the
+Latency is 28.7 ms at the test seed, 30.5 ± 1.1 ms over ten seeds. Duration follows the paper's rule -- the
 response ends at the first run of ten non-significant 2 ms bins -- searched up to 300 ms
 after onset, so long responses are timed rather than dropped.
 
@@ -139,7 +139,7 @@ population's ~2.5 Hz). The paper applies the same criterion, so responder-vs-res
 comparisons stay fair — but only `baseline, all units` estimates a firing rate.
 
 Responder fraction is deliberately not treated as a mismatch: 7/17 has a 95% confidence
-interval of 21–64%, which 62% sits inside.
+interval of 21–64%, which 61% sits inside.
 
 **The peak is a diagnostic, not a target, and is not asserted.** It is bin-width dependent
 and the paper never states how its plotted PSTHs were binned; 2 ms is the only binning it
@@ -159,11 +159,14 @@ equations and every value.
 Every synapse has a realistic decay. The auditory -> E and HVC -> I inputs and E -> I are AMPA
 (`TAU_S = TAU_EXC = 3 ms`); I -> E is GABA_A (`TAU_INH = 5 ms`). The auditory synapses onto E
 also carry a standard NMDA conductance (Wang 2002: saturating gating with 2 ms rise and
-100 ms decay, Mg2+ block, reversal 0 mV; `G_NMDA = 61.9`, the NMDA current at full gating,
-at rest and unblocked, relative to the fast EPSC). With fast synapses NMDA is the only slow
-excitation, and it is what holds the DAF response up: without enough of it the response peaks
-~30 ms after onset and fades while the noise is still on. It carries
-~130x the fast charge per spike near threshold (much less at rest, where Mg2+ blocks it).
+100 ms decay, Mg2+ block, reversal 0 mV), on the same connections as the fast weights,
+with a mean peak conductance of `G_NMDA_MEAN_NS = 1853` nS per connection at full gating
+before the Mg2+ block (which lets ~4% through at rest and ~14% at threshold). With fast
+synapses NMDA is the only slow excitation, and it is what holds the DAF response up: without
+enough of it the response peaks ~30 ms after onset and fades while the noise is still on.
+Lasting ~73 ms per spike against AMPA's ~3.5, it carries
+~130x the fast charge per spike near threshold (57x at rest), though its peak current is only
+~4x the fast EPSC.
 Both runtimes implement it; see `docs/MODEL.md` for the equations and
 `docs/design-notes.md` for the sweeps that chose it.
 

@@ -92,7 +92,7 @@ def test_spike_frequency_adaptation_slows_firing():
 def test_all_zero_weight_matrices_wire_inactive_synapses():
     """A population with no connections must be inactive, not a ValueError from numpy."""
     w = _weights()
-    for k in ("B", "B_hvc", "JIE", "JEI"):
+    for k in ("B", "B_hvc", "JIE", "JEI", "G_nmda"):
         w[k] = np.zeros_like(w[k])
     groups = build_ven_groups(w)
     aud = SpikeGeneratorGroup(w["n_aud"], [], [] * ms)
@@ -175,13 +175,13 @@ def test_nmda_runs_in_brian2_in_the_same_regime_as_numpy():
     aud = (rng.random((n_aud, T)) < 0.03).astype(np.float32)
     hvc = (rng.random((n_hvc, T)) < 0.02).astype(np.float32)
     out = {}
-    for g in (0.0, 6.2):
+    for g in (0.0, 558.0):
         brian2.start_scope()
         net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e_pa=0.0,
-                            noise_i_pa=0.0, seed=0, g_nmda=g, b_aud_mean_mv=34.4,
+                            noise_i_pa=0.0, seed=0, g_nmda_mean_ns=g, b_aud_mean_mv=34.4,
                             b_aud_sd_mv=17.2)
         out[g] = _rates_both_runtimes(net, aud, hvc, T)
-    (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[6.2]
+    (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[558.0]
     assert len(syns0) == 4 and len(syns1) == 5
     assert np1 > np0 and br1 > br0, out
     assert br1 == pytest.approx(np1, rel=0.5), (np1, br1)

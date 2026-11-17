@@ -46,7 +46,7 @@ __all__ = [
     "C_B", "B_AUD_MEAN_MV", "B_AUD_SD_MV",
     "C_HVC", "B_HVC_MEAN_MV", "B_HVC_SD_MV",
     "C_JEI", "J_EI_MEAN_MV", "J_EI_SD_MV",
-    "G_NMDA", "NMDA_TAU_RISE", "NMDA_TAU_DECAY", "NMDA_ALPHA", "MG_MM", "E_NMDA_MV",
+    "G_NMDA_MEAN_NS", "NMDA_TAU_RISE", "NMDA_TAU_DECAY", "NMDA_ALPHA", "MG_MM", "E_NMDA_MV",
     "T_REFR_MS", "TAU_STDP", "R_I_TH", "J_MAX_IE_MV", "A_SFA_PA", "TAU_SFA",
     "T_POST", "T_BURN", "N_ISTA",
     "A_JIE_MV_AT_10MS", "a_jie_for",
@@ -202,17 +202,20 @@ J_EI_MEAN_MV = 0.0271
 J_EI_SD_MV = 0.00271
 
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
-#: Wang (2001), on the same connections as ``B``. Current:
-#: ``G_NMDA (B s) B(V) (E_NMDA - V) / (E_NMDA - E_L)``, with ``B`` the fast weights'
-#: current (pA) -- so ``G_NMDA`` is the NMDA current at full gating, at rest and unblocked,
-#: relative to the fast EPSC. Near threshold it carries ~130x the fast component's charge
-#: per spike (much less at rest, where Mg2+ blocks it). With AMPA-fast inputs it is the
-#: only slow excitation, and what sustains the DAF response through and past the noise
+#: Wang (2001), on the same connections as the fast weights ``B``. Current (pA):
+#: ``I_nmda = (G s) mg(V) (E_NMDA - V)``, with ``G`` each connection's peak NMDA conductance
+#: (nS) and ``s`` its channel's gating in [0, 1]. ``G`` is ``B`` rescaled so its mean is
+#: ``G_NMDA_MEAN_NS``: a stronger AMPA synapse carries proportionally more NMDA. That mean is
+#: the ceiling -- full gating, no Mg2+ block; the block lets ~4% through at rest (~82 nS)
+#: and ~14% at threshold (~257 nS), against a leak of 16.7 nS. Per isolated spike near
+#: threshold NMDA carries ~130x the fast component's charge, mostly because it lasts ~73 ms
+#: against AMPA's ~3.5 (its peak current is ~4x the fast EPSC). With AMPA-fast inputs it is
+#: the only slow excitation, and what sustains the DAF response through and past the noise
 #: burst; chosen with the auditory weights for duration and magnitude. 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
-#: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
-G_NMDA = 61.9
+#: Mg2+ block (Jahr & Stevens 1990): mg(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
+G_NMDA_MEAN_NS = 1853.0
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5

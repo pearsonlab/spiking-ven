@@ -128,8 +128,7 @@ on a spike:  V_e = V_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 
 ### NMDA component
 
-The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 61.9`), following Wang
-(2002). Each auditory channel `j` has a gating variable, computed before the loop
+The auditory synapses onto E also carry an NMDA conductance, following Wang (2002). Each auditory channel `j` has a gating variable, computed before the loop
 (`nmda_gating`):
 
 ```
@@ -142,15 +141,27 @@ increment each exactly, in turn, so `s` stays in [0, 1] and saturates near 1 und
 At each step, before the membrane update, `I_e` gains
 
 ```
-I_nmda = g_nmda * (B_pA @ s_t) * mg_block(V_e) * (E_nmda - V_e) / (E_nmda - E_L)
+I_nmda = (G_nmda @ s_t) * mg_block(V_e) * (E_nmda - V_e)          nS x mV = pA
+G_nmda  = B * g_nmda_mean_ns / b_aud_mean_mv                        (nmda_conductances())
 mg_block(V) = 1 / (1 + mg_mm * exp(-0.062 * V) / 3.57)          (Jahr & Stevens 1990, V in mV)
 ```
 
-where `s_t` is delayed like `h_aud_t` and `V_e` is the potential from the previous step. NMDA
-uses the same connections as `B`, and the driving force is normalised to 1 at rest, so `g_nmda`
-is the NMDA current at full gating, at rest and without the Mg2+ block, relative to the fast
-EPSC. Per isolated spike near threshold, the shipped 61.9 carries ~130x the fast component's
-charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio
+where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous step and
+`E_nmda` = 0 mV. `G_nmda` is each connection's peak NMDA conductance (nS): the fast weights `B`
+rescaled so their mean is `g_nmda_mean_ns` = 1853 nS, so a stronger AMPA synapse carries
+proportionally more NMDA. That is the ceiling -- full gating, no Mg2+ block. The block lets
+~4% through at rest (~82 nS) and ~14% at threshold (~257 nS), against a leak of 16.7 nS:
+
+| V (mV) | unblocked | NMDA / fast charge per spike | NMDA / fast peak current |
+|---|---|---|---|
+| -70 (rest) | 0.044 | 57x | 1.9x |
+| -60 | 0.080 | 88x | 2.9x |
+| -50 (threshold) | 0.139 | 127x | 4.2x |
+
+The charge ratio is large mostly because one spike's NMDA gating lasts ~73 ms (peak 0.68 at
++6 ms) against the fast trace's ~3.5; a single spike nearly saturates a channel's gating, so NMDA
+reports whether a channel is active more than how fast it fires. `g_nmda_mean_ns = 0` removes
+the term. The STDP audio
 gate reads input spikes, not either current, so NMDA changes learning only through the E spikes
 it causes.
 
@@ -304,7 +315,7 @@ corpus's other renditions of the song.
 | Currents: drives, synaptic, adaptation, noise SD | pA | `i_drive_e_pa`, `i_drive_i_pa`, `a_sfa_pa`, `noise_e_pa`, `synaptic_currents()` |
 | Capacitance, leak conductance | pF, nS | `c_e_pf`, `c_i_pf`, `g_l_e`, `g_l_i` |
 | Weights, their mean / SD, the I->E bound and STDP step | mV (peak PSP at rest) | `B`, `B_hvc`, `JEI`, `JIE`, `b_aud_mean_mv`, `j_max_ie_mv`, `a_jie_mv` |
-| NMDA conductance | relative to the fast EPSC, at rest | `g_nmda` |
+| NMDA conductance | nS (peak, per connection, unblocked) | `g_nmda_mean_ns`, `nmda_conductances()` |
 | NMDA gating | in [0, 1] | `s_nmda` |
 | NMDA rate constant | 1 / ms | `nmda_alpha` |
 | Mg2+ concentration | mM | `mg_mm` |

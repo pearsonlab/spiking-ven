@@ -62,10 +62,10 @@ dg_inh/dt = -g_inh / tau_inh_ven : 1
 dw_sfa/dt = -w_sfa / tau_sfa_ven : 1
 {nmda_vars}"""
 
-# NMDA on aud -> E (Wang 2002), present only when g_nmda > 0. ``s_nmda`` is the summed
-# fast-current-weighted gating (pA) from the NMDA synapses; the driving force is
-# normalised to 1 at rest and the Mg2+ block evaluated at the membrane potential (mV).
-_NMDA_TERM = (" + g_nmda_ven * s_nmda * (e_nmda_ven - v) / (e_nmda_ven - e_l_ven)"
+# NMDA on aud -> E (Wang 2002), present only when g_nmda_mean_ns > 0. ``s_nmda`` is the
+# summed conductance (nS) from the NMDA synapses -- each its peak conductance times its
+# gating -- with the Mg2+ block evaluated at the membrane potential (mV); nS x mV = pA.
+_NMDA_TERM = (" + s_nmda * (e_nmda_ven - v)"
               " / (1 + mg_mm_ven * exp(-0.062 * v) / 3.57)")
 _NMDA_VARS = """s_nmda    : 1
 """
@@ -118,7 +118,7 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
     sigma_i = (w["noise_i_pa"] / w["g_l_i"]) * float(np.sqrt(DT_NUMPY_S)) / (w["tau_i"] * 1e-3)
     refractory = w["t_refr_ms"] * ms
 
-    nmda = float(w.get("g_nmda", 0.0)) > 0.0
+    nmda = float(w.get("g_nmda_mean_ns", 0.0)) > 0.0
     eqs_e = _EQS_VEN_E.replace("{nmda}", _NMDA_TERM if nmda else "").replace(
         "{nmda_vars}", _NMDA_VARS if nmda else "")
     e_group = NeuronGroup(
@@ -139,8 +139,7 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
             "v_th_ven":      w["v_th_mv"],
             "v_reset_ven":   w["v_reset_mv"],
             "sigma_e_ven":   sigma_e / second**0.5,   # SDE noise amplitude [mV/sqrt(s)]
-            **({"g_nmda_ven": w["g_nmda"], "mg_mm_ven": w["mg_mm"],
-                "e_nmda_ven": w["e_nmda_mv"]} if nmda else {}),
+            **({"mg_mm_ven": w["mg_mm"], "e_nmda_ven": w["e_nmda_mv"]} if nmda else {}),
         },
         method="euler",
         name=f"{name_prefix}_e",
@@ -211,8 +210,8 @@ def build_ven_synapses(
     so the trained JIE weights see the same relative timing here that produced them --
     the causal I-before-E STDP window is built on that offset.
 
-    With ``g_nmda > 0`` the NMDA component of aud→E is a fifth synapse object on the same
-    connections, appended to the list.
+    With ``g_nmda_mean_ns > 0`` the NMDA component of aud→E is a fifth synapse object on
+    the same connections, weighted by ``G_nmda`` (nS), appended to the list.
 
     Returns ``[syn_b, syn_b_hvc, syn_jei, syn_jie]`` (plus ``syn_nmda``).
     """
@@ -232,13 +231,13 @@ def build_ven_synapses(
         _syn(e_group, i_group, "g_exc", w["JEI"], 0.0, "jei"),
         _syn(i_group, e_group, "g_inh", w["JIE"], 0.0, "jie"),
     ]
-    if float(w.get("g_nmda", 0.0)) > 0.0:
+    if float(w.get("g_nmda_mean_ns", 0.0)) > 0.0:
         syn = Synapses(aud_group, e_group, _EQS_NMDA_SYN, on_pre="x_nmda += 1",
                        delay=w["aud_delay_ms"] * ms, method="euler",
                        namespace={"tau_nmda_rise": w["nmda_tau_rise"] * ms,
                                   "tau_nmda_decay": w["nmda_tau_decay"] * ms,
                                   "alpha_nmda": w["nmda_alpha"] / ms},
                        name=f"{name_prefix}_nmda")
-        _wire(syn, np.asarray(w["B"], dtype=np.float64))
+        _wire(syn, np.asarray(w["G_nmda"], dtype=np.float64))
         syns.append(syn)
     return syns

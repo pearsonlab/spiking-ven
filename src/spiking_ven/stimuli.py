@@ -166,7 +166,7 @@ def build_stimuli(
     sig_train, train_idx = corpus.template()
     rms_train = float(np.sqrt(np.mean(sig_train**2)))
 
-    # The encoder path normalises TWICE, and both have to share one reference (the song)
+    # The encoder path normalizes TWICE, and both have to share one reference (the song)
     # or the level difference between stimuli does not reach the network:
     #   encode_signal scales the waveform    -> rms_from=sig_train
     #   acts_to_spikes scales the spike rate -> calibrate_on=acts_train

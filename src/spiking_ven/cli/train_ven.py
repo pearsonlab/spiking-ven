@@ -173,14 +173,14 @@ def main(argv: list[str] | None = None) -> None:
         a_sfa=args.a_sfa, tau_sfa=args.tau_sfa, g_nmda=args.g_nmda,
     )
     if args.theta_e_init > 0.0:
-        ven.theta_e[:] = args.theta_e_init
+        ven.theta_e = args.theta_e_init
 
     print(f"\n{'=' * 65}")
     print(f"  VEN  A_jie={a_jie:.2e}  "
           f"tau_s={args.tau_s} ms" + (f"  tau_stdp={args.tau_stdp:.0f} ms"
                                       if args.tau_stdp > 0 else ""))
     print(f"  drive_e={args.drive_e}  B_scale={args.b_scale}  "
-          f"theta_e_init={ven.theta_e[0]:.4f}")
+          f"theta_e_init={ven.theta_e:.4f}")
     print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
           f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
     print(f"{'=' * 65}")

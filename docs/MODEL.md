@@ -90,7 +90,7 @@ g_syn = W_nS @ h
 | auditory -> E | `B` | `h_aud` (`spike_to_rate`, before the loop) | `tau_s` = 3 ms | AMPA, `E_AMPA` = 0 mV |
 | HVC -> I | `B_hvc` | `h_hvc` (`spike_to_rate`, before the loop) | `tau_s` = 3 ms | AMPA, 0 mV |
 | E -> I | `JEI` | `g_exc`, fed by `sE[t-1]` | `tau_exc` = 3 ms | AMPA, 0 mV |
-| I -> E | `JIE` | `g_inh`, fed by `sI[t-1]` | `tau_inh` = 5 ms | GABA_A, `E_GABA` = -70 mV |
+| I -> E | `JIE` | `g_inh`, fed by `sI[t-1]` | `tau_inh` = 15 ms | GABA_A, `E_GABA` = -70 mV |
 | auditory -> E, NMDA | `G_nmda` | gating `s` (below) | 2 ms rise, 100 ms decay | `E_NMDA` = 0 mV |
 
 Each weight is the **peak conductance (nS)** one presynaptic spike opens. A recurrent `tau` of 0
@@ -162,15 +162,15 @@ mg_block(V) = 1 / (1 + mg_mm * exp(-0.062 * V) / 3.57)        (Jahr & Stevens 19
 
 where `s_t` is delayed like `h_aud_t` and `V_e` is the potential from the previous step. `G_nmda`
 is each connection's peak NMDA conductance: the AMPA weights `B` rescaled so their mean is
-`g_nmda_mean_ns` = 3000 nS, so a stronger AMPA synapse carries proportionally more NMDA. That is
-the ceiling -- full gating, no Mg2+ block. The block lets ~4% through at rest (~133 nS) and ~14% at
-threshold (~416 nS), against a leak of 16.7 nS. Per isolated spike, against the mean AMPA synapse:
+`g_nmda_mean_ns` = 2500 nS, so a stronger AMPA synapse carries proportionally more NMDA. That is
+the ceiling -- full gating, no Mg2+ block. The block lets ~4% through at rest (~111 nS) and ~14% at
+threshold (~346 nS), against a leak of 16.7 nS. Per isolated spike, against the mean AMPA synapse:
 
 | V (mV) | unblocked | NMDA / AMPA charge | NMDA / AMPA peak current |
 |---|---|---|---|
-| -70 (rest) | 0.044 | 73x | 2.4x |
-| -60 | 0.080 | 130x | 4.3x |
-| -50 (threshold) | 0.139 | 226x | 7.4x |
+| -70 (rest) | 0.044 | 61x | 2.0x |
+| -60 | 0.080 | 108x | 3.6x |
+| -50 (threshold) | 0.139 | 188x | 6.2x |
 
 The charge ratio is large mostly because one spike's NMDA gating lasts ~73 ms (peak 0.68 at
 +6 ms) against the AMPA trace's ~3.5; a single spike nearly saturates a channel's gating, so NMDA
@@ -224,13 +224,13 @@ xi_th   = r_i_th * tau * 1e-3
 - **Threshold `xi_th`.** `r_i_th` (Hz) times the window `tau` (ms, hence `1e-3`) is approximately
   the mean trace of an I cell firing irregularly at `r_i_th`. An E spike potentiates synapses from I
   cells whose trace is above that level and depresses those below it, so I activity that is merely
-  at its baseline rate gives no net change. The shipped `r_i_th = 40` Hz is just below the I rate
-  during song (43.1 Hz), which makes the rule mildly potentiating; far below it (an early 6 Hz)
+  at its baseline rate gives no net change. The shipped `r_i_th = 46` Hz is just above the I rate
+  during song (43.8 Hz), which makes the rule mildly depressing; far below it (an early 6 Hz)
   nearly every gated E spike potentiates whatever I has been doing, and the inhibition loses its
   song specificity. With `r_i_th = 0` the rule only potentiates.
 - **Bounds.** Weights are clipped to `[0, j_max_ie]` (503 nS) after every step, so depression
-  stops at zero. In the shipped model 62% of the I->E weights are nonzero, with mean 47 nS, 90th
-  percentile 109 nS; 0.04% reach the bound.
+  stops at zero. In the shipped model 57% of the I->E weights are nonzero, with mean 14 nS, 90th
+  percentile 34 nS and maximum 204 nS; none reaches the bound.
 - **Amplitude.** `a_jie` defaults to `constants.a_jie_for(tau_stdp) = 7.55 nS * 10 / tau`, so
   the integral of the learning window stays fixed when its width changes.
 - Updates are applied online, so later steps of the same `fit` call already feel them. `JIE` is
@@ -247,7 +247,7 @@ stored as float32.
 |---|---|---|---|---|
 | `B` | `c_B` (0.05) | `b_aud_mean_ns` (38.1) | `b_aud_sd_ns` (19.0) | ~2700 |
 | `B_hvc` | `c_hvc` (0.1) | `b_hvc_mean_ns` (6.36) | `b_hvc_sd_ns` (3.18) | ~450 |
-| `JEI` | `c_JEI` (0.5) | `j_ei_mean_ns` (0.14) | `j_ei_sd_ns` (0.014) | ~10 |
+| `JEI` | `c_JEI` (0.5) | `j_ei_mean_ns` (0.187) | `j_ei_sd_ns` (0.0187) | ~13 |
 | `JIE` | -- | 0 (all zero) | -- | -- |
 
 The auditory synapse is strong because each E cell samples only ~2.7 of the 54 sparse auditory

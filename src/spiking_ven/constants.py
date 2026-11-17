@@ -166,11 +166,13 @@ TAU_I = 10.0
 #: (EPSC decay 2-5 ms; 2, 3 and 5 calibrate alike, docs/design-notes.md); I -> E is GABA_A
 #: (IPSC decay ~5-10 ms in adult cortex; 5 as in Brunel & Wang 2001). In songbirds, Luo &
 #: Perkel (2002, J Neurophysiol) report developmental changes in GABA_A IPSC decay, 5-20 ms
-#: in juveniles -- a different circuit, but the range the sweep covers. Each presynaptic
+#: in juveniles -- a different circuit, but the range the sweep covered. 15 ms, inside it:
+#: at 5 ms the DAF response broke into ~15 ms volleys (E -> I feedback recruits I, shunting
+#: silences E, E rebounds), which 15-20 ms smooths out (docs/design-notes.md). Each presynaptic
 #: spike adds its conductance to a trace that decays with these; 0 for the recurrent pair
 #: would be a one-step pulse. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
 TAU_S = 3.0
-TAU_INH = 5.0
+TAU_INH = 15.0
 TAU_EXC = 3.0
 
 #: Synaptic reversal potentials (mV): AMPA and NMDA at 0, GABA_A at rest (Wang 2002), so
@@ -203,28 +205,28 @@ C_HVC = 0.1
 B_HVC_MEAN_NS = 6.36
 B_HVC_SD_NS = 3.18
 
-#: E -> I, fixed: log-normal peak conductances of this mean and SD (nS). Three times the
+#: E -> I, fixed: log-normal peak conductances of this mean and SD (nS). Four times the
 #: conductance that matches the earlier current-based E -> I: the faster feedback trims
 #: the DAF response and moves its peak later (docs/design-notes.md).
 C_JEI = 0.5
-J_EI_MEAN_NS = 0.14
-J_EI_SD_NS = 0.014
+J_EI_MEAN_NS = 0.187
+J_EI_SD_NS = 0.0187
 
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
 #: Wang (2001), on the same connections as the fast weights ``B``. Current (pA):
 #: ``I_nmda = (G s) mg(V) (E_NMDA - V)``, with ``G`` each connection's peak NMDA conductance
 #: (nS) and ``s`` its channel's gating in [0, 1]. ``G`` is ``B`` rescaled so its mean is
 #: ``G_NMDA_MEAN_NS``: a stronger AMPA synapse carries proportionally more NMDA. That mean is
-#: the ceiling -- full gating, no Mg2+ block; the block lets ~4% through at rest (~133 nS)
-#: and ~14% at threshold (~416 nS), against a leak of 16.7 nS. Per isolated spike near
-#: threshold NMDA carries ~230x the AMPA charge (73x at rest), mostly because it lasts
-#: ~73 ms against AMPA's ~3.5; its peak current is ~7x AMPA's. With AMPA-fast inputs it is
+#: the ceiling -- full gating, no Mg2+ block; the block lets ~4% through at rest (~111 nS)
+#: and ~14% at threshold (~346 nS), against a leak of 16.7 nS. Per isolated spike near
+#: threshold NMDA carries ~190x the AMPA charge (61x at rest), mostly because it lasts
+#: ~73 ms against AMPA's ~3.5; its peak current is ~6x AMPA's. With AMPA-fast inputs it is
 #: the only slow excitation, and what sustains the DAF response through and past the noise
 #: burst; chosen with the auditory weights for duration and magnitude. 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
 #: Mg2+ block (Jahr & Stevens 1990): mg(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
-G_NMDA_MEAN_NS = 3000.0
+G_NMDA_MEAN_NS = 2500.0
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5
@@ -241,11 +243,12 @@ TAU_STDP = 20.0
 #: I -> E, the only plastic weights in the model, as peak GABA_A conductance (nS).
 #: Zero-initialised, so
 #: only song-driven E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the
-#: STDP trace is debiased against. Near the I rate during song (43.1 Hz in the shipped
-#: model), I activity unrelated to an E spike gives no net change; 40, slightly below,
-#: makes the rule mildly potentiating, which holds the DAF response in range under
-#: shunting inhibition. ``J_MAX_IE_NS`` caps each weight; 0.04% of them reach it.
-R_I_TH = 40.0
+#: STDP trace is debiased against. Near the I rate during song (43.8 Hz in the shipped
+#: model), I activity unrelated to an E spike gives no net change; 46, slightly above,
+#: makes the rule mildly depressing, which keeps the learned inhibition song-specific
+#: (reversed/trained 1.04-1.10 over training seeds). ``J_MAX_IE_NS`` caps each weight;
+#: none reaches it.
+R_I_TH = 46.0
 J_MAX_IE_NS = 503.0
 
 #: Firing-rate adaptation on E: a hyperpolarising current that steps up by ``A_SFA_PA``

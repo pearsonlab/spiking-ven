@@ -83,6 +83,10 @@ def test_encoder_then_network_end_to_end(tmp_path, capsys):
         # The HVC conductance is set for 600 HVC units; 6 need a much larger one to drive
         # I at all, and without I spikes JIE never moves.
         "--b-hvc-mean-ns", "100", "--b-hvc-sd-ns", "50",
+        # Two renditions of a tiny network are too few for the shipped R_I_TH (slightly above
+        # the I rate, so mildly depressing) to leave any weight above zero; 0 makes the rule
+        # purely potentiating, so the run still shows learning end to end.
+        "--r-i-th", "0",
     ])
     assert model_out.exists(), "model artifact not written"
     assert (tmp_path / "ven_traces.npz").exists(), "traces not written alongside the model"

@@ -433,21 +433,34 @@ stated.
   - **Stronger E -> I** (x2, x3) trims the response and moves the peak later (26 -> 38 ms): the
     noise response recruits I sooner, and shunting inhibition acts on exactly the cells it
     depolarised. x0.5 did the opposite.
-- **Adopted**: STDP step 7.55 nS (x5), `R_I_TH` 40, `G_NMDA_MEAN_NS` 3000, `J_EI_MEAN_NS` 0.14 (x3);
-  auditory, HVC and the I -> E bound unchanged. Training seeds 42 / 43 / 44: responders 56 / 52 /
-  56%, extra spikes 0.96 / 1.01 / 0.83, latency 23.6 / 18.3 / 18.3 ms, duration 55.0 / 48.6 / 54.0
-  ms, reversed/trained 1.10 / 1.02 / 1.10, peak 38 / 48 / 22 ms. Ten evaluation seeds of the
-  shipped model: duration 52.7 +/- 2.1 ms, latency 24.4 +/- 1.5 ms, extra spikes 0.96.
+- **First adoption** (`TAU_INH` 5 ms): STDP step 7.55 nS (x5), `R_I_TH` 40, `G_NMDA_MEAN_NS`
+  3000, `J_EI_MEAN_NS` 0.14 (x3). Every target was in range at seed 42, but the DAF response came
+  in volleys ~15 ms apart (10, 25, 38, 55, 70 ms): fast E -> I feedback recruits I in a burst,
+  shunting silences E, and E rebounds. Seed 43 was barely selective (1.02), seed 44 peaked at
+  22 ms, and the 2 ms-bin peak moved from 58 to 30 ms (45 to 22 Hz) between 1 and 10 ms bins.
+- **GABA_A decay, not an E -> I delay, smooths it.** Luo & Perkel (2002, J Neurophysiol) report
+  developmental changes in GABA_A IPSC decay, 5-20 ms in juveniles (a different circuit). Swept
+  `TAU_INH` 5 / 10 / 15 / 20 ms against an E -> I delay of 0 / 2 / 4 ms. Jaggedness (2 ms-bin /
+  10 ms-bin peak) fell 1.74 / 1.45 / 1.28 / 1.21 and the fast share of the response's variance
+  0.57 / 0.28 / 0.13 / 0.11 with the decay; the delays changed little, and at 5 ms made it slightly
+  worse, so they were removed. A slower decay costs selectivity (reversed/trained 1.10 -> 1.04
+  from 5 to 20 ms), which a higher `R_I_TH` buys back at the price of magnitude, and less NMDA and
+  stronger E -> I trim again.
+- **Adopted**: `TAU_INH` 15 ms, `R_I_TH` 46, `G_NMDA_MEAN_NS` 2500, `J_EI_MEAN_NS` 0.187 (x4),
+  STDP step 7.55 nS (x5); auditory, HVC and the I -> E bound unchanged. Training seeds 42 / 43 /
+  44: responders 53 / 48 / 49%, extra spikes 0.95 / 1.07 / 0.82, latency 23.2 / 21.4 / 26.4 ms,
+  duration 50.6 / 54.0 / 49.3 ms, reversed/trained 1.08 / 1.04 / 1.10, peak 38 / 34 / 22 ms. Ten
+  evaluation seeds of the shipped model: duration 51.2 +/- 2.2 ms, latency 22.9 +/- 1.0 ms, extra
+  spikes 0.95, peak 22 Hz at 38 ms on every seed. The peak now barely depends on binning (23 ->
+  18 Hz, 38 -> 30 ms from 1 to 10 ms bins); jaggedness 1.24.
 - **Caveats.**
-  - Seed 43 is barely selective (1.02); with `R_I_TH` 36 it dropped below 1 (0.97-0.99).
-    Selectivity is weaker and more seed-dependent than with current-based synapses, where seeds
-    42-44 gave 1.10-1.18.
-  - The response is jagged: the 10 ms PSTH dips mid-response (seed 44: 22 -> 9.5 -> 24 Hz at
-    20 / 30 / 40 ms) as E -> I feedback shunts it and it rebounds. The 2 ms-bin peak therefore
-    depends on the seed (seed 44's is the first lobe, at 22 ms, outside 35-75) and on the bin
-    width (45 Hz at 58 ms with 1 ms bins, 22 Hz at 30 ms with 10 ms).
-  - NMDA's share grew: near threshold it carries ~230x the AMPA charge per spike (130x before).
-  - Duration sits near its 47 ms bound (48.6 ms on seed 43).
+  - Selectivity is weaker and more seed-dependent than with current-based synapses (1.04-1.10
+    against 1.10-1.18), and seed 43 is just above the magnitude range (1.07).
+  - Seed 44's response sags mid-burst (22 -> 16 -> 19 Hz at 20 / 30 / 40 ms in 10 ms bins), which
+    puts its 2 ms peak at 22 ms, outside 35-75; seed 43's is at 34. Both hold across every
+    setting tried, so they belong to those seeds' stimulus draws.
+  - NMDA carries ~190x the AMPA charge per spike near threshold.
+  - Duration sits near its 47 ms bound (48.2 ms on the lowest evaluation seed).
 
 ## DAF metrics
 

@@ -84,8 +84,8 @@ def test_model_carries_the_operating_point(setup):
     assert (ven.e_ampa_mv, ven.e_gaba_mv) == (0.0, -70.0)   # conductance synapses
     assert ven.tau_sfa == pytest.approx(10.0)
     assert ven.tau_s == pytest.approx(3.0)           # AMPA-fast input synapses
-    assert ven.r_i_th == pytest.approx(40.0)         # just below the I rate during song
-    assert (ven.tau_inh, ven.tau_exc) == (5.0, 3.0)  # GABA_A I->E, AMPA E->I
+    assert ven.r_i_th == pytest.approx(46.0)         # just above the I rate during song
+    assert (ven.tau_inh, ven.tau_exc) == (15.0, 3.0)  # GABA_A I->E, AMPA E->I
     assert ven.stdp_gate == "window"
     assert (ven.aud_delay_ms, ven.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
     assert AUD_MEAN_RATE_HZ == pytest.approx(2.5)
@@ -98,20 +98,20 @@ def test_model_carries_the_operating_point(setup):
 
 def test_daf_response_matches_the_recorded_run(daf):
     # value at seed 42, tolerance ~3 SD over seeds 42-51 (SD in the comment)
-    assert daf["responder_fraction"] == pytest.approx(0.560, abs=0.03)       # 0.007
-    assert daf["baseline_hz_all"] == pytest.approx(2.832, abs=0.04)          # 0.011 Hz
-    assert daf["peak_change_hz"] == pytest.approx(39.8, abs=3.0)             # 0.94 Hz
-    assert daf["latency_ms"] == pytest.approx(25.9, abs=4.5)                 # 1.51 ms
-    assert daf["duration_ms"] == pytest.approx(51.1, abs=6.5)                # 2.14 ms
-    assert daf["extra_spikes_responders"] == pytest.approx(0.959, abs=0.03)  # 0.010
+    assert daf["responder_fraction"] == pytest.approx(0.548, abs=0.03)       # 0.005
+    assert daf["baseline_hz_all"] == pytest.approx(2.660, abs=0.04)          # 0.011 Hz
+    assert daf["peak_change_hz"] == pytest.approx(21.5, abs=1.5)             # 0.49 Hz
+    assert daf["latency_ms"] == pytest.approx(25.1, abs=4.0)                 # 0.96 ms
+    assert daf["duration_ms"] == pytest.approx(50.3, abs=6.5)                # 2.18 ms
+    assert daf["extra_spikes_responders"] == pytest.approx(0.931, abs=0.03)  # 0.007
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(2.09, abs=0.07)          # 0.023
-    assert daf["extra_spikes_max"] == pytest.approx(7.07, abs=0.45)          # 0.14
-    assert daf["extra_spikes_sd"] == pytest.approx(1.11, abs=0.03)           # 0.009
+    assert daf["extra_spikes_p90"] == pytest.approx(2.06, abs=0.08)          # 0.027
+    assert daf["extra_spikes_max"] == pytest.approx(9.72, abs=0.45)          # 0.13
+    assert daf["extra_spikes_sd"] == pytest.approx(1.25, abs=0.03)           # 0.008
 
 
 def test_biological_targets_that_are_met(daf):
@@ -119,9 +119,9 @@ def test_biological_targets_that_are_met(daf):
     lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
-    # 25.9 ms here, 24.4 +/- 1.5 over evaluation seeds 42-51; training seeds 43 and 44
-    # give 18.3 ms. Duration 51 ms here, 52.7 +/- 2.1 (49.4-55.4) over evaluation seeds,
-    # 48.6 and 54.0 ms on training seeds 43 and 44 -- the tightest margin, against 47.
+    # 25.1 ms here, 22.9 +/- 1.0 over evaluation seeds 42-51; training seeds 43 and 44
+    # give 21.4 and 26.4 ms. Duration 50 ms here, 51.2 +/- 2.2 (48.2-54.7) over evaluation
+    # seeds, 54.0 and 49.3 ms on training seeds 43 and 44 -- the tightest margin, against 47.
     assert abs(daf["latency_ms"] - lat) <= lat_sd
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
@@ -135,12 +135,10 @@ def test_response_shape_matches_figure_8e(daf):
     """Fig. 8E, black trace (noise during singing, n = 7), read off the panel.
 
     Shape rather than magnitude. The peak's AMPLITUDE depends on a bin width the paper
-    never states -- from 1 to 10 ms bins the model's peak falls 45 -> 22 Hz -- so it is
-    deliberately not asserted anywhere. With conductance synapses the response is jagged
-    (fast E->I feedback shunts it briefly and it rebounds), so the peak TIME also moves
-    with the bin: 58, 38, 35 and 30 ms at 1, 2, 5 and 10 ms bins. It is asserted at the
-    2 ms bins the paper uses for its other tests, where it is 38 ms on every evaluation
-    seed; training seed 44 puts it at 22 ms, the first lobe of that dip and rebound.
+    never states -- from 1 to 10 ms bins the model's peak falls 23 -> 18 Hz -- so it is
+    deliberately not asserted anywhere. When the peak occurs depends less on it: 38, 38, 35
+    and 30 ms at 1, 2, 5 and 10 ms bins, and 38 ms at 2 ms bins on every evaluation seed.
+    Training seed 44's response sags mid-burst, which puts its 2 ms peak at 22 ms.
 
     Both bounds come from reading a published panel, not from a stated number, so they are
     wider than the figure appears to justify.

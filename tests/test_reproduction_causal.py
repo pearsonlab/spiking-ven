@@ -81,6 +81,9 @@ def test_model_carries_the_operating_point(setup):
     assert ven.t_refr_ms == pytest.approx(2.0)
     assert ven.a_sfa == pytest.approx(1.0)
     assert ven.tau_sfa == pytest.approx(10.0)
+    assert ven.tau_s == pytest.approx(3.0)           # AMPA-fast input synapses
+    assert ven.r_i_th == pytest.approx(40.0)         # the I rate during song
+    assert ven.stdp_gate == "window"
     assert (ven.aud_delay_ms, ven.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
     assert AUD_MEAN_RATE_HZ == pytest.approx(2.5)
     # The peak is bin-width dependent, so the bin width is part of the metric's
@@ -92,20 +95,20 @@ def test_model_carries_the_operating_point(setup):
 
 def test_daf_response_matches_the_recorded_run(daf):
     # value at seed 42, tolerance ~3 SD over seeds 42-51 (SD in the comment)
-    assert daf["responder_fraction"] == pytest.approx(0.587, abs=0.03)       # 0.008
-    assert daf["baseline_hz_all"] == pytest.approx(2.735, abs=0.05)          # 0.007 Hz
-    assert daf["peak_change_hz"] == pytest.approx(23.9, abs=2.0)             # 0.64 Hz
-    assert daf["latency_ms"] == pytest.approx(26.7, abs=2.5)                 # 0.76 ms
-    assert daf["duration_ms"] == pytest.approx(59.8, abs=4.5)                # 1.36 ms
-    assert daf["extra_spikes_responders"] == pytest.approx(0.93, abs=0.04)   # 0.013
+    assert daf["responder_fraction"] == pytest.approx(0.598, abs=0.03)       # 0.008
+    assert daf["baseline_hz_all"] == pytest.approx(2.558, abs=0.03)          # 0.010 Hz
+    assert daf["peak_change_hz"] == pytest.approx(22.8, abs=1.5)             # 0.47 Hz
+    assert daf["latency_ms"] == pytest.approx(22.8, abs=2.5)                 # 0.84 ms
+    assert daf["duration_ms"] == pytest.approx(58.1, abs=6.0)                # 1.94 ms
+    assert daf["extra_spikes_responders"] == pytest.approx(0.928, abs=0.03)  # 0.009
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(1.94, abs=0.09)          # 0.028
-    assert daf["extra_spikes_max"] == pytest.approx(4.65, abs=0.18)          # 0.058
-    assert daf["extra_spikes_sd"] == pytest.approx(0.80, abs=0.02)           # 0.005
+    assert daf["extra_spikes_p90"] == pytest.approx(2.04, abs=0.10)          # 0.034
+    assert daf["extra_spikes_max"] == pytest.approx(7.82, abs=0.45)          # 0.14
+    assert daf["extra_spikes_sd"] == pytest.approx(0.90, abs=0.02)           # 0.005
 
 
 def test_biological_targets_that_are_met(daf):
@@ -113,8 +116,9 @@ def test_biological_targets_that_are_met(daf):
     lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
-    # 26.7 ms at this seed, 27.6 +/- 0.8 over evaluation seeds 42-51; training seeds 43
-    # and 44 give 32 ms, still inside 23 + 12.
+    # 22.8 ms here, 23.9 +/- 0.8 over evaluation seeds 42-51; training seeds 43 and 44
+    # give 26-28 ms. Duration is the tight one: 58 ms here, but 47.8-54.6 ms over
+    # evaluation seeds and 48-54 ms over training seeds 42-44, against the 47 ms bound.
     assert abs(daf["latency_ms"] - lat) <= lat_sd
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
@@ -128,10 +132,10 @@ def test_response_shape_matches_figure_8e(daf):
     """Fig. 8E, black trace (noise during singing, n = 7), read off the panel.
 
     Shape rather than magnitude. The peak's AMPLITUDE depends on a bin width the paper
-    never states -- from 1 to 10 ms bins the model's peak falls 49 -> 35 Hz -- so it is
+    never states -- from 1 to 10 ms bins the model's peak falls 26 -> 20 Hz -- so it is
     deliberately not asserted anywhere. When the peak occurs, and whether the response is
     a transient or a step, depend much less on it: over the same bins the peak time stays
-    at 50-55 ms.
+    at 30-40 ms.
 
     Both bounds come from reading a published panel, not from a stated number, so they are
     wider than the figure appears to justify.

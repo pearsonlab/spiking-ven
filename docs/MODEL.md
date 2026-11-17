@@ -53,6 +53,10 @@ h[t] = exp(-1 / tau_s) * h[t-1] + spikes[t]          (per channel, h[-1] = 0)
 
 so one input spike contributes a jump of 1 that decays with `tau_s` -- the postsynaptic current of
 that synapse. This gives `h_aud` (from auditory spikes) and `h_hvc` (from HVC spikes).
+`tau_s = 3 ms`, an AMPA EPSC decay. A spike's total charge is the filter's sum,
+`1 / (1 - exp(-1 / tau_s))` (3.5 at 3 ms, 20.5 at the former 20 ms), so `B_scale` and
+`B_hvc_scale` are tied to `tau_s`. The recurrent E -> I and I -> E synapses are not filtered: each
+spike acts for one step.
 
 ### Conduction delays
 
@@ -93,7 +97,7 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 
 ### NMDA component
 
-The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 60`), following Wang
+The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 150`), following Wang
 (2002). Each auditory channel `j` has a gating variable, computed before the loop
 (`nmda_gating`):
 
@@ -115,10 +119,14 @@ where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous 
 `E_nmda` is `e_nmda_mv` expressed in membrane units by the same map. The map sends reset (0) to
 `e_l_mv` (-70 mV) and each cell's threshold to `v_th_mv` (-50 mV), so the Mg2+ block and the
 driving force act on a physiological voltage scale. NMDA uses the same connections as `B`;
-`g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.055 of
-the fast component's charge per isolated spike, so the shipped 60 carries ~3.3x the fast
-charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio gate stays on the fast drive
-`a_e`, so NMDA changes learning only through the E spikes it causes.
+`g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.32 of
+the fast component's charge per isolated spike at `tau_s = 3 ms` (0.055 at the former 20 ms,
+since the fast charge per spike scales with the filter's sum), so the shipped 150 carries
+~48x the fast
+charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio gate reads input
+spikes, not either drive, so NMDA changes learning only through the E spikes it causes. Because
+NMDA uses `B`, its charge scales with `B_scale` as the fast component's does; `g_nmda` is
+relative to `B` so that ratio, not `B_scale`, sets the NMDA share.
 
 ### I neurons
 
@@ -144,7 +152,9 @@ Only in `fit`. After the E and I updates of step `t`:
 ```
 tau     = tau_stdp if tau_stdp > 0 else tau_s
 x_i     = exp(-1 / tau) * x_i + sI[t]                   presynaptic (I) trace
-gate_e  = 1 where a_e > 0, else 0                       audio gate
+gate_e  = 1 where B @ n_aud > 0, else 0                 audio gate; n_aud = auditory spikes
+                                                        per channel in (t - tau, t], delayed
+                                                        by aud_delay_ms like the drive
 JIE    += A_jie * outer(sE[t] * gate_e, x_i - xi_th)
 JIE     = clip(JIE, 0, J_max_ie)
 xi_th   = r_i_th * tau * 1e-3
@@ -153,14 +163,21 @@ xi_th   = r_i_th * tau * 1e-3
 - **Direction.** An E spike reads the trace of recent I spikes (including an I spike in the same
   step). I firing shortly before an E spike potentiates that I->E synapse; there is no term for an
   E spike followed by I firing, so the window is causal (I-before-E only).
-- **Audio gate.** Only E spikes that occur while the cell receives auditory drive (`B @ h_aud > 0`)
-  update their row. E spikes driven by tonic drive or noise alone never change `JIE`. Because
-  `h_aud` decays with `tau_s`, the gate stays open for a while after the cell's last auditory
-  input, so shortening `tau_s` narrows the window in which learning can happen.
+- **Audio gate.** Only E spikes within `tau` ms of an auditory input spike to that cell update its
+  row (`stdp_audio_gate`), so cells the song never reaches keep `JIE = 0`, and E spikes from tonic
+  drive or noise away from the song's input never change `JIE`. The gate is defined on input spike
+  events with the STDP window, so `tau_stdp` alone sets the learning window and `tau_s` plays no
+  part in it. (It was once `B @ h_aud > 0`; since an exponential never returns to zero, that
+  stayed open for the rest of the run after a cell's first input spike -- 51% of E-cell time in
+  the motif, against 7.8% for the window. Models saved before the change record no `stdp_gate`,
+  load as `"drive"`, and can be evaluated but not trained further.)
 - **Threshold `xi_th`.** `r_i_th` (Hz) times the window `tau` (ms, hence `1e-3`) is approximately
   the mean trace of an I cell firing irregularly at `r_i_th`. An E spike potentiates synapses from I
   cells whose trace is above that level and depresses those below it, so I activity that is merely
-  at its baseline rate gives no net change. With `r_i_th = 0` the rule only potentiates.
+  at its baseline rate gives no net change. The shipped `r_i_th = 40` Hz is the I rate during song
+(40.6 Hz); far below it (the former 6 Hz) nearly every gated E spike potentiates whatever I has
+been doing, and the inhibition loses its song specificity. With `r_i_th = 0` the rule only
+potentiates.
 - **Bounds.** Weights are clipped to `[0, J_max_ie]` after every step, so depression stops at zero.
 - **Amplitude.** `A_jie` defaults to `constants.a_jie_for(tau_stdp, tau_s) = 3e-3 * 10 / tau`, so
   the integral of the learning window stays fixed when its width changes.
@@ -200,8 +217,8 @@ All three are drawn from `default_rng(seed)`, in the order below, and stored as 
 
 | Matrix | Connection probability | Mean weight per connection | Std |
 |---|---|---|---|
-| `B` | `c_B` (0.05) | `B_scale / n_aud` (13 / 54 = 0.24) | half the mean |
-| `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.065), not divided by `n_hvc` | half the mean |
+| `B` | `c_B` (0.05) | `B_scale / n_aud` (35 / 54 = 0.65) | half the mean |
+| `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.378), not divided by `n_hvc` | half the mean |
 | `JEI` | `c_JEI` (0.5) | `0.17 / sqrt(n_e * c_JEI)` (0.0098) | 10% of the mean |
 | `JIE` | -- | 0 (all zero) | -- |
 

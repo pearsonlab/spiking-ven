@@ -279,7 +279,7 @@ def test_i_before_gated_e_potentiates_only_that_pair():
 
 def test_e_long_before_i_does_not_potentiate():
     """The window is causal: an I burst after E has fallen silent changes nothing."""
-    net = _stdp_net(r_i_th=0.0)
+    net = _stdp_net(r_i_th=0.0, g_nmda=0.0)            # no slow NMDA tail keeping E up
     hvc, aud = _pulses(net, aud_t=[20], hvc_t=[250])
     sE, sI = net.transform_all(hvc, aud)
     assert sE.sum() > 0 and sI.sum() > 0

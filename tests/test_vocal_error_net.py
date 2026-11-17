@@ -1,11 +1,13 @@
-"""Unit tests of :class:`VocalErrorNet`: persistence, defaults, delays, and the STDP rule.
+"""Unit tests of :class:`VocalErrorNet`: persistence, units, defaults, delays, and STDP.
 
 Small networks with hand-set weights and the noise off, so each test isolates one piece
-of the dynamics in ``_simulate`` and runs in well under a second. The end-to-end check on
-the shipped model is ``test_reproduction_causal.py``.
+of the dynamics in ``_simulate`` and runs in well under a second. Units: mV, pA, ms;
+weights are peak PSPs (mV). The end-to-end check on the shipped model is
+``test_reproduction_causal.py``.
 """
 
 import inspect
+from typing import Any
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +15,13 @@ import pytest
 
 from spiking_ven import constants as C
 from spiking_ven import generate_hvc_bursts
-from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2, stdp_audio_gate
+from spiking_ven import units as U
+from spiking_ven.vocal_error_net import (
+    LEGACY_OPTIONAL_DEFAULTS,
+    VocalErrorNet,
+    VocalErrorNetV2,
+    stdp_audio_gate,
+)
 
 SHIPPED_MODEL = Path(__file__).resolve().parent.parent / "outputs" / "ven_model.npz"
 
@@ -46,14 +54,93 @@ def _assert_same_value(a, b, name):
         assert a == b, name
 
 
+#: A model in the earlier dimensionless format: reset 0, thresholds theta, weights and
+#: drives in input units. Values are the former operating point's.
+_THETA_E = 0.06 * (1.0 - np.exp(-1.0 / 30.0) ** 40.0)
+_THETA_I = 0.5 * (1.0 - np.exp(-1.0 / 10.0) ** 20.0)
+
+
+def _legacy_file(path: Path, **override) -> dict:
+    rng = np.random.default_rng(0)
+    d = dict(
+        n_e=30, n_i=8, n_hvc=6, n_aud=10,
+        tau_e=30.0, tau_i=10.0, tau_s=3.0, A_jie=1.5e-3, J_max_ie=1.0,
+        c_B=0.05, c_hvc=0.1, c_JEI=0.5, r_i_th=43.0,
+        drive_e=0.06, drive_i=0.058, noise_e=0.1, noise_i=0.0,
+        theta_e=_THETA_E, theta_i=_THETA_I,
+        B=rng.random((30, 10)).astype(np.float32),
+        B_hvc=rng.random((8, 6)).astype(np.float32),
+        JEI=rng.random((8, 30)).astype(np.float32),
+        JIE=rng.random((30, 8)).astype(np.float32),
+    )
+    d.update(override)
+    arrays: dict[str, Any] = {k: np.asarray(v) for k, v in d.items() if v is not None}
+    np.savez(path, **arrays)
+    return arrays
+
+
+# ---------------------------------------------------------------------------
+# units
+# ---------------------------------------------------------------------------
+
+def test_psp_peak_matches_the_simulated_membrane():
+    """One spike through a weight of ``w`` mV of PSP peaks at ``w`` mV above rest."""
+    net = _small_net(noise_e_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0, g_nmda=0.0,
+                     a_sfa_pa=0.0, v_th_mv=100.0)       # never fires: read V directly
+    net.B = np.zeros_like(net.B)
+    net.B[0, 0] = 2.0
+    f = net._current_factors()["B"]
+    # The peak EPSC (pA) is f per mV; the membrane deflection is what psp_peak predicts.
+    assert f == pytest.approx(net.g_l_e / U.psp_peak(net.tau_s, net.tau_e))
+    d_m = np.exp(-1.0 / net.tau_e)
+    d_s = np.exp(-1.0 / net.tau_s)
+    v, h, best = 0.0, 0.0, 0.0
+    for t in range(200):
+        h = d_s * h + (1.0 if t == 0 else 0.0)
+        v = d_m * v + (1.0 - d_m) * (2.0 * f * h) / net.g_l_e
+        best = max(best, v)
+    assert best == pytest.approx(2.0, rel=1e-9)
+
+
+def test_tonic_drive_fires_e_at_its_target_rate():
+    net = _small_net(noise_e_pa=0.0, a_sfa_pa=0.0, target_rate_hz=25.0, t_refr_ms=0.0)
+    T = 1000
+    sE = net.transform(np.zeros((6, T), np.float32), np.zeros((10, T), np.float32))
+    isi = np.diff(np.flatnonzero(sE[0]))
+    assert set(isi) <= {40, 41}, "fires every 1000 / 25 ms (one step later at equality)"
+
+
+def test_constants_are_the_former_operating_point_converted():
+    """The mV / pA constants are the earlier dimensionless operating point, converted
+    (``units.from_dimensionless``) and rounded to 3-4 significant figures."""
+    old = dict(theta_e=_THETA_E, theta_i=_THETA_I, tau_e=30.0, tau_i=10.0, tau_s=3.0,
+               tau_inh=5.0, tau_exc=3.0, drive_e=0.06, drive_i=0.058, noise_e=0.1,
+               noise_i=0.0, a_sfa=1.0, A_jie=1.5e-3, J_max_ie=1.0, g_nmda=400.0,
+               e_l_mv=-70.0, v_th_mv=-50.0, e_nmda_mv=0.0)
+    new = U.from_dimensionless(old, C.C_E_PF, C.C_I_PF)
+    wf = new["w_factor"]
+    rel = 3e-3
+    assert C.I_DRIVE_I_PA == pytest.approx(new["i_drive_i_pa"], rel=rel)
+    assert C.NOISE_E_PA == pytest.approx(new["noise_e_pa"], rel=rel)
+    assert C.A_SFA_PA == pytest.approx(new["a_sfa_pa"], rel=rel)
+    assert C.J_MAX_IE_MV == pytest.approx(new["j_max_ie_mv"], rel=rel)
+    assert C.a_jie_for(20.0) == pytest.approx(new["a_jie_mv"], rel=rel)
+    assert C.G_NMDA == pytest.approx(new["g_nmda"], rel=rel)
+    assert C.B_AUD_MEAN_MV == pytest.approx(15.0 / 54 * wf["B"], rel=rel)
+    assert C.B_HVC_MEAN_MV == pytest.approx(0.378 * wf["B_hvc"], rel=rel)
+    assert C.J_EI_MEAN_MV == pytest.approx(0.048 / np.sqrt(300) * wf["JEI"], rel=rel)
+    drive = VocalErrorNet(n_aud=3, n_e=4, n_i=2).i_drive_e_pa
+    assert drive == pytest.approx(new["i_drive_e_pa"], rel=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # save / load
 # ---------------------------------------------------------------------------
 
 def test_save_load_round_trips_every_attribute(tmp_path):
-    net = _small_net(tau_e=25.0, a_sfa=0.7, aud_delay_ms=3, hvc_delay_ms=1, r_i_th=4.0)
+    net = _small_net(tau_e=25.0, a_sfa_pa=500.0, aud_delay_ms=3, hvc_delay_ms=1,
+                     r_i_th=4.0, v_th_mv=-52.0, c_e_pf=400.0)
     net.JIE = np.random.default_rng(1).random(net.JIE.shape).astype(np.float32)
-    net.theta_e = net.theta_e * 1.1
     net.stimulus = {"n_ista": 50, "rate_scale": 1.25, "checksums": {"aud": "ab12"}}
     path = tmp_path / "ven.npz"
     net.save(str(path))
@@ -92,44 +179,11 @@ def test_missing_required_keys_raise_naming_all_of_them(tmp_path):
     assert "tau_e" in msg and "JEI" in msg and str(broken) in msg
 
 
-def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
-    # The documented defaults, pinned: each switches its feature off, so a model saved
-    # before the feature existed reloads with the dynamics it was trained with.
-    expected = {
-        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0, "tau_inh": 0.0, "tau_exc": 0.0,
-        "j_ei_scale": 0.17,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0,
-        "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
-        "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
-        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {}, "stdp_gate": "drive",
-    }
-    assert VocalErrorNet.OPTIONAL_KEY_DEFAULTS == expected
-
-    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
-    net = _small_net()
-    net.stimulus = {"x": 1}
-    net.save(str(full))
-    _resave_without(full, old, expected)
-    back = VocalErrorNet.load(str(old))
-    for k, v in expected.items():
-        attr = "stimulus" if k == "stimulus_json" else k
-        assert getattr(back, attr) == v, k
-        assert type(getattr(back, attr)) is type(v), k
-    back.transform(np.zeros((6, 20)), np.zeros((10, 20)))   # still runs
-
-
 @pytest.mark.parametrize("saved", [None, 0.0])
 def test_old_files_load_their_stdp_window_as_tau_s(tmp_path, saved):
     """Before tau_stdp existed (or at 0) the STDP window was the synaptic tau_s."""
-    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
-    _small_net(tau_s=7.0).save(str(full))
-    d = dict(np.load(full))
-    if saved is None:
-        del d["tau_stdp"]
-    else:
-        d["tau_stdp"] = np.array(saved)
-    np.savez(old, **d)
-    assert VocalErrorNet.load(str(old)).tau_stdp == 7.0
+    _legacy_file(tmp_path / "old.npz", tau_s=7.0, tau_stdp=saved)
+    assert VocalErrorNet.load(str(tmp_path / "old.npz")).tau_stdp == 7.0
 
 
 @pytest.mark.parametrize("bad", [0.0, -5.0])
@@ -138,21 +192,6 @@ def test_tau_stdp_must_be_positive(bad):
         _small_net(tau_stdp=bad)
     with pytest.raises(ValueError, match="tau_stdp"):
         C.a_jie_for(bad)
-
-
-def test_per_cell_theta_e_from_older_files_loads_as_a_scalar(tmp_path):
-    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
-    _small_net().save(str(full))
-    d = dict(np.load(full))
-    d["theta_e"] = np.full(30, 0.05)            # older files stored it once per E cell
-    np.savez(old, **d)
-    theta = VocalErrorNet.load(str(old)).theta_e
-    assert type(theta) is float and theta == 0.05
-
-    d["theta_e"] = np.linspace(0.04, 0.06, 30)  # never written by this code: refuse it
-    np.savez(old, **d)
-    with pytest.raises(ValueError, match="theta_e"):
-        VocalErrorNet.load(str(old))
 
 
 @pytest.mark.skipif(not SHIPPED_MODEL.exists(), reason="shipped model missing")
@@ -164,6 +203,61 @@ def test_shipped_model_was_trained_at_the_default_operating_point():
         if k in ("B", "B_hvc", "JEI", "JIE", "stimulus"):
             continue                               # random draws, training, provenance
         _assert_same_value(v, getattr(shipped, k), k)
+
+
+# ---------------------------------------------------------------------------
+# the earlier dimensionless format
+# ---------------------------------------------------------------------------
+
+def test_legacy_files_convert_to_mv_and_pa(tmp_path):
+    d = _legacy_file(tmp_path / "old.npz")
+    net = VocalErrorNet.load(str(tmp_path / "old.npz"))
+    k_e = 20.0 / _THETA_E
+    assert (net.e_l_mv, net.v_th_mv, net.v_reset_mv) == (-70.0, -50.0, -70.0)
+    assert net.i_drive_e_pa == pytest.approx(0.06 * k_e * net.g_l_e)
+    np.testing.assert_allclose(
+        net.B, d["B"] * k_e * U.psp_peak(3.0, 30.0), rtol=1e-6)
+    np.testing.assert_allclose(
+        net.JIE, d["JIE"] * k_e * U.psp_peak(0.0, 30.0), rtol=1e-6)   # tau_inh absent: 0
+    nz = net.B[net.B > 0]
+    assert net.b_aud_mean_mv == pytest.approx(float(nz.mean()))
+
+
+def test_legacy_files_missing_later_keys_load_with_the_features_off(tmp_path):
+    # Pinned: each default switches its feature off, so a model saved before the feature
+    # existed reloads with the dynamics it was trained with.
+    assert LEGACY_OPTIONAL_DEFAULTS == {
+        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0, "tau_inh": 0.0, "tau_exc": 0.0,
+        "aud_delay_ms": 0, "hvc_delay_ms": 0,
+        "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
+        "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
+        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {}, "stdp_gate": "drive",
+    }
+    _legacy_file(tmp_path / "old.npz")
+    back = VocalErrorNet.load(str(tmp_path / "old.npz"))
+    assert (back.t_refr_ms, back.a_sfa_pa, back.tau_sfa) == (0.0, 0.0, 0.0)
+    assert (back.tau_inh, back.tau_exc, back.g_nmda) == (0.0, 0.0, 0.0)
+    assert (back.aud_delay_ms, back.hvc_delay_ms) == (0, 0)
+    assert back.stimulus == {} and back.stdp_gate == "drive"
+    back.transform(np.zeros((6, 20)), np.zeros((10, 20)))   # still runs
+
+
+def test_legacy_per_cell_theta_e_must_be_uniform(tmp_path):
+    _legacy_file(tmp_path / "old.npz", theta_e=np.full(30, _THETA_E))
+    assert VocalErrorNet.load(str(tmp_path / "old.npz")).v_th_mv == -50.0
+    _legacy_file(tmp_path / "bad.npz", theta_e=np.linspace(0.04, 0.06, 30))
+    with pytest.raises(ValueError, match="theta_e"):
+        VocalErrorNet.load(str(tmp_path / "bad.npz"))
+
+
+def test_legacy_models_refuse_to_train(tmp_path):
+    _legacy_file(tmp_path / "old.npz")
+    loaded = VocalErrorNet.load(str(tmp_path / "old.npz"))
+    assert loaded.stdp_gate == "drive"
+    hvc, aud = np.zeros((6, 50), np.float32), np.zeros((10, 50), np.float32)
+    loaded.transform(hvc, aud)                      # evaluation still works
+    with pytest.raises(ValueError, match="retrain"):
+        loaded.fit(hvc, aud)
 
 
 # ---------------------------------------------------------------------------
@@ -195,23 +289,36 @@ def test_defaults_are_the_operating_point():
     expected = {
         "n_e": C.N_E, "n_i": C.N_I, "n_hvc": C.N_HVC,
         "tau_e": C.TAU_E, "tau_i": C.TAU_I, "tau_s": C.TAU_S,
-        "J_max_ie": C.J_MAX_IE, "c_B": C.C_B, "B_scale": C.B_SCALE,
-        "c_hvc": C.C_HVC, "B_hvc_scale": C.B_HVC_SCALE, "c_JEI": C.C_JEI,
-        "t_refr_ms": C.T_REFR_MS, "a_sfa": C.A_SFA, "tau_sfa": C.TAU_SFA,
-        "r_i_th": C.R_I_TH, "drive_e": C.DRIVE_E, "drive_i": C.DRIVE_I,
-        "noise_e": C.NOISE_E, "noise_i": C.NOISE_I,
-        "target_rate": C.TARGET_RATE_E, "target_rate_i": C.TARGET_RATE_I,
-        "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
-        "tau_stdp": C.TAU_STDP,
-        "A_jie": C.a_jie_for(C.TAU_STDP),
+        "tau_inh": C.TAU_INH, "tau_exc": C.TAU_EXC,
+        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "v_reset_mv": C.V_RESET_MV,
+        "c_e_pf": C.C_E_PF, "c_i_pf": C.C_I_PF,
+        "i_drive_i_pa": C.I_DRIVE_I_PA, "noise_e_pa": C.NOISE_E_PA,
+        "noise_i_pa": C.NOISE_I_PA,
+        "c_B": C.C_B, "b_aud_mean_mv": C.B_AUD_MEAN_MV, "b_aud_sd_mv": C.B_AUD_SD_MV,
+        "c_hvc": C.C_HVC, "b_hvc_mean_mv": C.B_HVC_MEAN_MV, "b_hvc_sd_mv": C.B_HVC_SD_MV,
+        "c_JEI": C.C_JEI, "j_ei_mean_mv": C.J_EI_MEAN_MV, "j_ei_sd_mv": C.J_EI_SD_MV,
+        "j_max_ie_mv": C.J_MAX_IE_MV, "a_jie_mv": C.a_jie_for(C.TAU_STDP),
+        "t_refr_ms": C.T_REFR_MS, "a_sfa_pa": C.A_SFA_PA, "tau_sfa": C.TAU_SFA,
+        "r_i_th": C.R_I_TH, "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
+        "tau_stdp": C.TAU_STDP, "g_nmda": C.G_NMDA,
     }
     for k, v in expected.items():
         assert getattr(net, k) == v, k
     assert net.n_aud == 7
 
 
+def test_weights_have_the_requested_mean_and_sd():
+    net = VocalErrorNet(n_e=400, n_i=200, n_hvc=300, n_aud=200, seed=0)
+    for W, mean, sd in ((net.B, C.B_AUD_MEAN_MV, C.B_AUD_SD_MV),
+                        (net.B_hvc, C.B_HVC_MEAN_MV, C.B_HVC_SD_MV),
+                        (net.JEI, C.J_EI_MEAN_MV, C.J_EI_SD_MV)):
+        nz = W[W > 0]
+        assert nz.mean() == pytest.approx(mean, rel=0.05)
+        assert nz.std() == pytest.approx(sd, rel=0.1)
+
+
 def test_default_a_jie_follows_the_stdp_window():
-    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).A_jie == C.a_jie_for(10.0)
+    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).a_jie_mv == C.a_jie_for(10.0)
 
 
 def test_n_aud_is_required():
@@ -223,7 +330,8 @@ def test_v2_legacy_defaults_are_pinned():
     """``VocalErrorNetV2``'s defaults must not change.
 
     External code (finchsim) builds networks from these exact defaults, so they are
-    pinned here value by value rather than read from anywhere.
+    pinned here value by value rather than read from anywhere. They are in the earlier
+    dimensionless units and converted on construction.
     """
     legacy = {
         "n_e": 600, "n_i": 150, "n_hvc": 15, "n_aud": 256,
@@ -240,21 +348,32 @@ def test_v2_legacy_defaults_are_pinned():
     params = inspect.signature(VocalErrorNetV2.__init__).parameters
     assert {k: p.default for k, p in params.items() if k != "self"} == legacy
     net = VocalErrorNetV2(seed=0)
-    for k, v in legacy.items():
-        if k != "seed":
-            assert getattr(net, k) == v, k
+    for k in ("n_e", "n_i", "n_hvc", "n_aud", "tau_e", "tau_i", "tau_s", "c_B", "c_hvc",
+              "c_JEI", "t_refr_ms", "tau_sfa", "r_i_th", "aud_delay_ms", "hvc_delay_ms",
+              "tau_stdp"):
+        assert getattr(net, k) == legacy[k], k
+    # Converted: the earlier threshold maps to -50 mV and one input unit to k_e mV.
+    theta_e = 0.155 * (1.0 - np.exp(-1.0 / 30.0) ** 40.0)
+    k_e = 20.0 / theta_e
+    assert net.v_th_mv == -50.0
+    assert net.i_drive_e_pa == pytest.approx(0.155 * k_e * net.g_l_e)
+    assert net.b_aud_mean_mv == pytest.approx(5.0 / 256 * k_e * U.psp_peak(10.0, 30.0))
     # Inherited, not in the signature: operating-point features added later stay off.
-    assert net.g_nmda == 0.0
+    assert (net.g_nmda, net.tau_inh, net.tau_exc) == (0.0, 0.0, 0.0)
 
 
 # ---------------------------------------------------------------------------
 # dynamics
 # ---------------------------------------------------------------------------
 
+#: Tonic E current that fires E every few ms (the "drive_e = 1" of the old units).
+STRONG_DRIVE_PA = 7500.0
+
+
 def _quiet_net(**kw) -> VocalErrorNet:
-    """Noise off, no tonic E drive, no recurrent weights: E fires only from audio."""
-    net = _small_net(noise_e=0.0, noise_i=0.0, aud_delay_ms=0, hvc_delay_ms=0, **kw)
-    net.drive_e = 0.0            # theta_e keeps its value from the tonic-drive calibration
+    """Noise off, no tonic E drive, no E->I weights: E fires only from audio."""
+    net = _small_net(noise_e_pa=0.0, noise_i_pa=0.0, i_drive_e_pa=0.0,
+                     aud_delay_ms=0, hvc_delay_ms=0, **kw)
     net.JEI = np.zeros_like(net.JEI)
     return net
 
@@ -262,7 +381,7 @@ def _quiet_net(**kw) -> VocalErrorNet:
 def test_aud_delay_shifts_the_e_response_exactly():
     net = _quiet_net()
     net.B = np.zeros_like(net.B)
-    net.B[:, 0] = np.linspace(0.3, 3.0, net.n_e)         # a spread of response strengths
+    net.B[:, 0] = np.linspace(12.0, 120.0, net.n_e)      # a spread of EPSPs (mV)
     T, t0 = 120, 10
     aud = np.zeros((net.n_aud, T), dtype=np.float32)
     aud[0, t0] = 1.0
@@ -282,9 +401,9 @@ def _stdp_net(**kw) -> VocalErrorNet:
     """Two hand-wired pathways: auditory channel 0 -> E0 and HVC channel 0 -> I0."""
     net = _quiet_net(**kw)
     net.B = np.zeros_like(net.B)
-    net.B[0, 0] = 5.0
+    net.B[0, 0] = 200.0                       # a suprathreshold EPSP (mV)
     net.B_hvc = np.zeros_like(net.B_hvc)
-    net.B_hvc[0, 0] = 20.0
+    net.B_hvc[0, 0] = 200.0
     return net
 
 
@@ -322,13 +441,13 @@ def test_e_long_before_i_does_not_potentiate():
 def test_closed_audio_gate_blocks_all_plasticity(r_i_th):
     """E fires from tonic drive alone, with I active, but no audio: JIE must not move."""
     net = _stdp_net(r_i_th=r_i_th)
-    net.drive_e = 1.0
-    net.JIE[:] = 0.3
+    net.i_drive_e_pa = STRONG_DRIVE_PA
+    net.JIE[:] = 17.5
     hvc, aud = _pulses(net, hvc_t=[20, 60, 100])
     sE, sI = net.transform_all(hvc, aud)
     assert sE.sum() > 0 and sI.sum() > 0
     net.fit(hvc, aud)
-    assert np.all(net.JIE == np.float32(0.3))
+    assert np.all(net.JIE == np.float32(17.5))
 
 
 def test_stdp_audio_gate_is_a_causal_window_of_tau_stdp():
@@ -346,8 +465,8 @@ def test_stdp_audio_gate_is_a_causal_window_of_tau_stdp():
 def test_gate_closes_tau_stdp_after_the_last_input_spike():
     """E spikes driven by tonic drive long after the input must not move JIE."""
     net = _stdp_net(r_i_th=0.0)
-    net.drive_e = 1.0
-    net.JIE[:] = 0.3
+    net.i_drive_e_pa = STRONG_DRIVE_PA
+    net.JIE[:] = 17.5
     hvc, aud = _pulses(net, T=300, aud_t=[20], hvc_t=[100, 140, 180])
     sE, sI = net.transform_all(hvc, aud)
     assert sE[0, 100:].sum() > 0 and sI.sum() > 0, "premise: E and I both fire late"
@@ -355,25 +474,27 @@ def test_gate_closes_tau_stdp_after_the_last_input_spike():
     net.fit(hvc, aud)
     # I first fires at ~100 ms, long after the gate (20-40 ms) closed: no I trace was
     # ever read by a gated spike, and r_i_th = 0 means no depression either.
-    assert np.all(net.JIE == np.float32(0.3))
+    assert np.all(net.JIE == np.float32(17.5))
 
 
 def test_e_spike_without_i_activity_depresses_and_clips_at_zero():
     # xi_th = r_i_th * tau_stdp * 1e-3 = 50 * 20 * 1e-3 = 1.0; with I silent the trace is
     # 0, so every gated E spike (within tau_stdp of the input) lowers the row by
-    # A_jie * xi_th.
+    # a_jie_mv * xi_th.
     net = _stdp_net(r_i_th=50.0)
-    net.JIE[0, 0] = 0.5
+    net.JIE[0, 0] = 5.0
     hvc, aud = _pulses(net, aud_t=[20])
     sE = net.fit(hvc, aud)
     n_spikes = sE[0, 20:20 + int(net.tau_stdp)].sum()
     assert n_spikes > 0
     xi_th = net.r_i_th * net.tau_stdp * 1e-3
-    assert net.JIE[0, 0] == pytest.approx(0.5 - n_spikes * net.A_jie * xi_th, rel=1e-5)
+    expected = 5.0 - n_spikes * net.a_jie_mv * xi_th
+    assert expected > 0.0, "premise: the row is lowered, not clipped"
+    assert net.JIE[0, 0] == pytest.approx(expected, rel=1e-5)
     assert np.all(net.JIE[0, 1:] == 0.0), "zero weights are clipped, never negative"
 
-    net = _stdp_net(r_i_th=50.0, A_jie=1.0)            # one spike more than erases it
-    net.JIE[0, 0] = 0.5
+    net = _stdp_net(r_i_th=50.0, a_jie_mv=10.0)        # one spike more than erases it
+    net.JIE[0, 0] = 5.0
     net.fit(hvc, aud)
     assert net.JIE.min() == 0.0 and net.JIE[0, 0] == 0.0
 
@@ -381,9 +502,6 @@ def test_e_spike_without_i_activity_depresses_and_clips_at_zero():
 # ---------------------------------------------------------------------------
 # cancellation
 # ---------------------------------------------------------------------------
-
-HVC_SCALE_20 = C.B_HVC_SCALE * 600 / 20
-
 
 def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     """A small network trained on one (HVC, auditory) pairing learns to cancel it.
@@ -396,10 +514,12 @@ def test_training_cancels_the_trained_pattern_more_than_a_novel_one():
     n_e, n_i, n_hvc, n_aud = 120, 40, 20, 40
     T_song, T_post, n_rend = 300, 100, 40
     T = T_song + T_post
-    # B_HVC_SCALE is per connection and set for 600 HVC units; 20 need ~30x the weight
-    # for the same drive to I.
+    # The HVC weights are set for 600 HVC units; 20 need ~30x the EPSP for the same
+    # drive to I. The auditory ones for 54 channels: 40 carry 54/40 of the EPSP.
     net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, seed=0,
-                        B_hvc_scale=HVC_SCALE_20)
+                        b_hvc_mean_mv=30 * C.B_HVC_MEAN_MV, b_hvc_sd_mv=30 * C.B_HVC_SD_MV,
+                        b_aud_mean_mv=54 / 40 * C.B_AUD_MEAN_MV,
+                        b_aud_sd_mv=54 / 40 * C.B_AUD_SD_MV)
     trained = generate_hvc_bursts(n_aud, T, 1, T_song, 0, T_post=T_post, seed=100)
     novel = trained[::-1].copy()
     hvc = generate_hvc_bursts(n_hvc, T, 1, T_song, 0, T_post=T_post, seed=0)
@@ -448,9 +568,9 @@ def test_mg_block_follows_jahr_stevens():
 
 
 def _burst_response(g_nmda):
-    net = VocalErrorNet(n_e=40, n_i=10, n_hvc=3, n_aud=4, seed=0, noise_e=0.0,
-                        a_sfa=0.0, drive_e=0.0, aud_delay_ms=0, g_nmda=g_nmda)
-    net.theta_e = 0.03
+    net = VocalErrorNet(n_e=40, n_i=10, n_hvc=3, n_aud=4, seed=0, noise_e_pa=0.0,
+                        a_sfa_pa=0.0, i_drive_e_pa=0.0, aud_delay_ms=0, g_nmda=g_nmda,
+                        b_aud_mean_mv=230.0, b_aud_sd_mv=115.0)
     aud = np.zeros((4, 400), dtype=np.float32)
     aud[:, 50:100:4] = 1.0                  # a 50 ms burst at 250 Hz per channel
     sE = net.transform(np.zeros((3, 400), dtype=np.float32), aud)
@@ -459,7 +579,7 @@ def _burst_response(g_nmda):
 
 def test_nmda_sustains_firing_after_the_input_ends():
     during0, after0 = _burst_response(0.0)
-    during, after = _burst_response(20.0)
+    during, after = _burst_response(2.0)
     assert after > after0 + 5, (after0, after)
     assert during >= during0
 
@@ -473,7 +593,6 @@ def test_nmda_parameters_round_trip(tmp_path):
     assert (back.g_nmda, back.nmda_tau_decay) == (12.0, 80.0)
     w = back.to_brian_weights()
     assert w["g_nmda"] == 12.0 and w["nmda_tau_decay"] == 80.0
-
 
 
 # ------------------------------------------------------------------- HVC prelude
@@ -495,34 +614,21 @@ def test_a_prelude_is_trimmed_and_changes_no_weights():
     assert not net.JIE.any()
 
 
-def test_stdp_gate_is_saved_and_old_models_refuse_to_train(tmp_path):
+def test_stdp_gate_is_saved():
     net = _stdp_net()
-    path = tmp_path / "new.npz"
-    net.save(str(path))
-    assert VocalErrorNet.load(str(path)).stdp_gate == "window"
-
-    old = dict(np.load(path))
-    del old["stdp_gate"]
-    old_path = tmp_path / "old.npz"
-    np.savez(old_path, **old)
-    loaded = VocalErrorNet.load(str(old_path))
-    assert loaded.stdp_gate == "drive"
-    hvc, aud = _pulses(loaded, aud_t=[20])
-    loaded.transform(hvc, aud)                      # evaluation still works
-    with pytest.raises(ValueError, match="retrain"):
-        loaded.fit(hvc, aud)
+    assert net.stdp_gate == "window"
 
 
 def test_gaba_decay_lengthens_the_inhibition_from_one_i_spike():
     """A tonically firing E cell is silenced longer by one I spike at tau_inh = 5 ms than
-    by the one-step pulse of tau_inh = 0, at the same weight."""
+    by the one-step pulse of tau_inh = 0, at the same IPSP."""
     def silence_after_i_spike(tau_inh):
         net = _quiet_net(tau_inh=tau_inh, tau_exc=0.0)
-        net.drive_e = 1.0                      # E fires tonically
+        net.i_drive_e_pa = STRONG_DRIVE_PA     # E fires tonically
         net.B_hvc = np.zeros_like(net.B_hvc)
-        net.B_hvc[0, 0] = 20.0                 # HVC 0 -> I0 only
+        net.B_hvc[0, 0] = 200.0                # HVC 0 -> I0 only
         net.JIE = np.zeros_like(net.JIE)
-        net.JIE[0, 0] = 3.0                    # I0 -> E0 only
+        net.JIE[0, 0] = 175.0                  # I0 -> E0 only (peak IPSP, mV)
         hvc, aud = _pulses(net, T=150, hvc_t=[60])
         sE, sI = net.transform_all(hvc, aud)
         t_i = int(np.flatnonzero(sI[0])[0])

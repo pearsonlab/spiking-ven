@@ -79,7 +79,8 @@ def test_auditory_input_matches_schneider_woolley(setup):
 def test_model_carries_the_operating_point(setup):
     _, _, ven = setup
     assert ven.t_refr_ms == pytest.approx(2.0)
-    assert ven.a_sfa == pytest.approx(1.0)
+    assert ven.a_sfa_pa == pytest.approx(7540.0)
+    assert (ven.e_l_mv, ven.v_th_mv) == (-70.0, -50.0)
     assert ven.tau_sfa == pytest.approx(10.0)
     assert ven.tau_s == pytest.approx(3.0)           # AMPA-fast input synapses
     assert ven.r_i_th == pytest.approx(43.0)         # just above the I rate during song
@@ -96,20 +97,20 @@ def test_model_carries_the_operating_point(setup):
 
 def test_daf_response_matches_the_recorded_run(daf):
     # value at seed 42, tolerance ~3 SD over seeds 42-51 (SD in the comment)
-    assert daf["responder_fraction"] == pytest.approx(0.618, abs=0.03)       # 0.006
-    assert daf["baseline_hz_all"] == pytest.approx(2.493, abs=0.03)          # 0.010 Hz
-    assert daf["peak_change_hz"] == pytest.approx(20.3, abs=1.5)             # 0.39 Hz
-    assert daf["latency_ms"] == pytest.approx(28.8, abs=3.5)                 # 1.13 ms
-    assert daf["duration_ms"] == pytest.approx(68.0, abs=7.5)                # 2.51 ms
-    assert daf["extra_spikes_responders"] == pytest.approx(0.892, abs=0.03)  # 0.008
+    assert daf["responder_fraction"] == pytest.approx(0.622, abs=0.03)       # 0.006
+    assert daf["baseline_hz_all"] == pytest.approx(2.492, abs=0.03)          # 0.010 Hz
+    assert daf["peak_change_hz"] == pytest.approx(21.2, abs=1.5)             # 0.39 Hz
+    assert daf["latency_ms"] == pytest.approx(29.5, abs=3.5)                 # 1.13 ms
+    assert daf["duration_ms"] == pytest.approx(64.4, abs=7.5)                # 2.51 ms
+    assert daf["extra_spikes_responders"] == pytest.approx(0.900, abs=0.03)  # 0.008
 
 
 def test_the_response_magnitude_distribution_is_pinned(daf):
     """The spread, not just the mean -- it is what distinguishes a gain change from a
     truncation of the strongest responses."""
-    assert daf["extra_spikes_p90"] == pytest.approx(1.92, abs=0.10)          # 0.030
-    assert daf["extra_spikes_max"] == pytest.approx(12.2, abs=1.3)           # 0.42
-    assert daf["extra_spikes_sd"] == pytest.approx(1.03, abs=0.05)           # 0.015
+    assert daf["extra_spikes_p90"] == pytest.approx(1.83, abs=0.10)          # 0.030
+    assert daf["extra_spikes_max"] == pytest.approx(12.6, abs=1.3)           # 0.42
+    assert daf["extra_spikes_sd"] == pytest.approx(1.05, abs=0.05)           # 0.015
 
 
 def test_biological_targets_that_are_met(daf):
@@ -117,9 +118,9 @@ def test_biological_targets_that_are_met(daf):
     lo, hi = BIOLOGICAL_TARGETS["singing_rate_hz"]
     assert lo <= daf["baseline_hz_all"] <= hi
     lat, lat_sd = BIOLOGICAL_TARGETS["response_latency_ms"]
-    # 28.8 ms here, 29.0 +/- 1.1 over evaluation seeds 42-51; training seeds 43 and 44
-    # give 26.6 and 33.7 ms, the latter near the 35 ms bound. Duration 68 ms here, 67.6 +/-
-    # 2.5 over evaluation seeds and 68.5-70.6 ms over training seeds 42-44.
+    # 29.5 ms here, 29.1 +/- 1.3 over evaluation seeds 42-51; training seeds 43 and 44
+    # (in the earlier units) gave 26.6 and 33.7 ms, the latter near the 35 ms bound.
+    # Duration 64 ms here, 66.1 +/- 2.2 over evaluation seeds.
     assert abs(daf["latency_ms"] - lat) <= lat_sd
     dur, dur_sd = BIOLOGICAL_TARGETS["response_duration_ms"]
     assert abs(daf["duration_ms"] - dur) <= dur_sd
@@ -136,7 +137,7 @@ def test_response_shape_matches_figure_8e(daf):
     never states -- from 1 to 10 ms bins the model's peak falls 21 -> 18 Hz -- so it is
     deliberately not asserted anywhere. When the peak occurs, and whether the response is
     a transient or a step, depend much less on it: over the same bins the peak time stays
-    at 40-41 ms.
+    at 35-40 ms.
 
     Both bounds come from reading a published panel, not from a stated number, so they are
     wider than the figure appears to justify.

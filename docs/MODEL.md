@@ -39,28 +39,59 @@ shipped encoder (64 filters trained, the ones that never fire pruned).
 ## Discrete-time dynamics
 
 The simulation runs in 1 ms steps (`dt = 1`). Everything below is `_simulate` in
-`vocal_error_net.py`. Membrane potentials, thresholds, drives, weights and noise are
-dimensionless.
+`vocal_error_net.py`, with the unit conversions in `units.py`. Potentials are in mV, currents
+in pA, conductances in nS (pA / nS = mV), times in ms.
 
-### Input filtering
+### Membrane
 
-Before the loop, each input spike train is filtered by `spike_to_rate`, a causal one-pole filter
-with the synaptic time constant `tau_s`:
+Each E and I cell is a leaky integrate-and-fire membrane,
 
 ```
-h[t] = exp(-1 / tau_s) * h[t-1] + spikes[t]          (per channel, h[-1] = 0)
+C dV/dt = -g_L (V - E_L) + I        stepped exactly:   V <- E_L + d (V - E_L) + (1 - d) I / g_L
 ```
 
-so one input spike contributes a jump of 1 that decays with `tau_s` -- the postsynaptic current of
-that synapse. This gives `h_aud` (from auditory spikes) and `h_hvc` (from HVC spikes).
-`tau_s = 3 ms`, an AMPA EPSC decay. A spike's total charge is the filter's sum,
-`1 / (1 - exp(-1 / tau_s))` (3.5 at 3 ms, 20.5 at the former 20 ms), so `B_scale` and
-`B_hvc_scale` are tied to `tau_s`. The recurrent synapses are filtered the same way inside the
-loop, with `tau_inh` (I -> E, GABA_A, 5 ms) and `tau_exc` (E -> I, AMPA, 3 ms); see below.
+with `d = exp(-1 / tau)` and `g_L = C / tau`. Shipped values (both populations unless stated):
+
+| | E | I |
+|---|---|---|
+| rest `E_L`, reset `V_reset` | -70 mV | -70 mV |
+| threshold `V_th` | -50 mV | -50 mV |
+| capacitance `C` | 500 pF | 200 pF |
+| time constant `tau` | 30 ms | 10 ms |
+| leak conductance `g_L = C / tau` | 16.7 nS | 20 nS |
+
+`I` sums the tonic drive, the synaptic currents, adaptation (E) and noise. The capacitances are
+Wang's (2002); with the time constants they fix only the conversion between current and voltage,
+not the dynamics, which depend on `I / g_L`.
+
+### Synapses: weights as peak PSPs
+
+Every synaptic current is a trace per presynaptic cell (or auditory/HVC channel) that jumps by
+1 on a spike and decays with the synapse's time constant, times the weight's current:
+
+```
+h[t] = exp(-1 / tau_syn) * h[t-1] + spikes[t]          (h[-1] = 0)
+I_syn = W_pA @ h
+```
+
+| Synapse | Trace | `tau_syn` | Receptor |
+|---|---|---|---|
+| auditory -> E (`B`) | `h_aud` (`spike_to_rate`, before the loop) | `tau_s` = 3 ms | AMPA |
+| HVC -> I (`B_hvc`) | `h_hvc` (`spike_to_rate`, before the loop) | `tau_s` = 3 ms | AMPA |
+| E -> I (`JEI`) | `g_exc`, fed by `sE[t-1]` | `tau_exc` = 3 ms | AMPA |
+| I -> E (`JIE`) | `g_inh`, fed by `sI[t-1]` | `tau_inh` = 5 ms | GABA_A |
+
+Weights are stored and specified as the **peak PSP (mV)** one spike produces at rest. The
+simulation converts each to its current per spike -- the peak EPSC or IPSC -- with
+`W_pA = W_mV * g_L / psp_peak(tau_syn, tau_m)` (`VocalErrorNet._current_factors`), where
+`psp_peak` is the peak membrane deflection of a unit trace under the same stepping. At the
+shipped time constants that is 183 pA per mV for auditory -> E, 94.8 for HVC -> I and E -> I, and
+130 for I -> E. `VocalErrorNet.synaptic_currents()` returns every matrix in pA. A recurrent
+`tau` of 0 is a one-step pulse, as in models saved before the recurrent traces existed.
 
 ### Conduction delays
 
-At step `t` the network sees the filtered inputs from `aud_delay_ms` and `hvc_delay_ms` steps
+At step `t` the network sees the input traces from `aud_delay_ms` and `hvc_delay_ms` steps
 earlier, and zero before the delay has elapsed:
 
 ```
@@ -70,37 +101,34 @@ h_hvc_t = h_hvc[:, t - hvc_delay_ms]    if t >= hvc_delay_ms, else 0
 
 ### E neurons
 
-With `decay_e = exp(-1 / tau_e)`, at each step `t`, in this order:
+With `d_e = exp(-1 / tau_e)`, at each step `t`, in this order (currents in pA):
 
 ```
-a_e    = B @ h_aud_t                                    audio drive
-w_sfa  = decay_sfa * w_sfa                              adaptation decays (decay_sfa = exp(-1/tau_sfa))
 g_inh  = exp(-1 / tau_inh) * g_inh + sI[t-1]            GABA_A trace, one per I cell
-u_e    = drive_e + a_e - JIE @ g_inh - w_sfa + noise_e * N(0, 1)
+w_sfa  = exp(-1 / tau_sfa) * w_sfa                      adaptation current decays
+I_e    = I_drive_e + B_pA @ h_aud_t - JIE_pA @ g_inh + I_nmda - w_sfa + noise_e * N(0, 1)
 refr_e = max(refr_e - 1, 0)
-V_e    = decay_e * V_e + (1 - decay_e) * u_e
-V_e    = v_reset                       where refr_e > 0        (clamped while refractory)
-sE[t]  = 1                             where V_e > theta_e and refr_e == 0
-on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
+V_e    = E_L + d_e (V_e - E_L) + (1 - d_e) I_e / g_L_e
+V_e    = V_reset                       where refr_e > 0        (clamped while refractory)
+sE[t]  = 1                             where V_e > V_th and refr_e == 0
+on a spike:  V_e = V_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 ```
 
-- `V_e` relaxes toward its input `u_e` with time constant `tau_e`; a spike is a crossing of the
-  threshold `theta_e`, shared by every E cell. `v_reset = 0`, and all state starts at zero.
-- Inhibition is synaptic: each I spike adds 1 to its cell's trace `g_inh`, entering on the
-  step after the spike and decaying with `tau_inh = 5 ms` (GABA_A), so one I spike delivers
-  `1 / (1 - exp(-1/5))` = 5.5 units of charge. `tau_inh = 0` is a one-step pulse, as in models
-  saved before the trace existed.
-- The noise is a fresh Gaussian draw per neuron per step, added to the input (so its effect on
-  `V_e` is scaled by `1 - decay_e`).
+- All state starts at rest (`V = E_L`), and only `JIE` carries over between calls.
+- **Tonic drive.** `I_drive_e` is derived from `TARGET_RATE_E_HZ` (`units.tonic_drive_pa`): the
+  current that, alone and without noise, takes the membrane from reset to threshold in
+  `1000 / 25 = 40` ms, so it fires E at 25 Hz: 453 pA.
+- **Noise** is a fresh Gaussian current per neuron per step, SD `noise_e` = 754 pA, which gives the
+  free membrane a voltage SD of about 5.8 mV.
 - The refractory countdown is decremented before the threshold test, so with `t_refr_ms = 2` a
   cell can fire at `t` and again at `t + 2`. `t_refr_ms = 0` disables the refractory period.
-- Spike-frequency adaptation (`a_sfa > 0`): each spike adds `a_sfa` to a hyperpolarising current
-  `w_sfa` that decays with `tau_sfa`. The shipped `a_sfa = 1.0` is about 23x `theta_e`, so a spike
-  holds a cell quiet for several `tau_sfa` unless its auditory drive is strong.
+- **Spike-frequency adaptation** (`a_sfa > 0`): each spike adds `a_sfa` = 7540 pA to a
+  hyperpolarising current that decays with `tau_sfa` = 10 ms, so a spike holds a cell quiet for
+  several `tau_sfa` unless its auditory drive is strong.
 
 ### NMDA component
 
-The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 400`), following Wang
+The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 61.9`), following Wang
 (2002). Each auditory channel `j` has a gating variable, computed before the loop
 (`nmda_gating`):
 
@@ -110,49 +138,45 @@ s_j[t] = d * s_j[t-1] + (1 - d * s_j[t-1]) * (1 - exp(-nmda_alpha * x_j[t]))    
 ```
 
 a step of `ds/dt = -s / tau_decay + alpha x (1 - s)` that applies the decay and the saturating
-increment each exactly, in turn, so `s` stays in [0, 1] and saturates near 1 under dense input. At each step, before the membrane update, `u_e` gains
+increment each exactly, in turn, so `s` stays in [0, 1] and saturates near 1 under dense input.
+At each step, before the membrane update, `I_e` gains
 
 ```
-g_nmda * (B @ s_t) * mg_block(V_mV) * (E_nmda - V_e)
-V_mV = e_l_mv + V_e * (v_th_mv - e_l_mv) / theta_e
-mg_block(V_mV) = 1 / (1 + mg_mm * exp(-0.062 * V_mV) / 3.57)          (Jahr & Stevens 1990)
+I_nmda = g_nmda * (B_pA @ s_t) * mg_block(V_e) * (E_nmda - V_e) / (E_nmda - E_L)
+mg_block(V) = 1 / (1 + mg_mm * exp(-0.062 * V) / 3.57)          (Jahr & Stevens 1990, V in mV)
 ```
 
-where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous step, and
-`E_nmda` is `e_nmda_mv` expressed in membrane units by the same map. The map sends reset (0) to
-`e_l_mv` (-70 mV) and each cell's threshold to `v_th_mv` (-50 mV), so the Mg2+ block and the
-driving force act on a physiological voltage scale. NMDA uses the same connections as `B`;
-`g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.32 of
-the fast component's charge per isolated spike at `tau_s = 3 ms` (0.055 at the former 20 ms,
-since the fast charge per spike scales with the filter's sum), so the shipped 400 carries
-~130x the fast
-charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio gate reads input
-spikes, not either drive, so NMDA changes learning only through the E spikes it causes. Because
-NMDA uses `B`, its charge scales with `B_scale` as the fast component's does; `g_nmda` is
-relative to `B` so that ratio, not `B_scale`, sets the NMDA share.
+where `s_t` is delayed like `h_aud_t` and `V_e` is the potential from the previous step. NMDA
+uses the same connections as `B`, and the driving force is normalised to 1 at rest, so `g_nmda`
+is the NMDA current at full gating, at rest and without the Mg2+ block, relative to the fast
+EPSC. Per isolated spike near threshold, the shipped 61.9 carries ~130x the fast component's
+charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio
+gate reads input spikes, not either current, so NMDA changes learning only through the E spikes
+it causes.
 
 ### I neurons
 
-With `decay_i = exp(-1 / tau_i)`, at the same step `t`, after E:
+With `d_i = exp(-1 / tau_i)`, at the same step `t`, after E:
 
 ```
 g_exc  = exp(-1 / tau_exc) * g_exc + sE[t-1]            AMPA trace, one per E cell
-u_i    = drive_i + JEI @ g_exc + B_hvc @ h_hvc_t + noise_i * N(0, 1)
+I_i    = I_drive_i + JEI_pA @ g_exc + B_hvc_pA @ h_hvc_t + noise_i * N(0, 1)
 refr_i = max(refr_i - 1, 0)
-V_i    = decay_i * V_i + (1 - decay_i) * u_i
-V_i    = v_reset                       where refr_i > 0
-sI[t]  = 1                             where V_i > theta_i and refr_i == 0
-on a spike:  V_i = v_reset,  refr_i = t_refr_ms
+V_i    = E_L + d_i (V_i - E_L) + (1 - d_i) I_i / g_L_i
+V_i    = V_reset                       where refr_i > 0
+sI[t]  = 1                             where V_i > V_th and refr_i == 0
+on a spike:  V_i = V_reset,  refr_i = t_refr_ms
 ```
 
-I has no adaptation and one scalar threshold `theta_i`. E -> I is synaptic like I -> E, with
-`tau_exc = 3 ms` (AMPA); since `JEI` is fixed, its scale `j_ei_scale` is tied to `tau_exc`.
-Each step draws the E noise first and then the I noise, from the network's own generator
+I has no adaptation. Its tonic drive `I_drive_i` = 53.7 pA holds it 2.7 mV above rest, far below
+the 400 pA (20 mV) it would need to reach threshold, so I fires only when HVC drives it. Each step
+draws the E noise first and then the I noise, from the network's own generator
 (`default_rng(seed + 10000)`) unless `transform(..., rng=g)` supplies another.
 
 ### Plasticity (STDP on JIE)
 
-Only in `fit`. After the E and I updates of step `t`:
+Only in `fit`. After the E and I updates of step `t` (`JIE` in peak IPSP, mV; the loop runs on
+its current, `JIE_pA`, and converts back at the end of the call):
 
 ```
 tau     = tau_stdp                                      STDP window, > 0 (20 ms)
@@ -160,8 +184,8 @@ x_i     = exp(-1 / tau) * x_i + sI[t]                   presynaptic (I) trace
 gate_e  = 1 where B @ n_aud > 0, else 0                 audio gate; n_aud = auditory spikes
                                                         per channel in (t - tau, t], delayed
                                                         by aud_delay_ms like the drive
-JIE    += A_jie * outer(sE[t] * gate_e, x_i - xi_th)
-JIE     = clip(JIE, 0, J_max_ie)
+JIE    += a_jie * outer(sE[t] * gate_e, x_i - xi_th)
+JIE     = clip(JIE, 0, j_max_ie)
 xi_th   = r_i_th * tau * 1e-3
 ```
 
@@ -180,55 +204,39 @@ xi_th   = r_i_th * tau * 1e-3
   the mean trace of an I cell firing irregularly at `r_i_th`. An E spike potentiates synapses from I
   cells whose trace is above that level and depresses those below it, so I activity that is merely
   at its baseline rate gives no net change. The shipped `r_i_th = 43` Hz is just above the I rate
-during song (40.6 Hz), which makes the rule mildly depressing; far below it (the former 6 Hz) nearly every gated E spike potentiates whatever I has
-been doing, and the inhibition loses its song specificity. With `r_i_th = 0` the rule only
-potentiates.
-- **Bounds.** Weights are clipped to `[0, J_max_ie]` after every step, so depression stops at zero.
-- **Amplitude.** `A_jie` defaults to `constants.a_jie_for(tau_stdp) = 3e-3 * 10 / tau`, so
+  during song (40.6 Hz), which makes the rule mildly depressing; far below it (the former 6 Hz)
+  nearly every gated E spike potentiates whatever I has been doing, and the inhibition loses its
+  song specificity. With `r_i_th = 0` the rule only potentiates.
+- **Bounds.** Weights are clipped to `[0, j_max_ie]` (58.2 mV) after every step, so depression
+  stops at zero. In the shipped model 56% of the I->E weights are nonzero, with mean IPSP 0.58 mV
+  (75 pA of IPSC), 90th percentile 1.4 mV and maximum 6.9 mV; none reaches the bound.
+- **Amplitude.** `a_jie` defaults to `constants.a_jie_for(tau_stdp) = 0.175 mV * 10 / tau`, so
   the integral of the learning window stays fixed when its width changes.
 - Updates are applied online, so later steps of the same `fit` call already feel them. `JIE` is
   stored as float32 between calls.
 
-## Thresholds
-
-Both are set once, in the constructor.
-
-**`theta_e`** -- the level the E membrane, started at 0 with no noise and constant input
-`drive_e`, reaches after `1 / target_rate` steps. Tonic drive alone therefore fires each E cell every
-`1 / target_rate` ms (40 ms, 25 Hz, at the operating point):
-
-```
-theta_e = max(drive_e * (1 - decay_e ** (1 / target_rate)), 1e-3)     # same for every E cell
-```
-
-At the operating point `theta_e = 0.06 * (1 - exp(-40/30)) = 0.044`, one value shared by every E
-cell, like `theta_i`. Older models, which stored it once per E cell (always uniform), still load.
-
-**`theta_i`** -- the same construction for a fixed reference input `target_rate_i * 10` (the 10 is a
-fixed 10 ms reference, so `theta_i` does not move with `tau_s`):
-
-```
-theta_i = max(target_rate_i * 10 * (1 - decay_i ** (1 / target_rate_i)), 1e-3)
-```
-
-At the operating point `theta_i = 0.5 * (1 - exp(-2)) = 0.43`, far above `drive_i = 0.058`, so I
-fires only when HVC drives it.
-
 ## Weight initialisation
 
 Fixed weights are sparse and log-normal (`common._lognormal_sparse`): a fraction `c` of the entries,
-placed at random, are nonzero, with log-normal values of the given mean and standard deviation.
-All three are drawn from `default_rng(seed)`, in the order below, and stored as float32.
+placed at random, are nonzero, with log-normal values of the given mean and standard deviation
+(peak PSP, mV). All three are drawn from `default_rng(seed)`, in the order below, and stored as
+float32.
 
-| Matrix | Connection probability | Mean weight per connection | Std |
-|---|---|---|---|
-| `B` | `c_B` (0.05) | `B_scale / n_aud` (15 / 54 = 0.28) | half the mean |
-| `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.378), not divided by `n_hvc` | half the mean |
-| `JEI` | `c_JEI` (0.5) | `j_ei_scale / sqrt(n_e * c_JEI)` (0.048 / 17.3 = 0.0028) | 10% of the mean |
-| `JIE` | -- | 0 (all zero) | -- |
+| Matrix | Connection probability | Mean (mV) | SD (mV) | Mean EPSC (pA) |
+|---|---|---|---|---|
+| `B` | `c_B` (0.05) | `b_aud_mean_mv` (11.45) | `b_aud_sd_mv` (5.73) | ~2100 |
+| `B_hvc` | `c_hvc` (0.1) | `b_hvc_mean_mv` (3.69) | `b_hvc_sd_mv` (1.85) | ~350 |
+| `JEI` | `c_JEI` (0.5) | `j_ei_mean_mv` (0.0271) | `j_ei_sd_mv` (0.00271) | ~2.6 |
+| `JIE` | -- | 0 (all zero) | -- | -- |
 
-Starting `JIE` at zero means only E cells that song drives ever acquire inhibition; cells that
-song does not reach keep zero rows and respond fully to novel sound.
+The auditory EPSP is large because each E cell samples only ~2.7 of the 54 sparse auditory
+channels. Starting `JIE` at zero means only E cells that song drives ever acquire inhibition;
+cells that song does not reach keep zero rows and respond fully to novel sound.
+
+**Older model files** stored everything dimensionless: reset at 0, thresholds `theta_e` and
+`theta_i` in input units, weights and drives in those units. `units.from_dimensionless` converts
+them on load (one input unit is `(V_th - E_L) / theta` mV), as it does `VocalErrorNetV2`'s
+arguments, so they keep the dynamics they were trained with.
 
 ## Input spike trains
 
@@ -262,7 +270,7 @@ song does not reach keep zero rows and respond fully to novel sound.
 **Training** (`cli/train_ven.py`): `N_RENDITIONS = 600` calls to `fit`, one per rendition of the
 motif plus `T_POST = 200` ms of silence, each preceded by the intro notes; the first is preceded
 by `T_BURN = 500` ms of silence, which ends with them.
-Each call starts the membranes from zero; only `JIE` carries over. The HVC spike train is the same
+Each call starts the membranes at rest; only `JIE` carries over. The HVC spike train is the same
 every rendition, and the auditory input cycles through encodings of the template motif and the
 corpus's other renditions of the song.
 
@@ -291,16 +299,17 @@ corpus's other renditions of the song.
 | Quantity | Unit | Examples |
 |---|---|---|
 | Time step | 1 ms | the loop index `t`, `dt` |
-| Time constants, delays, refractory period | ms | `tau_e`, `tau_i`, `tau_s`, `tau_stdp`, `tau_sfa`, `nmda_tau_rise`, `nmda_tau_decay`, `aud_delay_ms`, `t_refr_ms` |
-| Potentials, thresholds, drives, noise std | dimensionless | `V_e`, `theta_e`, `drive_e`, `noise_e`, `v_reset` |
-| Weights, adaptation increment | dimensionless | `B`, `JIE`, `J_max_ie`, `a_sfa`, `A_jie` |
-| NMDA conductance, gating | dimensionless (conductance relative to `B`); `s` in [0, 1] | `g_nmda`, `s_nmda` |
+| Time constants, delays, refractory period | ms | `tau_e`, `tau_i`, `tau_s`, `tau_inh`, `tau_exc`, `tau_stdp`, `tau_sfa`, `nmda_tau_rise`, `nmda_tau_decay`, `aud_delay_ms`, `t_refr_ms` |
+| Membrane potentials | mV | `V_e`, `V_i`, `e_l_mv`, `v_th_mv`, `v_reset_mv`, `e_nmda_mv` |
+| Currents: drives, synaptic, adaptation, noise SD | pA | `i_drive_e_pa`, `i_drive_i_pa`, `a_sfa_pa`, `noise_e_pa`, `synaptic_currents()` |
+| Capacitance, leak conductance | pF, nS | `c_e_pf`, `c_i_pf`, `g_l_e`, `g_l_i` |
+| Weights, their mean / SD, the I->E bound and STDP step | mV (peak PSP at rest) | `B`, `B_hvc`, `JEI`, `JIE`, `b_aud_mean_mv`, `j_max_ie_mv`, `a_jie_mv` |
+| NMDA conductance | relative to the fast EPSC, at rest | `g_nmda` |
+| NMDA gating | in [0, 1] | `s_nmda` |
 | NMDA rate constant | 1 / ms | `nmda_alpha` |
-| Voltages for the NMDA map only | mV | `e_l_mv`, `v_th_mv`, `e_nmda_mv` |
 | Mg2+ concentration | mM | `mg_mm` |
-| Filtered input `h` | spikes (a sum of decaying unit jumps) | `h_aud`, `h_hvc` |
-| Rates used for thresholds | spikes per ms | `target_rate` (0.025 = 25 Hz), `target_rate_i` |
-| Other rates | Hz | `r_i_th`, `AUD_MEAN_RATE_HZ`, `HVC_INTRA_BURST_HZ` |
+| Synaptic traces | spikes (a sum of decaying unit jumps) | `h_aud`, `h_hvc`, `g_inh`, `g_exc` |
+| Rates | Hz | `target_rate_hz`, `r_i_th`, `AUD_MEAN_RATE_HZ`, `HVC_INTRA_BURST_HZ` |
 | Spike matrices | 0/1 per neuron per 1 ms bin | `transform` output, `(n_e, T)` |
 
 ## Glossary

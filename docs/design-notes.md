@@ -385,6 +385,25 @@ stated.
   short of the bird's 90. A slower auditory input code or recurrent E -> E excitation are the
   alternatives not yet tried.
 
+## Physiological units (adopted)
+
+- **The model was dimensionless**: the membrane relaxed toward its input from a reset of 0 and
+  fired at a threshold `theta` derived from the tonic drive, and drives, weights, noise and
+  adaptation were in those input units (E: `theta_e` 0.044; I: `theta_i` 0.43). Only NMDA used mV,
+  through a map of reset to -70 and threshold to -50 mV.
+- **It is now in mV and pA** (`units.py`): `C dV/dt = -g_L (V - E_L) + I`, rest and reset -70 mV,
+  threshold -50 mV, Wang's (2002) capacitances (500 pF E, 200 pF I). One old input unit is
+  `(V_th - E_L) / theta` mV: 453 mV on E, 46 mV on I. Weights are peak PSPs (mV) with a log-normal
+  mean and SD, replacing `B_SCALE / n_aud`, `B_HVC_SCALE` and `J_EI_SCALE / sqrt(n_e c_JEI)` with
+  fixed "half the mean" or "10%" spreads. E's tonic drive is derived from its 25 Hz target rate,
+  as `theta_e` was. NMDA's driving force is normalised at rest, so `G_NMDA` 400 became 61.9.
+- **A change of units, not of model.** The shipped model loaded from its old file and run in the
+  new code reproduced every metric to the last printed digit. Retrained from the rounded
+  constants (3-4 significant figures), the ten-evaluation-seed means moved by under one seed SD
+  (responders 60.3 -> 61.1%, extra spikes 0.916 -> 0.915, latency 29.0 -> 29.1 ms, duration
+  67.6 -> 66.1 ms, reversed/trained 1.115 -> 1.116). Values in the sections above are in the
+  earlier dimensionless units.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst

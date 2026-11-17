@@ -75,7 +75,8 @@ def from_dimensionless(p: dict, c_e_pf: float, c_i_pf: float) -> dict:
     ``v_th_mv``, ``e_nmda_mv``. The dimensionless membrane maps reset to ``e_l_mv`` and
     each threshold to ``v_th_mv``, so one input unit is ``k = (v_th - e_l) / theta`` mV.
 
-    Returns the new scalars and ``w_factor``: the multipliers that turn the old
+    Returns the new scalars (NMDA as ``nmda_ns_per_mv``, its conductance per mV of fast
+    EPSP) and ``w_factor``: the multipliers that turn the old
     ``B``, ``B_hvc``, ``JEI`` and ``JIE`` matrices into peak PSPs in mV.
     """
     span = p["v_th_mv"] - p["e_l_mv"]
@@ -93,8 +94,9 @@ def from_dimensionless(p: dict, c_e_pf: float, c_i_pf: float) -> dict:
         "a_sfa_pa": p["a_sfa"] * k_e * g_e,
         "a_jie_mv": p["A_jie"] * psp_ie,
         "j_max_ie_mv": p["J_max_ie"] * psp_ie,
-        # NMDA current = g (B @ s) mg(V) (E_nmda - V) / (E_nmda - E_L), B in pA.
-        "g_nmda": p["g_nmda"] * (p["e_nmda_mv"] - p["e_l_mv"]) / k_e,
+        # NMDA conductance (nS) per mV of fast EPSP on the same connection:
+        # I_nmda = (G @ s) mg(V) (E_nmda - V) with G = B_mV * nmda_ns_per_mv.
+        "nmda_ns_per_mv": p["g_nmda"] * g_e / (k_e * psp_peak(p["tau_s"], p["tau_e"])),
         "w_factor": {
             "B": k_e * psp_peak(p["tau_s"], p["tau_e"]),
             "B_hvc": k_i * psp_peak(p["tau_s"], p["tau_i"]),

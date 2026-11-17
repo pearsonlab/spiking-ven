@@ -6,7 +6,8 @@ Architecture
 - E neurons        →  JEI (n_i × n_e)                 →  I neurons  [fixed]
 - HVC spikes       (n_hvc, T) →  B_hvc (n_i × n_hvc) →  I neurons  [fixed sparse]
 - I neurons        →  JIE (n_e × n_i)                 →  E neurons  [plastic — causal Hebbian]
-- Auditory spikes  also drive an NMDA conductance on E (``g_nmda``), through B; see
+- Auditory spikes  also drive an NMDA conductance on E (``g_nmda_mean_ns``), on B's
+  connections; see
   ``docs/MODEL.md``.
 
 Plasticity
@@ -39,8 +40,11 @@ __all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_bursts", "spike_to_
            "nmda_gating", "mg_block", "stdp_audio_gate"]
 
 #: NMDA parameters a model file stores.
-_NMDA_KEYS = ("g_nmda", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
+_NMDA_KEYS = ("g_nmda_mean_ns", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
               "e_nmda_mv")
+#: The same, as the earlier dimensionless format stored them.
+_LEGACY_NMDA_KEYS = ("g_nmda", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
+                     "e_nmda_mv")
 
 
 # ---------------------------------------------------------------------------
@@ -110,15 +114,15 @@ def _simulate(
     aud_delay_ms: int = 0,
     hvc_delay_ms: int = 0,
     s_nmda: np.ndarray | None = None,
-    g_nmda: float = 0.0,
+    G_nmda: np.ndarray | None = None,
     nmda: tuple | None = None,
     stdp_gate: np.ndarray | None = None,
     decay_inh: float = 0.0,
     decay_exc: float = 0.0,
 ):
     # Potentials in mV, currents in pA, conductances in nS. Every weight matrix here is
-    # the synaptic current (pA) per unit of its trace, i.e. the peak EPSC/IPSC per spike.
-    # ``nmda`` is (e_nmda_mv, mg_mm). Membrane noise comes from the caller's seeded
+    # the synaptic current (pA) per unit of its trace, i.e. the peak EPSC/IPSC per spike;
+    # ``G_nmda`` is the NMDA conductance (nS) per connection. ``nmda`` is (e_nmda_mv, mg_mm). Membrane noise comes from the caller's seeded
     # generator, never the global np.random.
     n_e = B.shape[0]
     n_i = JEI.shape[0]
@@ -162,14 +166,13 @@ def _simulate(
         # --- E dynamics (currents in pA) ---
         g_inh = decay_inh * g_inh + sI_prev
         I_e = i_drive_e + B @ h_aud_t - JIE @ g_inh
-        if g_nmda > 0.0:
-            # NMDA conductance through the same connections, Mg2+-blocked at the
-            # membrane potential, with its driving force normalised to 1 at rest.
-            assert s_nmda is not None and nmda is not None, "g_nmda > 0 needs s_nmda, nmda"
+        if G_nmda is not None:
+            # NMDA conductance (nS) through the same connections, Mg2+-blocked at the
+            # membrane potential: nS x mV = pA.
+            assert s_nmda is not None and nmda is not None, "G_nmda needs s_nmda, nmda"
             e_nmda, mg_mm = nmda
             s_t = s_nmda[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
-            I_e = I_e + (g_nmda * (B @ s_t) * mg_block(V_e, mg_mm)
-                         * (e_nmda - V_e) / (e_nmda - e_l))
+            I_e = I_e + (G_nmda @ s_t) * mg_block(V_e, mg_mm) * (e_nmda - V_e)
         if a_sfa > 0.0:
             w_sfa *= decay_sfa
             I_e = I_e - w_sfa
@@ -285,8 +288,8 @@ class VocalErrorNet:
     t_refr_ms    : absolute refractory period (ms); 0 disables it
     a_sfa_pa, tau_sfa : adaptation current step per E spike (pA) and its decay (ms)
     aud_delay_ms, hvc_delay_ms : conduction delays (ms)
-    g_nmda       : NMDA current at full gating, at rest and unblocked, relative to the
-                   fast EPSC (0 = off)
+    g_nmda_mean_ns : mean peak NMDA conductance (nS) per aud->E connection, at full
+                   gating and unblocked; the matrix is ``B`` rescaled to this mean (0 = off)
     nmda_tau_rise, nmda_tau_decay, nmda_alpha : NMDA gating kinetics (ms, ms, 1/ms)
     mg_mm, e_nmda_mv : Mg2+ concentration (mM) and NMDA reversal potential (mV)
     seed         : RNG seed
@@ -337,7 +340,7 @@ class VocalErrorNet:
         tau_sfa: float = C.TAU_SFA,
         aud_delay_ms: int = C.AUD_DELAY_MS,
         hvc_delay_ms: int = C.HVC_DELAY_MS,
-        g_nmda: float = C.G_NMDA,
+        g_nmda_mean_ns: float = C.G_NMDA_MEAN_NS,
         nmda_tau_rise: float = C.NMDA_TAU_RISE,
         nmda_tau_decay: float = C.NMDA_TAU_DECAY,
         nmda_alpha: float = C.NMDA_ALPHA,
@@ -378,8 +381,8 @@ class VocalErrorNet:
         self.t_refr_ms = float(t_refr_ms)
         self.a_sfa_pa, self.tau_sfa = float(a_sfa_pa), float(tau_sfa)
         self.aud_delay_ms, self.hvc_delay_ms = int(aud_delay_ms), int(hvc_delay_ms)
-        #: NMDA component of aud -> E (see constants.G_NMDA); off when g_nmda is 0.
-        self.g_nmda         = float(g_nmda)
+        #: NMDA component of aud -> E (see constants.G_NMDA_MEAN_NS); off when 0.
+        self.g_nmda_mean_ns = float(g_nmda_mean_ns)
         self.nmda_tau_rise  = float(nmda_tau_rise)
         self.nmda_tau_decay = float(nmda_tau_decay)
         self.nmda_alpha     = float(nmda_alpha)
@@ -418,6 +421,14 @@ class VocalErrorNet:
         """Each weight matrix as the synaptic current (pA) one spike produces at its peak."""
         f = self._current_factors()
         return {k: np.asarray(getattr(self, k), dtype=np.float64) * f[k] for k in _ARRAY_KEYS}
+
+    def nmda_conductances(self) -> np.ndarray:
+        """Peak NMDA conductance (nS) per aud->E connection: ``B`` rescaled so its mean is
+        ``g_nmda_mean_ns`` (at full gating, before the Mg2+ block)."""
+        B = np.asarray(self.B, dtype=np.float64)
+        if self.g_nmda_mean_ns <= 0.0 or self.b_aud_mean_mv <= 0.0:
+            return np.zeros_like(B)
+        return B * (self.g_nmda_mean_ns / self.b_aud_mean_mv)
 
     def _current_factors(self) -> dict[str, float]:
         """pA of peak synaptic current per mV of peak PSP, per connection."""
@@ -494,14 +505,19 @@ class VocalErrorNet:
 
         Raises ``ValueError`` naming every missing key. A file without the ``units`` marker
         is the earlier dimensionless format, converted on load (:func:`_load_legacy`) so
-        it keeps the dynamics it was trained with. ``seed`` seeds the simulation noise.
+        it keeps the dynamics it was trained with; one whose NMDA is the relative
+        ``g_nmda`` is converted to the conductance ``g_nmda_mean_ns`` the same way. ``seed`` seeds the simulation noise.
         """
         d = np.load(path)
         if "units" not in d:
             return _load_legacy(cls, d, path, seed)
         if str(d["units"]) != UNITS:
             raise ValueError(f"{path}: unknown units {str(d['units'])!r}")
-        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS if k not in d]
+        # Files from before NMDA was a conductance stored ``g_nmda``: the NMDA current at
+        # full gating, at rest and unblocked, relative to the fast EPSC.
+        relative_nmda = "g_nmda_mean_ns" not in d and "g_nmda" in d
+        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
+                   if k not in d and not (relative_nmda and k == "g_nmda_mean_ns")]
         if missing:
             raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
                              f"{', '.join(missing)}")
@@ -510,7 +526,14 @@ class VocalErrorNet:
         for k in _INT_KEYS:
             setattr(obj, k, int(d[k]))
         for k in _FLOAT_KEYS:
-            setattr(obj, k, float(d[k]))
+            if k != "g_nmda_mean_ns" or not relative_nmda:
+                setattr(obj, k, float(d[k]))
+        if relative_nmda:
+            # I = g (B_pA s) mg (E - V) / (E - E_L)  ==  (G_nS s) mg (E - V), so the mean
+            # conductance is g x (pA per mV of EPSP) x mean EPSP / (E_NMDA - E_L).
+            obj.g_nmda_mean_ns = float(
+                float(d["g_nmda"]) * obj._current_factors()["B"] * obj.b_aud_mean_mv
+                / (obj.e_nmda_mv - obj.e_l_mv))
         for k in _ARRAY_KEYS:
             setattr(obj, k, d[k])
         obj.stimulus = json.loads(str(d["stimulus_json"])) if "stimulus_json" in d else {}
@@ -521,13 +544,15 @@ class VocalErrorNet:
         """Everything :mod:`spiking_ven.brian2_runtime` needs to run this network.
 
         Weight matrices (float64, post x pre) as synaptic currents (pA per spike, at the
-        peak), and every scalar the dynamics use -- potentials (mV), leak conductances
+        peak), the NMDA conductances (nS, ``G_nmda``), and every scalar the dynamics
+        use -- potentials (mV), leak conductances
         (nS), drives, noise and adaptation (pA), time constants, the refractory period and
         the conduction delays, without which the Brian2 network would not be the one that
         was trained.
         """
         return {
             **self.synaptic_currents(),
+            "G_nmda": self.nmda_conductances(),
             **{k: float(getattr(self, k)) for k in _FLOAT_KEYS},
             "g_l_e": self.g_l_e,
             "g_l_i": self.g_l_i,
@@ -573,7 +598,7 @@ class VocalErrorNet:
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
         s_nmda = None
-        if self.g_nmda > 0.0:
+        if self.g_nmda_mean_ns > 0.0:
             s_nmda = nmda_gating(aud_spikes, self.nmda_tau_rise, self.nmda_tau_decay,
                                  self.nmda_alpha, dt)
 
@@ -590,7 +615,9 @@ class VocalErrorNet:
             learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
-            s_nmda=s_nmda, g_nmda=self.g_nmda, nmda=(self.e_nmda_mv, self.mg_mm),
+            s_nmda=s_nmda,
+            G_nmda=self.nmda_conductances() if self.g_nmda_mean_ns > 0.0 else None,
+            nmda=(self.e_nmda_mv, self.mg_mm),
             stdp_gate=(stdp_audio_gate(aud_spikes, self.B, self.tau_stdp)
                        if learn_weights else None),
             decay_inh=_decay(self.tau_inh), decay_exc=_decay(self.tau_exc),
@@ -649,13 +676,14 @@ def _load_legacy(cls, d, path, seed):
     opt = LEGACY_OPTIONAL_DEFAULTS
     p = {k: uniform_scalar(d[k], k) for k in LEGACY_REQUIRED_KEYS
          if k not in ("n_e", "n_i", "n_hvc", "n_aud", "B", "B_hvc", "JEI", "JIE")}
-    for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_inh", "tau_exc") + _NMDA_KEYS + (
+    for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_inh", "tau_exc") + _LEGACY_NMDA_KEYS + (
             "e_l_mv", "v_th_mv"):
         p[k] = float(d[k]) if k in d else opt[k]
     saved_stdp = float(d["tau_stdp"]) if "tau_stdp" in d else 0.0
     p["tau_stdp"] = saved_stdp if saved_stdp > 0.0 else p["tau_s"]
     new = U.from_dimensionless(p, C.C_E_PF, C.C_I_PF)
     wf = new.pop("w_factor")
+    nmda_ns_per_mv = new.pop("nmda_ns_per_mv")
 
     obj = cls.__new__(cls)
     obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
@@ -677,6 +705,7 @@ def _load_legacy(cls, d, path, seed):
         nz = np.asarray(getattr(obj, k))[np.asarray(getattr(obj, k)) > 0]
         setattr(obj, mk, float(nz.mean()) if nz.size else 0.0)
         setattr(obj, sk, float(nz.std()) if nz.size else 0.0)
+    obj.g_nmda_mean_ns = float(nmda_ns_per_mv * obj.b_aud_mean_mv)
     obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
                     else dict(opt["stimulus_json"]))
     obj.stdp_gate = str(d["stdp_gate"]) if "stdp_gate" in d else opt["stdp_gate"]
@@ -752,5 +781,6 @@ class VocalErrorNetV2(VocalErrorNet):
             j_max_ie_mv=new["j_max_ie_mv"], a_jie_mv=new["a_jie_mv"],
             r_i_th=r_i_th, tau_stdp=tau_stdp, t_refr_ms=t_refr_ms,
             a_sfa_pa=new["a_sfa_pa"], tau_sfa=tau_sfa,
-            aud_delay_ms=aud_delay_ms, hvc_delay_ms=hvc_delay_ms, g_nmda=0.0, seed=seed,
+            aud_delay_ms=aud_delay_ms, hvc_delay_ms=hvc_delay_ms, g_nmda_mean_ns=0.0,
+            seed=seed,
         )

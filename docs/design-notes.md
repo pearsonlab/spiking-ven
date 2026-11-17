@@ -396,7 +396,10 @@ stated.
   `(V_th - E_L) / theta` mV: 453 mV on E, 46 mV on I. Weights are peak PSPs (mV) with a log-normal
   mean and SD, replacing `B_SCALE / n_aud`, `B_HVC_SCALE` and `J_EI_SCALE / sqrt(n_e c_JEI)` with
   fixed "half the mean" or "10%" spreads. E's tonic drive is derived from its 25 Hz target rate,
-  as `theta_e` was. NMDA's driving force is normalised at rest, so `G_NMDA` 400 became 61.9.
+  as `theta_e` was. NMDA became a conductance: `G_NMDA` 400 is a mean peak NMDA conductance of
+  1853 nS per auditory connection (`G_NMDA_MEAN_NS`), on `B`'s connections and proportional to
+  them. (A first version normalised its driving force at rest instead, as 61.9; files saved
+  that way convert on load.)
 - **A change of units, not of model.** The shipped model loaded from its old file and run in the
   new code reproduced every metric to the last printed digit. Retrained from the rounded
   constants (3-4 significant figures), the ten-evaluation-seed means moved by under one seed SD

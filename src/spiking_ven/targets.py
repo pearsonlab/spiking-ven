@@ -65,7 +65,7 @@ BIOLOGICAL_TARGETS: BiologicalTargets = {
     "extra_spikes_per_burst": (0.8, 1.0),
     #: Fig 8E, black trace, read off the panel (the paper states no number): the peak
     #: falls ~40-60 ms after noise onset, widened to 35-75 ms for figure-reading error.
-    #: Less bin-dependent than the amplitude: the model's peak time stays at 35-40 ms
+    #: Less bin-dependent than the amplitude: the model's peak time stays at 40 ms
     #: from 1 to 10 ms bins.
     "responder_peak_latency_ms": (35.0, 75.0),
     #: Also off Fig 8E: the black trace is back to ~0 by 120-150 ms and stays there, i.e.

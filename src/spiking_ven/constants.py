@@ -41,7 +41,7 @@ __all__ = [
     # 2. the network operating point
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "E_L_MV", "V_TH_MV", "V_RESET_MV", "C_E_PF", "C_I_PF",
-    "TAU_E", "TAU_I", "TAU_S", "TAU_INH", "TAU_EXC",
+    "TAU_E", "TAU_I", "TAU_S", "TAU_INH", "TAU_EXC", "EI_DELAY_MS",
     "TARGET_RATE_E_HZ", "I_DRIVE_I_PA", "NOISE_E_PA", "NOISE_I_PA",
     "E_AMPA_MV", "E_GABA_MV",
     "C_B", "B_AUD_MEAN_NS", "B_AUD_SD_NS",
@@ -164,12 +164,17 @@ TAU_I = 10.0
 
 #: Synaptic decays (ms). The auditory -> E and HVC -> I inputs and E -> I are AMPA
 #: (EPSC decay 2-5 ms; 2, 3 and 5 calibrate alike, docs/design-notes.md); I -> E is GABA_A
-#: (IPSC decay ~5-10 ms; 5 as in Brunel & Wang 2001). Each presynaptic spike adds its
-#: current to a trace that decays with these; 0 for the recurrent pair would be a one-step
-#: pulse. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
+#: (IPSC decay ~5-10 ms in adult cortex; 5 as in Brunel & Wang 2001). In songbirds, Luo &
+#: Perkel (2002, J Neurophysiol) report developmental changes in GABA_A IPSC decay, 5-20 ms
+#: in juveniles -- a different circuit, but the range the sweep covers. Each presynaptic
+#: spike adds its conductance to a trace that decays with these; 0 for the recurrent pair
+#: would be a one-step pulse. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
 TAU_S = 3.0
 TAU_INH = 5.0
 TAU_EXC = 3.0
+
+#: E -> I conduction delay (ms) beyond the one step every recurrent spike takes to arrive.
+EI_DELAY_MS = 0
 
 #: Synaptic reversal potentials (mV): AMPA and NMDA at 0, GABA_A at rest (Wang 2002), so
 #: I -> E inhibition is shunting -- it does nothing at rest and grows as E depolarises.

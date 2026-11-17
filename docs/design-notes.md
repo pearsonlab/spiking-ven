@@ -95,7 +95,8 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   and the comparison with 23 ms becomes circular. finchsim's driver scripts carried the same 23 ms
   as their default until finchsim PR #27; they now use the trained model's delay.
 - **`tau_s` and the STDP window** were once the same constant, which tied the coincidence window to
-  the synaptic time course; `tau_stdp` now sets it separately.
+  the synaptic time course; `tau_stdp` now sets it separately. A coupling survived in the audio
+  gate (`B @ h_aud > 0`) until the AMPA recalibration below, which also moved `tau_s` to 3 ms.
 - **Membrane refractory period.** Without it the ceiling was 1000 Hz and was reached: during a DAF
   burst the median E inter-spike interval was 1 ms, with 73% of burst spikes in the very next bin,
   while the baseline median ISI was 31 ms. Decrementing the countdown after the spike test, rather
@@ -298,6 +299,91 @@ and 7J rasters show 100 and 126 trials). At 100 trials:
 - **`c_hvc` 0.03** has the best selectivity but sits at the edge on responders and
   magnitude. `TAU_E` 20 and more tonic drive buy ~2 ms of latency and push responders past
   the CI.
+
+## STDP audio gate and AMPA-fast input synapses (adopted)
+
+Two changes, then a recalibration. Seed-42 networks, 100 DAF trials, one evaluation seed unless
+stated.
+
+- **The audio gate was not a window.** It was `B @ h_aud > 0`. `h_aud` is an exponential that
+  never returns to zero (it underflows ~2 s later in float32), so after a cell's first input spike
+  the gate stayed open for the rest of the run: 50.8% of E-cell time in the motif, the same at
+  `tau_s` 20, 5 and 2 ms. It is now `stdp_audio_gate`: an auditory input spike within the last
+  `tau_stdp` ms. Open 7.8% of the time; the same 69% of E cells can ever learn.
+- **The gate alone weakened the response** (`tau_s` 20): extra spikes 0.95 -> 0.57, latency
+  26.7 -> 43.6 ms, duration 60 -> 41 ms, reversed/trained 1.12 -> 1.05. Inhibition rose (mean
+  `JIE` 0.042 -> 0.063): the late E spikes the old gate let through were mostly *depression*
+  events. `A_jie` at 0.5-4x barely moved anything; it sets how fast the weights get there, not
+  where.
+- **`r_i_th` was far below the I rate.** The rule is zero-mean for unrelated I activity only if
+  `r_i_th` is the I rate during song. It was 6 Hz against a measured 32 Hz (`tau_s` 20) or 41 Hz
+  (`tau_s` 3), so nearly every gated E spike potentiated whatever I had been doing, and selectivity
+  suffered. At `tau_s` 20, `r_i_th` 30 restored nearly everything (extra spikes 0.81, latency
+  30 ms, duration 58 ms, reversed/trained 1.11).
+- **`tau_s` 20 -> 3 ms (AMPA).** A spike's charge is the filter's sum, 20.5 -> 3.5, so matched
+  mean drive needs `B_SCALE` and `B_HVC_SCALE` x5.81 and, since NMDA uses `B`, `G_NMDA` /5.81.
+  At matched drive 2, 3 and 5 ms were indistinguishable (duration 21-24 ms, reversed/trained
+  1.01-1.02), so 3 ms was taken as the middle of the AMPA range.
+- **Fast synapses shorten the response.** The responder PSTH (10 ms bins) at 20 ms holds a plateau
+  from 30 to 60 ms after onset; at 3 ms it peaks at 30 ms and fades while the noise is still on.
+  The 20 ms filter averaged the sparse Poisson input into a sustained drive; with AMPA kinetics
+  only NMDA is slow. More NMDA restores the plateau, with `B_SCALE` lowered to hold magnitude;
+  longer `TAU_E` (45, 60 ms) and weaker adaptation (`A_SFA` 0.5, 0.7) did not lengthen it.
+
+| `tau_s` 3, `r_i_th` 40 | NMDA/fast charge | extra spikes | latency (ms) | duration (ms) | reversed/trained |
+|---|---|---|---|---|---|
+| `G_NMDA` 10.3, `B_SCALE` 75.5 (matched) | 3.3x | 0.76 | 26.7 | 33.1 | 1.08 |
+| 60, 55 | 19x | 0.85 | 25.6 | 46.6 | 1.10 |
+| 90, 45 | 28x | 0.88 | 25.7 | 49.4 | 1.10 |
+| 120, 40 | 38x | 0.93 | 23.8 | 49.3 | 1.11 |
+| **150, 35 (adopted)** | 48x | 0.96 | 23.9 | 54.5 | 1.12 |
+
+- **Across training seeds 42-44**, duration was 41.5-49.4 ms at `G_NMDA` 90, 45.8-49.3 at 120 and
+  48.2-54.5 at 150, so 150 is the lowest that keeps every seed above the 47 ms bound. At 150:
+  extra spikes 0.92-1.04, latency 24-28 ms, responders 57-59%, reversed/trained 1.11-1.18,
+  baseline 2.1-2.6 Hz. Over evaluation seeds 42-51, duration 52.5 +/- 1.9 ms (47.8-54.6).
+- **Adopted then:** `TAU_S` 3, `B_SCALE` 35, `B_HVC_SCALE` 0.378, `G_NMDA` 150, `R_I_TH` 40.
+  The recurrent synapses were still one-step pulses; superseded by the next section.
+
+## Synaptic recurrent connections and the NMDA duration sweep (adopted)
+
+- **I -> E and E -> I were one-step pulses** (`JIE @ sI[t-1]`, `JEI @ sE[t-1]`; the Brian2 port
+  approximated them with 1 ms decays). They are now traces like the inputs': GABA_A at
+  `TAU_INH` 5 ms (IPSC decay ~5-10 ms; 5 as in Brunel & Wang 2001) and AMPA at `TAU_EXC` 3 ms.
+  0 keeps the one-step pulse, which is how older model files and `VocalErrorNetV2` load.
+- **The GABA charge compensates itself; E -> I does not.** A 5 ms trace gives each I spike 5.5x
+  the charge, and learning settled at ~5x smaller `JIE` (row sum 5.9 -> 1.2): matching
+  `J_MAX_IE` and `A_jie` to it changed little. `JEI` is fixed, so the 3 ms trace made E -> I 3.5x
+  stronger, and that fast feedback inhibition cut the DAF response (extra spikes 0.96 -> 0.75,
+  latency 24 -> 39 ms, duration 54 -> 43 ms, reversed/trained 1.12 -> 1.06). Its scale, once a
+  hard-coded 0.17, is now `J_EI_SCALE`; 0.048 = 0.17 / 3.53 keeps the charge per spike and
+  recovers most of it (0.87, 32 ms, 48 ms, 1.09). 0.034-0.10 behave alike. `TAU_INH` 10 ms was
+  worse on every axis (0.78, 34 ms, 44 ms, 1.07).
+- **NMDA then lengthens the response to ~70 ms**, with `B_SCALE` lowered to hold magnitude
+  (seed 42): `G_NMDA` 150/35 -> 48 ms; 200/30 -> 50; 250/25 -> 55; 300/20 -> 61; 400/15 -> 67;
+  beyond that it saturates at 68-70 ms while magnitude falls (300/15, 400/10, 500/10: extra
+  spikes 0.62-0.72). The response stays a transient (late/peak 0.07).
+- **Latency is the binding constraint**, near the 35 ms bound: at `R_I_TH` 40 training seed 44
+  gave 35.7 ms (400/15) and 35.9 ms (300/20). Raising `R_I_TH` slightly above the I rate
+  (40.6 Hz) shortens it: 46 gave 26.7-32.5 ms but responders 62-63% (CI to 64%) and extra spikes
+  1.07 on one seed. 43 sits between:
+
+| `G_NMDA` 400, `B_SCALE` 15, `R_I_TH` 43, training seed | 42 | 43 | 44 |
+|---|---|---|---|
+| responders | 60% | 59% | 60% |
+| extra spikes | 0.92 | 1.02 | 0.95 |
+| latency (ms) | 28.7 | 26.6 | 33.7 |
+| duration (ms) | 70.6 | 68.5 | 70.2 |
+| late / peak | 0.07 | 0.10 | 0.11 |
+| reversed / trained | 1.105 | 1.103 | 1.157 |
+
+- **Adopted:** `TAU_INH` 5, `TAU_EXC` 3, `J_EI_SCALE` 0.048, `G_NMDA` 400, `B_SCALE` 15,
+  `R_I_TH` 43. Over evaluation seeds 42-51: duration 67.6 +/- 2.5 ms, latency 29.0 +/- 1.1 ms,
+  extra spikes 0.92, responders 60%, peak ~21 Hz at 40 ms (the bird's ~20 Hz).
+- **Open: the NMDA share.** Near threshold NMDA carries ~130x the fast charge per spike (3.3x
+  at the original 20 ms operating point), and duration rests on it; it saturates near 70 ms,
+  short of the bird's 90. A slower auditory input code or recurrent E -> E excitation are the
+  alternatives not yet tried.
 
 ## DAF metrics
 

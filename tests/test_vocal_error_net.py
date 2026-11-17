@@ -13,7 +13,7 @@ import pytest
 
 from spiking_ven import constants as C
 from spiking_ven import generate_hvc_bursts
-from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2
+from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2, stdp_audio_gate
 
 SHIPPED_MODEL = Path(__file__).resolve().parent.parent / "outputs" / "ven_model.npz"
 
@@ -96,11 +96,12 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
     # The documented defaults, pinned: each switches its feature off, so a model saved
     # before the feature existed reloads with the dynamics it was trained with.
     expected = {
-        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0,
+        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0, "tau_inh": 0.0, "tau_exc": 0.0,
+        "j_ei_scale": 0.17,
+        "aud_delay_ms": 0, "hvc_delay_ms": 0,
         "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
         "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
-        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {},
+        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {}, "stdp_gate": "drive",
     }
     assert VocalErrorNet.OPTIONAL_KEY_DEFAULTS == expected
 
@@ -115,6 +116,28 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
         assert getattr(back, attr) == v, k
         assert type(getattr(back, attr)) is type(v), k
     back.transform(np.zeros((6, 20)), np.zeros((10, 20)))   # still runs
+
+
+@pytest.mark.parametrize("saved", [None, 0.0])
+def test_old_files_load_their_stdp_window_as_tau_s(tmp_path, saved):
+    """Before tau_stdp existed (or at 0) the STDP window was the synaptic tau_s."""
+    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
+    _small_net(tau_s=7.0).save(str(full))
+    d = dict(np.load(full))
+    if saved is None:
+        del d["tau_stdp"]
+    else:
+        d["tau_stdp"] = np.array(saved)
+    np.savez(old, **d)
+    assert VocalErrorNet.load(str(old)).tau_stdp == 7.0
+
+
+@pytest.mark.parametrize("bad", [0.0, -5.0])
+def test_tau_stdp_must_be_positive(bad):
+    with pytest.raises(ValueError, match="tau_stdp"):
+        _small_net(tau_stdp=bad)
+    with pytest.raises(ValueError, match="tau_stdp"):
+        C.a_jie_for(bad)
 
 
 def test_per_cell_theta_e_from_older_files_loads_as_a_scalar(tmp_path):
@@ -180,7 +203,7 @@ def test_defaults_are_the_operating_point():
         "target_rate": C.TARGET_RATE_E, "target_rate_i": C.TARGET_RATE_I,
         "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
         "tau_stdp": C.TAU_STDP,
-        "A_jie": C.a_jie_for(C.TAU_STDP, C.TAU_S),
+        "A_jie": C.a_jie_for(C.TAU_STDP),
     }
     for k, v in expected.items():
         assert getattr(net, k) == v, k
@@ -188,7 +211,7 @@ def test_defaults_are_the_operating_point():
 
 
 def test_default_a_jie_follows_the_stdp_window():
-    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).A_jie == C.a_jie_for(10.0, C.TAU_S)
+    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).A_jie == C.a_jie_for(10.0)
 
 
 def test_n_aud_is_required():
@@ -210,7 +233,9 @@ def test_v2_legacy_defaults_are_pinned():
         "t_refr_ms": 2.0, "a_sfa": 0.0, "tau_sfa": 100.0, "r_i_th": 0.0,
         "drive_e": 0.155, "drive_i": 0.058, "noise_e": 0.1, "noise_i": 0.0,
         "target_rate": 0.025, "target_rate_i": 0.05,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0, "seed": None,
+        # tau_stdp was 0, "reuse tau_s"; that fallback is gone, so it is now that same
+        # 10 ms window stated directly -- identical learning.
+        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 10.0, "seed": None,
     }
     params = inspect.signature(VocalErrorNetV2.__init__).parameters
     assert {k: p.default for k, p in params.items() if k != "self"} == legacy
@@ -284,7 +309,7 @@ def test_i_before_gated_e_potentiates_only_that_pair():
 
 def test_e_long_before_i_does_not_potentiate():
     """The window is causal: an I burst after E has fallen silent changes nothing."""
-    net = _stdp_net(r_i_th=0.0)
+    net = _stdp_net(r_i_th=0.0, g_nmda=0.0)            # no slow NMDA tail keeping E up
     hvc, aud = _pulses(net, aud_t=[20], hvc_t=[250])
     sE, sI = net.transform_all(hvc, aud)
     assert sE.sum() > 0 and sI.sum() > 0
@@ -306,14 +331,42 @@ def test_closed_audio_gate_blocks_all_plasticity(r_i_th):
     assert np.all(net.JIE == np.float32(0.3))
 
 
+def test_stdp_audio_gate_is_a_causal_window_of_tau_stdp():
+    B = np.array([[1.0, 0.0], [0.0, 2.0], [0.0, 0.0]])
+    aud = np.zeros((2, 100))
+    aud[0, 10] = 1.0
+    aud[1, 50] = 1.0
+    g = stdp_audio_gate(aud, B, 20.0)
+    assert g.shape == (3, 100)
+    np.testing.assert_array_equal(np.flatnonzero(g[0]), np.arange(10, 30))
+    np.testing.assert_array_equal(np.flatnonzero(g[1]), np.arange(50, 70))
+    assert not g[2].any(), "a cell with no auditory input is never gated"
+
+
+def test_gate_closes_tau_stdp_after_the_last_input_spike():
+    """E spikes driven by tonic drive long after the input must not move JIE."""
+    net = _stdp_net(r_i_th=0.0)
+    net.drive_e = 1.0
+    net.JIE[:] = 0.3
+    hvc, aud = _pulses(net, T=300, aud_t=[20], hvc_t=[100, 140, 180])
+    sE, sI = net.transform_all(hvc, aud)
+    assert sE[0, 100:].sum() > 0 and sI.sum() > 0, "premise: E and I both fire late"
+    assert sI[:, :45].sum() == 0, "premise: I is silent while the gate is open"
+    net.fit(hvc, aud)
+    # I first fires at ~100 ms, long after the gate (20-40 ms) closed: no I trace was
+    # ever read by a gated spike, and r_i_th = 0 means no depression either.
+    assert np.all(net.JIE == np.float32(0.3))
+
+
 def test_e_spike_without_i_activity_depresses_and_clips_at_zero():
     # xi_th = r_i_th * tau_stdp * 1e-3 = 50 * 20 * 1e-3 = 1.0; with I silent the trace is
-    # 0, so every gated E spike lowers the row by A_jie * xi_th.
+    # 0, so every gated E spike (within tau_stdp of the input) lowers the row by
+    # A_jie * xi_th.
     net = _stdp_net(r_i_th=50.0)
     net.JIE[0, 0] = 0.5
     hvc, aud = _pulses(net, aud_t=[20])
     sE = net.fit(hvc, aud)
-    n_spikes = sE[0].sum()
+    n_spikes = sE[0, 20:20 + int(net.tau_stdp)].sum()
     assert n_spikes > 0
     xi_th = net.r_i_th * net.tau_stdp * 1e-3
     assert net.JIE[0, 0] == pytest.approx(0.5 - n_spikes * net.A_jie * xi_th, rel=1e-5)
@@ -440,3 +493,46 @@ def test_a_prelude_is_trimmed_and_changes_no_weights():
     net.fit(np.zeros((6, 0), dtype=np.float32), np.zeros((5, 0), dtype=np.float32),
             hvc_prelude=pre)
     assert not net.JIE.any()
+
+
+def test_stdp_gate_is_saved_and_old_models_refuse_to_train(tmp_path):
+    net = _stdp_net()
+    path = tmp_path / "new.npz"
+    net.save(str(path))
+    assert VocalErrorNet.load(str(path)).stdp_gate == "window"
+
+    old = dict(np.load(path))
+    del old["stdp_gate"]
+    old_path = tmp_path / "old.npz"
+    np.savez(old_path, **old)
+    loaded = VocalErrorNet.load(str(old_path))
+    assert loaded.stdp_gate == "drive"
+    hvc, aud = _pulses(loaded, aud_t=[20])
+    loaded.transform(hvc, aud)                      # evaluation still works
+    with pytest.raises(ValueError, match="retrain"):
+        loaded.fit(hvc, aud)
+
+
+def test_gaba_decay_lengthens_the_inhibition_from_one_i_spike():
+    """A tonically firing E cell is silenced longer by one I spike at tau_inh = 5 ms than
+    by the one-step pulse of tau_inh = 0, at the same weight."""
+    def silence_after_i_spike(tau_inh):
+        net = _quiet_net(tau_inh=tau_inh, tau_exc=0.0)
+        net.drive_e = 1.0                      # E fires tonically
+        net.B_hvc = np.zeros_like(net.B_hvc)
+        net.B_hvc[0, 0] = 20.0                 # HVC 0 -> I0 only
+        net.JIE = np.zeros_like(net.JIE)
+        net.JIE[0, 0] = 3.0                    # I0 -> E0 only
+        hvc, aud = _pulses(net, T=150, hvc_t=[60])
+        sE, sI = net.transform_all(hvc, aud)
+        t_i = int(np.flatnonzero(sI[0])[0])
+        assert sI[1:].sum() == 0 and sE[0, :t_i].sum() > 0, "premise: E fires before I"
+        after = np.flatnonzero(sE[0, t_i:])
+        return int(after[0]) if after.size else 150
+    assert silence_after_i_spike(5.0) > silence_after_i_spike(0.0)
+
+
+def test_recurrent_decay_zero_is_the_instantaneous_pulse():
+    from spiking_ven.vocal_error_net import _decay
+    assert _decay(0.0) == 0.0
+    assert _decay(5.0) == pytest.approx(np.exp(-1 / 5.0))

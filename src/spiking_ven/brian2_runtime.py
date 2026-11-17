@@ -42,8 +42,8 @@ __all__ = [
 
 # E neurons: dimensionless LIF with spike-frequency adaptation.
 # g_aud decays with tau_s (matches numpy spike_to_rate filtering of aud input).
-# g_inh decays with tau_inh (fast synaptic decay, ~1 ms, approximating the
-# instantaneous JIE @ sI_prev coupling in the numpy model at dt=1 ms).
+# g_inh decays with the model's tau_inh (GABA_A). A model with tau_inh = 0 has the numpy
+# model's instantaneous one-step coupling, approximated here by a 1 ms decay.
 # w_sfa steps up by a_sfa on every spike (in the reset) and decays with tau_sfa, as in
 # the numpy loop. The membrane is clamped at v_reset during the refractory period.
 #
@@ -77,14 +77,19 @@ ds_gate/dt = -s_gate / tau_nmda_decay + alpha_nmda * x_nmda * (1 - s_gate) : 1 (
 s_nmda_post = w_syn * s_gate : 1 (summed)
 """
 
-# I neurons: dimensionless LIF. g_hvc filtered at tau_s (spike_to_rate); g_exc fast
-# decay (E→I coupling).
+# I neurons: dimensionless LIF. g_hvc filtered at tau_s (spike_to_rate); g_exc decays
+# with the model's tau_exc (E→I, AMPA; 1 ms when the model has 0, as for g_inh).
 _EQS_VEN_I = """
 dv/dt     = (-v + drive_i_ven + g_hvc + g_exc) / tau_i_ven{noise} : 1 (unless refractory)
 dg_hvc/dt = -g_hvc / tau_s_ven : 1
 dg_exc/dt = -g_exc / tau_exc_ven : 1
 """
 
+
+
+def _syn_tau(tau_ms: float) -> float:
+    """A recurrent synapse's decay (ms); 0, the numpy one-step pulse, runs as 1 ms."""
+    return float(tau_ms) if tau_ms > 0.0 else 1.0
 
 def _eqs(template: str, noise_amp: float, sigma_name: str) -> str:
     """Fill in a population's equation, including the noise term only if it is live."""
@@ -124,7 +129,7 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
         namespace={
             "tau_e_ven":   w["tau_e"] * ms,
             "tau_s_ven":   w["tau_s"] * ms,
-            "tau_inh_ven": 1.0 * ms,   # fast synaptic decay for I→E inhibition
+            "tau_inh_ven": _syn_tau(w.get("tau_inh", 0.0)) * ms,
             "tau_sfa_ven": w["tau_sfa"] * ms,
             "a_sfa_ven":   w["a_sfa"],
             "drive_e_ven": w["drive_e"],
@@ -150,7 +155,7 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
         namespace={
             "tau_i_ven":   w["tau_i"] * ms,
             "tau_s_ven":   w["tau_s"] * ms,
-            "tau_exc_ven": 1.0 * ms,   # fast synaptic decay for E→I excitation
+            "tau_exc_ven": _syn_tau(w.get("tau_exc", 0.0)) * ms,
             "drive_i_ven": w["drive_i"],
             "v_reset_ven": w["v_reset"],
             "theta_i_ven": w["theta_i"],

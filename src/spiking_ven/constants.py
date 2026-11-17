@@ -42,7 +42,7 @@ __all__ = [
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
     "DRIVE_E", "DRIVE_I",
-    "TAU_S", "TAU_E", "TAU_STDP",
+    "TAU_S", "TAU_E", "TAU_STDP", "TAU_INH", "TAU_EXC", "J_EI_SCALE",
     "R_I_TH", "J_MAX_IE",
     "A_SFA", "TAU_SFA",
     "TAU_I", "C_JEI", "NOISE_E", "NOISE_I", "TARGET_RATE_E", "TARGET_RATE_I", "T_REFR_MS",
@@ -149,17 +149,18 @@ N_RENDITIONS = 600
 #: with probability ``C_B``, so it samples only a few channels. The mean weight per
 #: connection is ``B_SCALE / n_aud`` (n_aud = the encoder's channel count). Set together
 #: with ``G_NMDA`` (the slow NMDA component carries part of the drive) and with the
-#: encoder's output scale (raw ISTA coefficients, no loudness gain).
-B_SCALE = 13.0
+#: encoder's output scale (raw ISTA coefficients, no loudness gain). Each spike's charge
+#: is ``B`` times the ``TAU_S`` filter's sum (3.5 at 3 ms), so ``B_SCALE`` moves with it.
+B_SCALE = 15.0
 C_B = 0.05
 
 #: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
 #: E -> I alone supplies 0.28 against a threshold gap of 0.37, so I is effectively an
 #: HVC-driven population. Compensating one limb without the other starves it.
-#: ``B_HVC_SCALE`` is per connection, so it scales with ``N_HVC`` and the burst count:
-#: 0.065 at 600 burst units sets the singing baseline to that of the former 60-unit
-#: Gaussian-envelope HVC input at 0.333 (docs/design-notes.md).
-B_HVC_SCALE = 0.065
+#: ``B_HVC_SCALE`` is per connection, so it scales with ``N_HVC`` and the burst count, and
+#: per spike with the ``TAU_S`` filter's sum: 0.378 at 3 ms is the mean drive 0.065 gave
+#: at 20 ms (x 20.5 / 3.53), which set the 600-unit singing baseline (docs/design-notes.md).
+B_HVC_SCALE = 0.378
 C_HVC = 0.1
 
 #: Tonic drives. ``theta_e`` is derived from ``DRIVE_E`` inside the network, so raising
@@ -167,23 +168,32 @@ C_HVC = 0.1
 DRIVE_E = 0.06
 DRIVE_I = 0.058
 
-#: Input synaptic time constant (ms) for aud -> E and HVC -> I, and the membrane time
-#: constants (ms) of E and I.
-TAU_S = 20.0
+#: Input synaptic time constant (ms) for aud -> E and HVC -> I -- the AMPA EPSC decay,
+#: 2-5 ms (2, 3 and 5 ms calibrate alike; docs/design-notes.md) -- and the membrane time
+#: constants (ms) of E and I. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
+TAU_S = 3.0
 TAU_E = 30.0
 TAU_I = 10.0
 
+#: Recurrent synaptic decays (ms): I -> E is GABA_A (IPSC decay ~5-10 ms; 5 as in Brunel &
+#: Wang 2001), E -> I is AMPA (the same 3 ms as ``TAU_S``). Each presynaptic spike adds 1 to
+#: a trace that decays with these; 0 would be the former one-step pulse.
+TAU_INH = 5.0
+TAU_EXC = 3.0
+
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
 #: Wang (2001). It uses the same connections as the fast weights ``B``; ``G_NMDA`` is its
-#: conductance relative to them, in units of the leak. At 60 it carries ~3.3x the fast
-#: component's charge per isolated spike at threshold (less at rest, where Mg2+ blocks it).
-#: Chosen with ``B_SCALE`` to lengthen and weaken the DAF response (docs/design-notes.md);
-#: 0 removes it.
+#: conductance relative to them, in units of the leak. Per unit it carries 0.32 of the
+#: fast component's charge per isolated spike at threshold with ``TAU_S`` = 3 ms (0.055
+#: at the former 20 ms), so at 400 NMDA carries ~130x the fast charge near threshold (much
+#: less at rest, where Mg2+ blocks it). With AMPA-fast inputs it is the only slow
+#: excitation, and what sustains the DAF response through and past the noise burst;
+#: chosen with ``B_SCALE`` for duration and magnitude (docs/design-notes.md). 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
 #: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
 #: Current: G_NMDA (B s) B(V) (E_NMDA - V).
-G_NMDA = 60.0
+G_NMDA = 400.0
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5
@@ -198,6 +208,10 @@ V_TH_MV = -50.0
 
 #: E -> I connection probability (fixed weights).
 C_JEI = 0.5
+#: E -> I weight scale: the mean weight is ``J_EI_SCALE / sqrt(N_E * C_JEI)``. Fixed, not
+#: learned, so it is tied to ``TAU_EXC`` (a spike's charge is that trace's sum): the former
+#: 0.17 was set for a one-step pulse; 0.048 = 0.17 / 3.53 keeps the charge per spike at 3 ms.
+J_EI_SCALE = 0.048
 
 #: Standard deviation of the Gaussian noise added to the E and I input every 1 ms step.
 NOISE_E = 0.1
@@ -211,13 +225,17 @@ TARGET_RATE_I = 0.05
 #: Absolute refractory period (ms) of the E and I membranes and the input populations.
 T_REFR_MS = 2.0
 
-#: STDP coincidence window (ms), set independently of the synaptic ``TAU_S``.
+#: STDP window (ms): the I trace's time constant, and the audio gate's width (an E spike
+#: counts only within this long after an auditory input spike). Independent of ``TAU_S``.
 TAU_STDP = 20.0
 
 #: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
 #: E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the STDP trace is
-#: debiased against; ``J_MAX_IE`` caps each weight.
-R_I_TH = 6.0
+#: debiased against. Near the I rate during song (40.6 Hz in the shipped model), I
+#: activity unrelated to an E spike gives no net change; 43, slightly above, makes the
+#: rule mildly depressing and shortens latency by a few ms across training seeds.
+#: ``J_MAX_IE`` caps each weight.
+R_I_TH = 43.0
 J_MAX_IE = 1.0
 
 #: Firing-rate adaptation on E. ``TAU_SFA`` must stay shorter than the 50 ms DAF burst it
@@ -234,7 +252,7 @@ T_BURN = 500
 N_ISTA = 50
 
 
-def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
+def a_jie_for(tau_stdp: float = TAU_STDP) -> float:
     """STDP amplitude for a given kernel width.
 
     Derived, not a constant: the per-spike STDP integral goes as ``A_jie * tau``, so the
@@ -242,11 +260,11 @@ def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
     computed number instead would desynchronise the learning rule the first time the
     window changed -- which is the reason this module is Python and not a data file.
 
-    ``tau_stdp <= 0`` falls back to the synaptic constant, matching the network, where an
-    unset STDP window means the synaptic one is reused.
+    The window must be positive; the synaptic ``TAU_S`` plays no part in learning.
     """
-    tau_eff = tau_stdp if tau_stdp > 0.0 else tau_s
-    return 3e-3 * (10.0 / tau_eff)
+    if tau_stdp <= 0.0:
+        raise ValueError(f"tau_stdp must be > 0 ms, got {tau_stdp}")
+    return 3e-3 * (10.0 / tau_stdp)
 
 
 # =============================================================================

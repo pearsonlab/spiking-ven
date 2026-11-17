@@ -205,6 +205,7 @@ def test_train_encoder_front_end_is_sane():
         ("r_i_th", "R_I_TH"), ("j_max_ie", "J_MAX_IE"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
         ("a_sfa", "A_SFA"), ("tau_sfa", "TAU_SFA"), ("g_nmda", "G_NMDA"),
+        ("tau_inh", "TAU_INH"), ("tau_exc", "TAU_EXC"), ("j_ei_scale", "J_EI_SCALE"),
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):
@@ -218,7 +219,6 @@ def test_train_ven_a_jie_is_derived_not_stored():
     learning rule the first time the window changed."""
     assert cli_train_ven.build_parser().parse_args([]).a_jie is None
     assert C.a_jie_for(C.TAU_STDP) == pytest.approx(C.a_jie_for(2 * C.TAU_STDP) * 2)
-    assert C.a_jie_for(0.0, tau_s=C.TAU_S) == C.a_jie_for(C.TAU_S)
 
 
 def test_adaptation_timescale_is_shorter_than_the_burst():

@@ -246,8 +246,8 @@ class VocalErrorNet:
     c_JEI        : E→I connection probability (fixed throughout)
     r_i_th       : I baseline rate threshold for STDP (Hz); x_i below this → LTD on JIE.
                    Set to mean I rate during song so rule is zero-mean for uncorrelated activity.
-    tau_stdp     : STDP window (ms): the I trace's time constant and the audio gate's
-                   width; 0 falls back to tau_s
+    tau_stdp     : STDP window (ms), > 0: the I trace's time constant and the audio
+                   gate's width
     drive_e      : tonic E drive
     drive_i      : tonic I drive
     noise_e      : std of additive Gaussian noise on E input
@@ -262,7 +262,7 @@ class VocalErrorNet:
     seed         : RNG seed
 
     Every default is the shipped operating point (:mod:`spiking_ven.constants`), except
-    ``A_jie``, which defaults to ``constants.a_jie_for(tau_stdp, tau_s)`` for the given
+    ``A_jie``, which defaults to ``constants.a_jie_for(tau_stdp)`` for the given
     windows.
 
     ``stimulus`` is a dict describing how the training stimuli were built (rate
@@ -311,8 +311,10 @@ class VocalErrorNet:
     ) -> None:
         if n_aud is None:
             raise ValueError("n_aud is required: pass the encoder's n_channels")
+        if tau_stdp <= 0.0:
+            raise ValueError(f"tau_stdp must be > 0 ms (the STDP window), got {tau_stdp}")
         if A_jie is None:
-            A_jie = C.a_jie_for(tau_stdp, tau_s)
+            A_jie = C.a_jie_for(tau_stdp)
         rng = default_rng(seed)
         # Separate stream for simulation noise, so weight initialisation and the
         # simulation cannot interleave and perturb each other.
@@ -485,14 +487,15 @@ class VocalErrorNet:
     #: Keys added with later features, and the value a file saved before the feature
     #: existed loads with. Each default switches the feature off, so such a model reloads
     #: with the dynamics it was trained with: no refractory period, no adaptation, no
-    #: conduction delay, and an STDP window equal to ``tau_s``.
+    #: conduction delay. ``tau_stdp`` is not listed: a file without it (or with 0, the
+    #: former "reuse the synaptic window") loads it as its own ``tau_s``, the window it
+    #: was trained with.
     OPTIONAL_KEY_DEFAULTS: dict[str, Any] = {
         "t_refr_ms": 0.0,
         "a_sfa": 0.0,
         "tau_sfa": 0.0,
         "aud_delay_ms": 0,
         "hvc_delay_ms": 0,
-        "tau_stdp": 0.0,
         "g_nmda": 0.0,
         "nmda_tau_rise": C.NMDA_TAU_RISE,
         "nmda_tau_decay": C.NMDA_TAU_DECAY,
@@ -528,8 +531,10 @@ class VocalErrorNet:
             setattr(obj, k, float(d[k]))
 
         opt = cls.OPTIONAL_KEY_DEFAULTS
-        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_stdp") + _NMDA_KEYS:
+        for k in ("t_refr_ms", "a_sfa", "tau_sfa") + _NMDA_KEYS:
             setattr(obj, k, float(d[k]) if k in d else opt[k])
+        saved_stdp = float(d["tau_stdp"]) if "tau_stdp" in d else 0.0
+        obj.tau_stdp = saved_stdp if saved_stdp > 0.0 else obj.tau_s
         for k in ("aud_delay_ms", "hvc_delay_ms"):
             setattr(obj, k, int(d[k]) if k in d else opt[k])
         obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
@@ -610,9 +615,8 @@ class VocalErrorNet:
         decay_i = float(np.exp(-dt / self.tau_i))
         # The STDP trace decays at tau_stdp; xi_th is calibrated to the same constant so
         # the I-baseline debiasing stays correct whatever the window.
-        tau_stdp_eff = self.tau_stdp if self.tau_stdp > 0.0 else self.tau_s
-        alpha_stdp   = float(np.exp(-dt / tau_stdp_eff))
-        xi_th        = float(self.r_i_th * tau_stdp_eff * 1e-3)
+        alpha_stdp   = float(np.exp(-dt / self.tau_stdp))
+        xi_th        = float(self.r_i_th * self.tau_stdp * 1e-3)
 
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
@@ -641,7 +645,7 @@ class VocalErrorNet:
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
             s_nmda=s_nmda, g_nmda=g_nmda, nmda_v=nmda_v,
-            stdp_gate=(stdp_audio_gate(aud_spikes, self.B, tau_stdp_eff)
+            stdp_gate=(stdp_audio_gate(aud_spikes, self.B, self.tau_stdp)
                        if learn_weights else None),
         )
 
@@ -688,7 +692,7 @@ class VocalErrorNetV2(VocalErrorNet):
         target_rate_i: float = 0.05,
         aud_delay_ms: int = 0,
         hvc_delay_ms: int = 0,
-        tau_stdp: float = 0.0,
+        tau_stdp: float = 10.0,     # its tau_s: the window it once reused from it
         seed: int | None = None,
     ) -> None:
         super().__init__(

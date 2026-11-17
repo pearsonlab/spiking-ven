@@ -218,7 +218,6 @@ def test_train_ven_a_jie_is_derived_not_stored():
     learning rule the first time the window changed."""
     assert cli_train_ven.build_parser().parse_args([]).a_jie is None
     assert C.a_jie_for(C.TAU_STDP) == pytest.approx(C.a_jie_for(2 * C.TAU_STDP) * 2)
-    assert C.a_jie_for(0.0, tau_s=C.TAU_S) == C.a_jie_for(C.TAU_S)
 
 
 def test_adaptation_timescale_is_shorter_than_the_burst():

@@ -97,7 +97,7 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
     # before the feature existed reloads with the dynamics it was trained with.
     expected = {
         "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0,
+        "aud_delay_ms": 0, "hvc_delay_ms": 0,
         "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
         "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
         "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {}, "stdp_gate": "drive",
@@ -115,6 +115,28 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
         assert getattr(back, attr) == v, k
         assert type(getattr(back, attr)) is type(v), k
     back.transform(np.zeros((6, 20)), np.zeros((10, 20)))   # still runs
+
+
+@pytest.mark.parametrize("saved", [None, 0.0])
+def test_old_files_load_their_stdp_window_as_tau_s(tmp_path, saved):
+    """Before tau_stdp existed (or at 0) the STDP window was the synaptic tau_s."""
+    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
+    _small_net(tau_s=7.0).save(str(full))
+    d = dict(np.load(full))
+    if saved is None:
+        del d["tau_stdp"]
+    else:
+        d["tau_stdp"] = np.array(saved)
+    np.savez(old, **d)
+    assert VocalErrorNet.load(str(old)).tau_stdp == 7.0
+
+
+@pytest.mark.parametrize("bad", [0.0, -5.0])
+def test_tau_stdp_must_be_positive(bad):
+    with pytest.raises(ValueError, match="tau_stdp"):
+        _small_net(tau_stdp=bad)
+    with pytest.raises(ValueError, match="tau_stdp"):
+        C.a_jie_for(bad)
 
 
 def test_scalar_theta_e_is_broadcast(tmp_path):
@@ -175,7 +197,7 @@ def test_defaults_are_the_operating_point():
         "target_rate": C.TARGET_RATE_E, "target_rate_i": C.TARGET_RATE_I,
         "aud_delay_ms": C.AUD_DELAY_MS, "hvc_delay_ms": C.HVC_DELAY_MS,
         "tau_stdp": C.TAU_STDP,
-        "A_jie": C.a_jie_for(C.TAU_STDP, C.TAU_S),
+        "A_jie": C.a_jie_for(C.TAU_STDP),
     }
     for k, v in expected.items():
         assert getattr(net, k) == v, k
@@ -183,7 +205,7 @@ def test_defaults_are_the_operating_point():
 
 
 def test_default_a_jie_follows_the_stdp_window():
-    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).A_jie == C.a_jie_for(10.0, C.TAU_S)
+    assert VocalErrorNet(n_aud=3, n_e=4, n_i=2, tau_stdp=10.0).A_jie == C.a_jie_for(10.0)
 
 
 def test_n_aud_is_required():
@@ -205,7 +227,9 @@ def test_v2_legacy_defaults_are_pinned():
         "t_refr_ms": 2.0, "a_sfa": 0.0, "tau_sfa": 100.0, "r_i_th": 0.0,
         "drive_e": 0.155, "drive_i": 0.058, "noise_e": 0.1, "noise_i": 0.0,
         "target_rate": 0.025, "target_rate_i": 0.05,
-        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0, "seed": None,
+        # tau_stdp was 0, "reuse tau_s"; that fallback is gone, so it is now that same
+        # 10 ms window stated directly -- identical learning.
+        "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 10.0, "seed": None,
     }
     params = inspect.signature(VocalErrorNetV2.__init__).parameters
     assert {k: p.default for k, p in params.items() if k != "self"} == legacy

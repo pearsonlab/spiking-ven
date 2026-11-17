@@ -150,7 +150,7 @@ Each step draws the E noise first and then the I noise, from the network's own g
 Only in `fit`. After the E and I updates of step `t`:
 
 ```
-tau     = tau_stdp if tau_stdp > 0 else tau_s
+tau     = tau_stdp                                      STDP window, > 0 (20 ms)
 x_i     = exp(-1 / tau) * x_i + sI[t]                   presynaptic (I) trace
 gate_e  = 1 where B @ n_aud > 0, else 0                 audio gate; n_aud = auditory spikes
                                                         per channel in (t - tau, t], delayed
@@ -179,7 +179,7 @@ xi_th   = r_i_th * tau * 1e-3
 been doing, and the inhibition loses its song specificity. With `r_i_th = 0` the rule only
 potentiates.
 - **Bounds.** Weights are clipped to `[0, J_max_ie]` after every step, so depression stops at zero.
-- **Amplitude.** `A_jie` defaults to `constants.a_jie_for(tau_stdp, tau_s) = 3e-3 * 10 / tau`, so
+- **Amplitude.** `A_jie` defaults to `constants.a_jie_for(tau_stdp) = 3e-3 * 10 / tau`, so
   the integral of the learning window stays fixed when its width changes.
 - Updates are applied online, so later steps of the same `fit` call already feel them. `JIE` is
   stored as float32 between calls.

@@ -240,7 +240,7 @@ T_BURN = 500
 N_ISTA = 50
 
 
-def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
+def a_jie_for(tau_stdp: float = TAU_STDP) -> float:
     """STDP amplitude for a given kernel width.
 
     Derived, not a constant: the per-spike STDP integral goes as ``A_jie * tau``, so the
@@ -248,11 +248,11 @@ def a_jie_for(tau_stdp: float = TAU_STDP, tau_s: float = TAU_S) -> float:
     computed number instead would desynchronise the learning rule the first time the
     window changed -- which is the reason this module is Python and not a data file.
 
-    ``tau_stdp <= 0`` falls back to the synaptic constant, matching the network, where an
-    unset STDP window means the synaptic one is reused.
+    The window must be positive; the synaptic ``TAU_S`` plays no part in learning.
     """
-    tau_eff = tau_stdp if tau_stdp > 0.0 else tau_s
-    return 3e-3 * (10.0 / tau_eff)
+    if tau_stdp <= 0.0:
+        raise ValueError(f"tau_stdp must be > 0 ms, got {tau_stdp}")
+    return 3e-3 * (10.0 / tau_stdp)
 
 
 # =============================================================================

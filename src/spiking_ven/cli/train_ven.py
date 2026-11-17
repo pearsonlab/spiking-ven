@@ -96,10 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--j-max-ie", type=float, default=J_MAX_IE)
     p.add_argument("--theta-e-init", type=float, default=0.0)
     p.add_argument("--a-jie", type=float, default=None,
-                   help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp_eff)")
+                   help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp)")
     p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
-                   help="STDP coincidence window (ms), independent of the synaptic "
-                        "tau_s; 0 falls back to tau_s")
+                   help="STDP window (ms), > 0: the I trace and the audio gate. "
+                        "Independent of the synaptic tau_s")
     # protocol
     p.add_argument("--t-post", type=int, default=T_POST)
     p.add_argument("--t-burn", type=int, default=T_BURN)
@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> None:
     # A_jie * tau, so the amplitude scales inversely with the kernel width. See
     # constants.a_jie_for for why that formula lives with its inputs.
     a_jie = (args.a_jie if args.a_jie is not None
-             else a_jie_for(args.tau_stdp, args.tau_s))
+             else a_jie_for(args.tau_stdp))
 
     from ..causal_filters import CausalFilterEncoder
 
@@ -177,8 +177,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"\n{'=' * 65}")
     print(f"  VEN  A_jie={a_jie:.2e}  "
-          f"tau_s={args.tau_s} ms" + (f"  tau_stdp={args.tau_stdp:.0f} ms"
-                                      if args.tau_stdp > 0 else ""))
+          f"tau_s={args.tau_s} ms  tau_stdp={args.tau_stdp:g} ms")
     print(f"  drive_e={args.drive_e}  B_scale={args.b_scale}  "
           f"theta_e_init={ven.theta_e[0]:.4f}")
     print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "

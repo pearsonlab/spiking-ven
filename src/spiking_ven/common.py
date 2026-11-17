@@ -155,6 +155,18 @@ def generate_hvc_intro(
     return out
 
 
+def uniform_scalar(x, name: str = "value") -> float:
+    """``x`` as a float, accepting an array only if every element is the same.
+
+    Models saved before ``theta_e`` became a scalar stored it once per E cell, always with
+    one value; this reads those back. A non-uniform array raises ``ValueError``.
+    """
+    a = np.asarray(x, dtype=np.float64)
+    if a.size == 0 or np.any(a != a.flat[0]):
+        raise ValueError(f"{name} must be a scalar (or a uniform array), got {a!r}")
+    return float(a.flat[0])
+
+
 def _lognormal_sparse(shape, c, mean, std, rng):
     """Sparse log-normal weight matrix with connection probability c."""
     sigma2 = np.log(1 + (std / mean) ** 2)

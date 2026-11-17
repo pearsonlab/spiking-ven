@@ -38,17 +38,19 @@ __all__ = [
 # VEN equation strings
 # ---------------------------------------------------------------------------
 
-# Units throughout: potentials in mV, currents in pA, conductances in nS, as plain numbers
-# (Brian2 unit "1"); time constants carry Brian2's ms. The membrane is
-#   tau dV/dt = -(V - E_L) + I / g_L
-# with I the sum of the tonic drive, the synaptic currents, adaptation and noise.
+# Units throughout: potentials in mV, currents in pA, conductances in nS, capacitances
+# in pF, as plain numbers (Brian2 unit "1"); time constants carry Brian2's ms. The
+# membrane is
+#   C dV/dt = g_L (E_L - V) + sum_k g_k (E_k - V) + I
+# with every synapse a conductance through its reversal potential and I the tonic drive,
+# adaptation and noise currents. nS x mV / pF = mV / ms, hence the division by ms_ven.
 #
-# E neurons: LIF with spike-frequency adaptation. g_aud (pA) decays with tau_s, as the
-# numpy model's spike_to_rate filtering of the auditory input. g_inh (pA) decays with the
-# model's tau_inh (GABA_A); a model with tau_inh = 0 has the numpy model's instantaneous
-# one-step coupling, approximated here by a 1 ms decay. w_sfa (pA) steps up by a_sfa on
-# every spike (in the reset) and decays with tau_sfa, as in the numpy loop. The membrane
-# is clamped at v_reset during the refractory period.
+# E neurons: LIF with spike-frequency adaptation. g_aud (nS, AMPA) decays with tau_s, as
+# the numpy model's spike_to_rate filtering of the auditory input. g_inh (nS, GABA_A)
+# decays with the model's tau_inh; a model with tau_inh = 0 has a one-step pulse,
+# approximated here by a 1 ms decay. w_sfa (pA) steps up by a_sfa on every spike (in the
+# reset) and decays with tau_sfa, as in the numpy loop. The membrane is clamped at
+# v_reset during the refractory period.
 #
 # The noise term is added only when the amplitude is non-zero. A `sigma * xi`
 # term with sigma == 0 contributes nothing but still draws a random number per
@@ -56,7 +58,7 @@ __all__ = [
 # other group's noise. Omitting it keeps a noiseless population exactly
 # noiseless and leaves the rest of the network's draws untouched.
 _EQS_VEN_E = """
-dv/dt     = (-(v - e_l_ven) + (i_drive_e_ven + g_aud - g_inh - w_sfa{nmda}) / g_l_e_ven) / tau_e_ven{noise} : 1 (unless refractory)
+dv/dt     = (g_l_e_ven * (e_l_ven - v) + g_aud * (e_ampa_ven - v) + g_inh * (e_gaba_ven - v){nmda} + i_drive_e_ven - w_sfa) / c_e_ven / ms_ven{noise} : 1 (unless refractory)
 dg_aud/dt = -g_aud / tau_s_ven : 1
 dg_inh/dt = -g_inh / tau_inh_ven : 1
 dw_sfa/dt = -w_sfa / tau_sfa_ven : 1
@@ -79,10 +81,10 @@ ds_gate/dt = -s_gate / tau_nmda_decay + alpha_nmda * x_nmda * (1 - s_gate) : 1 (
 s_nmda_post = w_syn * s_gate : 1 (summed)
 """
 
-# I neurons: LIF. g_hvc (pA) decays with tau_s (spike_to_rate); g_exc (pA) with the
-# model's tau_exc (E->I, AMPA; 1 ms when the model has 0, as for g_inh).
+# I neurons: LIF. g_hvc (nS) decays with tau_s (spike_to_rate); g_exc (nS) with the
+# model's tau_exc (E->I, AMPA; 1 ms when the model has 0, as for g_inh). Both are AMPA.
 _EQS_VEN_I = """
-dv/dt     = (-(v - e_l_ven) + (i_drive_i_ven + g_hvc + g_exc) / g_l_i_ven) / tau_i_ven{noise} : 1 (unless refractory)
+dv/dt     = (g_l_i_ven * (e_l_ven - v) + (g_hvc + g_exc) * (e_ampa_ven - v) + i_drive_i_ven) / c_i_ven / ms_ven{noise} : 1 (unless refractory)
 dg_hvc/dt = -g_hvc / tau_s_ven : 1
 dg_exc/dt = -g_exc / tau_exc_ven : 1
 """
@@ -108,14 +110,14 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
 
     Noise: VocalErrorNet adds ``noise_e_pa`` per 1 ms step, so the SDE sigma is always
     calibrated to dt = 1 ms regardless of Brian2's defaultclock.dt:
-    sigma = (noise / g_L) * sqrt(1 ms) / tau. Calibrating to the Brian2 dt instead would give
+    sigma = noise * sqrt(1 ms) / C. Calibrating to the Brian2 dt instead would give
     10x smaller variance at dt = 0.1 ms and suppress the noise-driven crossings.
     """
     DT_NUMPY_S = 1e-3   # VocalErrorNet reference timestep (1 ms)
-    # The numpy model adds noise_e_pa of current per 1 ms step, i.e. noise_e_pa / g_L mV
-    # of input-referred drive; the SDE sigma (mV / sqrt(s)) is calibrated to that step.
-    sigma_e = (w["noise_e_pa"] / w["g_l_e"]) * float(np.sqrt(DT_NUMPY_S)) / (w["tau_e"] * 1e-3)
-    sigma_i = (w["noise_i_pa"] / w["g_l_i"]) * float(np.sqrt(DT_NUMPY_S)) / (w["tau_i"] * 1e-3)
+    # The numpy model adds noise_e_pa of current per 1 ms step, moving V by about
+    # noise_e_pa * 1 ms / C; the SDE sigma (mV / sqrt(s)) is calibrated to that step.
+    sigma_e = w["noise_e_pa"] / w["c_e_pf"] * float(np.sqrt(DT_NUMPY_S)) / 1e-3
+    sigma_i = w["noise_i_pa"] / w["c_i_pf"] * float(np.sqrt(DT_NUMPY_S)) / 1e-3
     refractory = w["t_refr_ms"] * ms
 
     nmda = float(w.get("g_nmda_mean_ns", 0.0)) > 0.0
@@ -128,7 +130,10 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
         reset="v = v_reset_ven; w_sfa += a_sfa_ven",
         refractory=refractory,
         namespace={
-            "tau_e_ven":     w["tau_e"] * ms,
+            "ms_ven":        1.0 * ms,
+            "c_e_ven":       w["c_e_pf"],
+            "e_ampa_ven":    w["e_ampa_mv"],
+            "e_gaba_ven":    w["e_gaba_mv"],
             "tau_s_ven":     w["tau_s"] * ms,
             "tau_inh_ven":   _syn_tau(w.get("tau_inh", 0.0)) * ms,
             "tau_sfa_ven":   w["tau_sfa"] * ms,
@@ -153,7 +158,9 @@ def build_ven_groups(w: dict, name_prefix: str = "ven") -> dict:
         reset="v = v_reset_ven",
         refractory=refractory,
         namespace={
-            "tau_i_ven":     w["tau_i"] * ms,
+            "ms_ven":        1.0 * ms,
+            "c_i_ven":       w["c_i_pf"],
+            "e_ampa_ven":    w["e_ampa_mv"],
             "tau_s_ven":     w["tau_s"] * ms,
             "tau_exc_ven":   _syn_tau(w.get("tau_exc", 0.0)) * ms,
             "i_drive_i_ven": w["i_drive_i_pa"],

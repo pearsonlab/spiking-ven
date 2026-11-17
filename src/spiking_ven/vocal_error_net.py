@@ -16,13 +16,13 @@ Only JIE learns, by causal STDP, during ``fit()``. Everything else is fixed.
 
 :class:`VocalErrorNet` defaults to the shipped operating point in
 :mod:`spiking_ven.constants`, so ``VocalErrorNet(n_aud=encoder.n_channels)`` builds the
-network the published model was trained as. :class:`VocalErrorNetV2` is the earlier
-name, kept with its earlier (non-operating-point) defaults so existing callers behave as
-before; new code should use :class:`VocalErrorNet`.
+network the published model was trained as.
+
+Synapses are conductances (AMPA, NMDA, GABA_A) acting through their reversal
+potentials; see ``docs/MODEL.md``.
 """
 
 import json
-from typing import Any
 
 import numpy as np
 from numpy.random import default_rng
@@ -33,18 +33,14 @@ from .common import (
     _lognormal_sparse,
     generate_hvc_bursts,  # re-exported for convenience
     spike_to_rate,        # re-exported for convenience
-    uniform_scalar,
 )
 
-__all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_bursts", "spike_to_rate",
+__all__ = ["VocalErrorNet", "generate_hvc_bursts", "spike_to_rate",
            "nmda_gating", "mg_block", "stdp_audio_gate"]
 
 #: NMDA parameters a model file stores.
 _NMDA_KEYS = ("g_nmda_mean_ns", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
               "e_nmda_mv")
-#: The same, as the earlier dimensionless format stored them.
-_LEGACY_NMDA_KEYS = ("g_nmda", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
-                     "e_nmda_mv")
 
 
 # ---------------------------------------------------------------------------
@@ -105,9 +101,22 @@ def mg_block(v_mv, mg_mm=C.MG_MM):
 # simulation loop
 # ---------------------------------------------------------------------------
 
+def _step(V, g_l, c, e_l, g_syn_e, I_ext):
+    """Exponential-Euler membrane step over 1 ms, conductances held for the step.
+
+    ``C dV/dt = -g_L (V - E_L) - sum_k g_k (V - E_k) + I_ext``: V relaxes toward
+    ``V_inf = (g_L E_L + sum g_k E_k + I_ext) / g_tot`` with time constant ``C / g_tot``.
+    Exact for constant conductances, and stable however large they get. ``g_syn_e`` is a
+    list of (conductance, reversal) pairs, each conductance one value per cell.
+    """
+    g_tot = g_l + sum(g for g, _ in g_syn_e)
+    v_inf = (g_l * e_l + sum(g * e for g, e in g_syn_e) + I_ext) / g_tot
+    return v_inf + (V - v_inf) * np.exp(-g_tot / c)
+
+
 def _simulate(
     h_aud, h_hvc, B, B_hvc, JEI, JIE,
-    decay_e, decay_i, g_l_e, g_l_i, e_l, v_th, v_reset,
+    c_e, c_i, g_l_e, g_l_i, e_l, v_th, v_reset, e_ampa, e_gaba,
     i_drive_e, i_drive_i, noise_e, noise_i, t_refr_ms, a_sfa, tau_sfa,
     A_jie, J_max_ie, xi_th,
     learn_weights, alpha_stdp, rng,
@@ -120,10 +129,10 @@ def _simulate(
     decay_inh: float = 0.0,
     decay_exc: float = 0.0,
 ):
-    # Potentials in mV, currents in pA, conductances in nS. Every weight matrix here is
-    # the synaptic current (pA) per unit of its trace, i.e. the peak EPSC/IPSC per spike;
-    # ``G_nmda`` is the NMDA conductance (nS) per connection. ``nmda`` is (e_nmda_mv, mg_mm). Membrane noise comes from the caller's seeded
-    # generator, never the global np.random.
+    # Potentials in mV, currents in pA, conductances in nS, capacitances in pF (nS / pF =
+    # 1 / ms). Every weight matrix is a peak conductance (nS) per unit of its trace;
+    # ``G_nmda`` likewise. ``nmda`` is (e_nmda_mv, mg_mm). Membrane noise comes from the
+    # caller's seeded generator, never the global np.random.
     n_e = B.shape[0]
     n_i = JEI.shape[0]
     T   = h_aud.shape[1]
@@ -134,8 +143,8 @@ def _simulate(
     sI_prev = np.zeros(n_i)
     x_i     = np.zeros(n_i)
     # Recurrent synaptic traces, one per presynaptic cell: each spike adds 1, which
-    # decays with tau_inh (I->E, GABA_A) or tau_exc (E->I, AMPA). A decay of 0 is the
-    # former instantaneous coupling: the previous step's spikes only.
+    # decays with tau_inh (I->E, GABA_A) or tau_exc (E->I, AMPA). A decay of 0 is a
+    # one-step pulse: the previous step's spikes only.
     g_inh   = np.zeros(n_i)
     g_exc   = np.zeros(n_e)
 
@@ -163,16 +172,17 @@ def _simulate(
         h_aud_t = h_aud[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
         h_hvc_t = h_hvc[:, t - hvc_delay_ms] if t >= hvc_delay_ms else _zero_hvc
 
-        # --- E dynamics (currents in pA) ---
+        # --- E dynamics: conductances (nS) through their reversals, currents (pA) ---
         g_inh = decay_inh * g_inh + sI_prev
-        I_e = i_drive_e + B @ h_aud_t - JIE @ g_inh
+        syn_e = [(B @ h_aud_t, e_ampa), (JIE @ g_inh, e_gaba)]
         if G_nmda is not None:
-            # NMDA conductance (nS) through the same connections, Mg2+-blocked at the
-            # membrane potential: nS x mV = pA.
+            # NMDA conductance through the same connections, Mg2+-blocked at the
+            # membrane potential of the previous step.
             assert s_nmda is not None and nmda is not None, "G_nmda needs s_nmda, nmda"
             e_nmda, mg_mm = nmda
             s_t = s_nmda[:, t - aud_delay_ms] if t >= aud_delay_ms else _zero_aud
-            I_e = I_e + (G_nmda @ s_t) * mg_block(V_e, mg_mm) * (e_nmda - V_e)
+            syn_e.append(((G_nmda @ s_t) * mg_block(V_e, mg_mm), e_nmda))
+        I_e = np.full(n_e, float(i_drive_e))
         if a_sfa > 0.0:
             w_sfa *= decay_sfa
             I_e = I_e - w_sfa
@@ -182,7 +192,7 @@ def _simulate(
         # may fire again 2 ms later, not 3.
         if t_refr_ms > 0.0:
             refr_e = np.maximum(refr_e - 1.0, 0.0)
-        V_e = e_l + decay_e * (V_e - e_l) + (1.0 - decay_e) * I_e / g_l_e
+        V_e = _step(V_e, g_l_e, c_e, e_l, syn_e, I_e)
         if t_refr_ms > 0.0:
             V_e[refr_e > 0.0] = v_reset       # clamped while refractory, as in a LIF
         sE  = ((V_e > v_th) & (refr_e <= 0.0)).astype(np.float64)
@@ -193,14 +203,15 @@ def _simulate(
             w_sfa += a_sfa * sE
         sE_mat[:, t] = sE
 
-        # --- I dynamics (currents in pA) ---
+        # --- I dynamics ---
         g_exc = decay_exc * g_exc + sE_prev
-        I_i = i_drive_i + JEI @ g_exc + B_hvc @ h_hvc_t
+        syn_i = [(JEI @ g_exc + B_hvc @ h_hvc_t, e_ampa)]
+        I_i = np.full(n_i, float(i_drive_i))
         if noise_i > 0.0:
             I_i += rng.normal(0.0, noise_i, n_i)
         if t_refr_ms > 0.0:
             refr_i = np.maximum(refr_i - 1.0, 0.0)
-        V_i = e_l + decay_i * (V_i - e_l) + (1.0 - decay_i) * I_i / g_l_i
+        V_i = _step(V_i, g_l_i, c_i, e_l, syn_i, I_i)
         if t_refr_ms > 0.0:
             V_i[refr_i > 0.0] = v_reset
         sI  = ((V_i > v_th) & (refr_i <= 0.0)).astype(np.float64)
@@ -236,17 +247,19 @@ def _simulate(
 #: Scalar parameters a model file stores, all floats (units in the class docstring).
 _FLOAT_KEYS = (
     "tau_e", "tau_i", "tau_s", "tau_inh", "tau_exc", "tau_stdp", "tau_sfa",
-    "e_l_mv", "v_th_mv", "v_reset_mv", "c_e_pf", "c_i_pf",
+    "e_l_mv", "v_th_mv", "v_reset_mv", "c_e_pf", "c_i_pf", "e_ampa_mv", "e_gaba_mv",
     "i_drive_e_pa", "i_drive_i_pa", "noise_e_pa", "noise_i_pa", "a_sfa_pa",
-    "c_B", "b_aud_mean_mv", "b_aud_sd_mv", "c_hvc", "b_hvc_mean_mv", "b_hvc_sd_mv",
-    "c_JEI", "j_ei_mean_mv", "j_ei_sd_mv", "j_max_ie_mv", "a_jie_mv", "r_i_th",
+    "c_B", "b_aud_mean_ns", "b_aud_sd_ns", "c_hvc", "b_hvc_mean_ns", "b_hvc_sd_ns",
+    "c_JEI", "j_ei_mean_ns", "j_ei_sd_ns", "j_max_ie_ns", "a_jie_ns", "r_i_th",
     "t_refr_ms",
 ) + _NMDA_KEYS
 _INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "aud_delay_ms", "hvc_delay_ms")
 _ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE")
 
-#: Marks a file in these units. Files without it are the earlier dimensionless format.
-UNITS = "mV-pA"
+#: Marks a file in these units with conductance synapses. Files with another marker, or
+#: none, used current-based synapses and cannot be run by this version.
+UNITS = "mV-pA-nS"
+_LAST_CURRENT_BASED = "50f5304"
 
 
 class VocalErrorNet:
@@ -256,32 +269,35 @@ class VocalErrorNet:
     I→E (JIE) strengthens when I precedes E (causal window only), implementing
     song-matched inhibition that cancels trained auditory patterns.
 
-    Units: ms, mV, pA, pF, Hz. The membrane is ``C dV/dt = -g_L (V - E_L) + I`` with
-    ``g_L = C / tau`` (see :mod:`spiking_ven.units`). Weight matrices ``B``, ``B_hvc``,
-    ``JEI`` and ``JIE`` are stored as the peak PSP (mV) one presynaptic spike produces at
-    rest; the simulation turns them into synaptic currents (pA).
+    Units: ms, mV, pA, nS, pF, Hz. The membrane is
+    ``C dV/dt = -g_L (V - E_L) - sum_k g_k (V - E_k) + I`` with ``g_L = C / tau``: every
+    synapse is a conductance acting through its reversal potential (AMPA and NMDA at
+    ``e_ampa_mv`` / ``e_nmda_mv``, GABA_A at ``e_gaba_mv``), and ``I`` holds the tonic drive,
+    adaptation and noise currents. Weight matrices ``B``, ``B_hvc``, ``JEI`` and ``JIE`` are
+    the peak conductance (nS) one presynaptic spike opens.
 
     Parameters
     ----------
     n_e, n_i, n_hvc, n_aud : population sizes. ``n_aud`` has no default: it must equal
                    the encoder's ``n_channels``.
-    tau_e, tau_i : membrane time constants (ms)
+    tau_e, tau_i : membrane time constants (ms), at rest (leak only)
     tau_s        : aud->E and HVC->I synaptic decay (ms), AMPA. It plays no part in
                    learning: ``tau_stdp`` sets both the I trace and the audio gate.
-    tau_inh      : I->E synaptic decay (ms), GABA_A; 0 = instantaneous (one-step pulse)
-    tau_exc      : E->I synaptic decay (ms), AMPA; 0 = instantaneous
+    tau_inh      : I->E synaptic decay (ms), GABA_A; 0 = a one-step pulse
+    tau_exc      : E->I synaptic decay (ms), AMPA; 0 = a one-step pulse
     e_l_mv, v_th_mv, v_reset_mv : rest, threshold and reset (mV), shared by E and I
     c_e_pf, c_i_pf : membrane capacitances (pF)
+    e_ampa_mv, e_gaba_mv : AMPA and GABA_A reversal potentials (mV)
     target_rate_hz : rate (Hz) the tonic drive alone fires E at; sets ``i_drive_e_pa``
     i_drive_e_pa : tonic E current (pA); ``None`` derives it from ``target_rate_hz``
     i_drive_i_pa : tonic I current (pA)
     noise_e_pa, noise_i_pa : SD (pA) of the Gaussian current noise added every 1 ms step
-    c_B, b_aud_mean_mv, b_aud_sd_mv : aud->E connection probability and log-normal weight
-                   mean and SD (peak EPSP, mV)
-    c_hvc, b_hvc_mean_mv, b_hvc_sd_mv : the same for HVC->I
-    c_JEI, j_ei_mean_mv, j_ei_sd_mv : the same for E->I (fixed)
-    j_max_ie_mv  : upper bound on each I->E weight (peak IPSP, mV)
-    a_jie_mv     : STDP step (peak IPSP, mV); ``None`` is ``constants.a_jie_for(tau_stdp)``
+    c_B, b_aud_mean_ns, b_aud_sd_ns : aud->E connection probability and log-normal peak
+                   conductance mean and SD (nS)
+    c_hvc, b_hvc_mean_ns, b_hvc_sd_ns : the same for HVC->I
+    c_JEI, j_ei_mean_ns, j_ei_sd_ns : the same for E->I (fixed)
+    j_max_ie_ns  : upper bound on each I->E peak conductance (nS)
+    a_jie_ns     : STDP step (nS); ``None`` is ``constants.a_jie_for(tau_stdp)``
     r_i_th       : I rate (Hz) the STDP trace is debiased against; x_i below it -> LTD
     tau_stdp     : STDP window (ms), > 0: the I trace's time constant and the audio
                    gate's width
@@ -317,22 +333,24 @@ class VocalErrorNet:
         v_reset_mv: float = C.V_RESET_MV,
         c_e_pf: float = C.C_E_PF,
         c_i_pf: float = C.C_I_PF,
+        e_ampa_mv: float = C.E_AMPA_MV,
+        e_gaba_mv: float = C.E_GABA_MV,
         target_rate_hz: float = C.TARGET_RATE_E_HZ,
         i_drive_e_pa: float | None = None,
         i_drive_i_pa: float = C.I_DRIVE_I_PA,
         noise_e_pa: float = C.NOISE_E_PA,
         noise_i_pa: float = C.NOISE_I_PA,
         c_B: float = C.C_B,
-        b_aud_mean_mv: float = C.B_AUD_MEAN_MV,
-        b_aud_sd_mv: float = C.B_AUD_SD_MV,
+        b_aud_mean_ns: float = C.B_AUD_MEAN_NS,
+        b_aud_sd_ns: float = C.B_AUD_SD_NS,
         c_hvc: float = C.C_HVC,
-        b_hvc_mean_mv: float = C.B_HVC_MEAN_MV,
-        b_hvc_sd_mv: float = C.B_HVC_SD_MV,
+        b_hvc_mean_ns: float = C.B_HVC_MEAN_NS,
+        b_hvc_sd_ns: float = C.B_HVC_SD_NS,
         c_JEI: float = C.C_JEI,
-        j_ei_mean_mv: float = C.J_EI_MEAN_MV,
-        j_ei_sd_mv: float = C.J_EI_SD_MV,
-        j_max_ie_mv: float = C.J_MAX_IE_MV,
-        a_jie_mv: float | None = None,
+        j_ei_mean_ns: float = C.J_EI_MEAN_NS,
+        j_ei_sd_ns: float = C.J_EI_SD_NS,
+        j_max_ie_ns: float = C.J_MAX_IE_NS,
+        a_jie_ns: float | None = None,
         r_i_th: float = C.R_I_TH,
         tau_stdp: float = C.TAU_STDP,
         t_refr_ms: float = C.T_REFR_MS,
@@ -363,17 +381,18 @@ class VocalErrorNet:
         self.tau_inh, self.tau_exc = float(tau_inh), float(tau_exc)
         self.e_l_mv, self.v_th_mv, self.v_reset_mv = float(e_l_mv), float(v_th_mv), float(v_reset_mv)
         self.c_e_pf, self.c_i_pf = float(c_e_pf), float(c_i_pf)
+        self.e_ampa_mv, self.e_gaba_mv = float(e_ampa_mv), float(e_gaba_mv)
         self.i_drive_e_pa = float(
             i_drive_e_pa if i_drive_e_pa is not None else
             U.tonic_drive_pa(target_rate_hz, self.tau_e, self.g_l_e,
                              self.e_l_mv, self.v_th_mv, self.v_reset_mv))
         self.i_drive_i_pa = float(i_drive_i_pa)
         self.noise_e_pa, self.noise_i_pa = float(noise_e_pa), float(noise_i_pa)
-        self.c_B, self.b_aud_mean_mv, self.b_aud_sd_mv = float(c_B), float(b_aud_mean_mv), float(b_aud_sd_mv)
-        self.c_hvc, self.b_hvc_mean_mv, self.b_hvc_sd_mv = float(c_hvc), float(b_hvc_mean_mv), float(b_hvc_sd_mv)
-        self.c_JEI, self.j_ei_mean_mv, self.j_ei_sd_mv = float(c_JEI), float(j_ei_mean_mv), float(j_ei_sd_mv)
-        self.j_max_ie_mv = float(j_max_ie_mv)
-        self.a_jie_mv = float(C.a_jie_for(tau_stdp) if a_jie_mv is None else a_jie_mv)
+        self.c_B, self.b_aud_mean_ns, self.b_aud_sd_ns = float(c_B), float(b_aud_mean_ns), float(b_aud_sd_ns)
+        self.c_hvc, self.b_hvc_mean_ns, self.b_hvc_sd_ns = float(c_hvc), float(b_hvc_mean_ns), float(b_hvc_sd_ns)
+        self.c_JEI, self.j_ei_mean_ns, self.j_ei_sd_ns = float(c_JEI), float(j_ei_mean_ns), float(j_ei_sd_ns)
+        self.j_max_ie_ns = float(j_max_ie_ns)
+        self.a_jie_ns = float(C.a_jie_for(tau_stdp) if a_jie_ns is None else a_jie_ns)
         self.r_i_th = float(r_i_th)
         self.tau_stdp = float(tau_stdp)
         #: Absolute refractory period (ms). 2 ms is the standard cortical value and caps
@@ -389,15 +408,13 @@ class VocalErrorNet:
         self.mg_mm          = float(mg_mm)
         self.e_nmda_mv      = float(e_nmda_mv)
         self.stimulus: dict = {}
-        #: Which STDP audio gate this network learns with. "window" is
-        #: :func:`stdp_audio_gate`; models saved before it load as "drive" (the old
-        #: ``B @ h_aud > 0``) and can be evaluated but not trained further.
+        #: Which STDP audio gate this network learns with; see :func:`stdp_audio_gate`.
         self.stdp_gate: str = STDP_GATE
 
-        # Fixed weights: sparse log-normal, peak PSP (mV), drawn in this order.
-        self.B = _lognormal_sparse((n_e, n_aud), c_B, b_aud_mean_mv, b_aud_sd_mv, rng)
-        self.B_hvc = _lognormal_sparse((n_i, n_hvc), c_hvc, b_hvc_mean_mv, b_hvc_sd_mv, rng)
-        self.JEI = _lognormal_sparse((n_i, n_e), c_JEI, j_ei_mean_mv, j_ei_sd_mv, rng)
+        # Fixed weights: sparse log-normal peak conductances (nS), drawn in this order.
+        self.B = _lognormal_sparse((n_e, n_aud), c_B, b_aud_mean_ns, b_aud_sd_ns, rng)
+        self.B_hvc = _lognormal_sparse((n_i, n_hvc), c_hvc, b_hvc_mean_ns, b_hvc_sd_ns, rng)
+        self.JEI = _lognormal_sparse((n_i, n_e), c_JEI, j_ei_mean_ns, j_ei_sd_ns, rng)
 
         # I→E: zero-initialised. Starting from zero means only song-driven E neurons ever
         # get trained (via STDP in fit()), leaving novel-E rows at zero.
@@ -417,27 +434,13 @@ class VocalErrorNet:
         """I leak conductance (nS)."""
         return U.leak_conductance(self.c_i_pf, self.tau_i)
 
-    def synaptic_currents(self) -> dict[str, np.ndarray]:
-        """Each weight matrix as the synaptic current (pA) one spike produces at its peak."""
-        f = self._current_factors()
-        return {k: np.asarray(getattr(self, k), dtype=np.float64) * f[k] for k in _ARRAY_KEYS}
-
     def nmda_conductances(self) -> np.ndarray:
         """Peak NMDA conductance (nS) per aud->E connection: ``B`` rescaled so its mean is
         ``g_nmda_mean_ns`` (at full gating, before the Mg2+ block)."""
         B = np.asarray(self.B, dtype=np.float64)
-        if self.g_nmda_mean_ns <= 0.0 or self.b_aud_mean_mv <= 0.0:
+        if self.g_nmda_mean_ns <= 0.0 or self.b_aud_mean_ns <= 0.0:
             return np.zeros_like(B)
-        return B * (self.g_nmda_mean_ns / self.b_aud_mean_mv)
-
-    def _current_factors(self) -> dict[str, float]:
-        """pA of peak synaptic current per mV of peak PSP, per connection."""
-        return {
-            "B": U.current_per_psp(self.tau_s, self.tau_e, self.g_l_e),
-            "B_hvc": U.current_per_psp(self.tau_s, self.tau_i, self.g_l_i),
-            "JEI": U.current_per_psp(self.tau_exc, self.tau_i, self.g_l_i),
-            "JIE": U.current_per_psp(self.tau_inh, self.tau_e, self.g_l_e),
-        }
+        return B * (self.g_nmda_mean_ns / self.b_aud_mean_ns)
 
     # ------------------------------------------------------------------
     # public API
@@ -501,23 +504,21 @@ class VocalErrorNet:
 
     @classmethod
     def load(cls, path: str, seed: int | None = None) -> "VocalErrorNet":
-        """Load a model written by :meth:`save`, or by the earlier dimensionless format.
+        """Load a model written by :meth:`save`.
 
-        Raises ``ValueError`` naming every missing key. A file without the ``units`` marker
-        is the earlier dimensionless format, converted on load (:func:`_load_legacy`) so
-        it keeps the dynamics it was trained with; one whose NMDA is the relative
-        ``g_nmda`` is converted to the conductance ``g_nmda_mean_ns`` the same way. ``seed`` seeds the simulation noise.
+        Raises ``ValueError`` naming every missing key, or for a model with current-based
+        synapses (any earlier format), which this version cannot run: use spiking-ven at
+        commit ``50f5304`` or earlier for those, or retrain. ``seed`` seeds the
+        simulation noise.
         """
         d = np.load(path)
-        if "units" not in d:
-            return _load_legacy(cls, d, path, seed)
-        if str(d["units"]) != UNITS:
-            raise ValueError(f"{path}: unknown units {str(d['units'])!r}")
-        # Files from before NMDA was a conductance stored ``g_nmda``: the NMDA current at
-        # full gating, at rest and unblocked, relative to the fast EPSC.
-        relative_nmda = "g_nmda_mean_ns" not in d and "g_nmda" in d
-        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
-                   if k not in d and not (relative_nmda and k == "g_nmda_mean_ns")]
+        units = str(d["units"]) if "units" in d else "dimensionless"
+        if units != UNITS:
+            raise ValueError(
+                f"{path}: a model with current-based synapses ({units!r}); this version "
+                f"has conductance synapses and cannot run it. Retrain, or use spiking-ven "
+                f"at commit {_LAST_CURRENT_BASED} or earlier.")
+        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS if k not in d]
         if missing:
             raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
                              f"{', '.join(missing)}")
@@ -526,14 +527,7 @@ class VocalErrorNet:
         for k in _INT_KEYS:
             setattr(obj, k, int(d[k]))
         for k in _FLOAT_KEYS:
-            if k != "g_nmda_mean_ns" or not relative_nmda:
-                setattr(obj, k, float(d[k]))
-        if relative_nmda:
-            # I = g (B_pA s) mg (E - V) / (E - E_L)  ==  (G_nS s) mg (E - V), so the mean
-            # conductance is g x (pA per mV of EPSP) x mean EPSP / (E_NMDA - E_L).
-            obj.g_nmda_mean_ns = float(
-                float(d["g_nmda"]) * obj._current_factors()["B"] * obj.b_aud_mean_mv
-                / (obj.e_nmda_mv - obj.e_l_mv))
+            setattr(obj, k, float(d[k]))
         for k in _ARRAY_KEYS:
             setattr(obj, k, d[k])
         obj.stimulus = json.loads(str(d["stimulus_json"])) if "stimulus_json" in d else {}
@@ -543,15 +537,13 @@ class VocalErrorNet:
     def to_brian_weights(self) -> dict:
         """Everything :mod:`spiking_ven.brian2_runtime` needs to run this network.
 
-        Weight matrices (float64, post x pre) as synaptic currents (pA per spike, at the
-        peak), the NMDA conductances (nS, ``G_nmda``), and every scalar the dynamics
-        use -- potentials (mV), leak conductances
-        (nS), drives, noise and adaptation (pA), time constants, the refractory period and
-        the conduction delays, without which the Brian2 network would not be the one that
-        was trained.
+        Weight matrices (float64, post x pre) as peak conductances (nS), the NMDA
+        conductances (nS, ``G_nmda``), and every scalar the dynamics use -- potentials
+        and reversals (mV), capacitances (pF), leak conductances (nS), drives, noise and
+        adaptation (pA), time constants, the refractory period and the conduction delays.
         """
         return {
-            **self.synaptic_currents(),
+            **{k: np.asarray(getattr(self, k), dtype=np.float64) for k in _ARRAY_KEYS},
             "G_nmda": self.nmda_conductances(),
             **{k: float(getattr(self, k)) for k in _FLOAT_KEYS},
             "g_l_e": self.g_l_e,
@@ -576,10 +568,6 @@ class VocalErrorNet:
         rng: np.random.Generator | None = None,
         hvc_prelude: np.ndarray | None = None,
     ):
-        if learn_weights and self.stdp_gate != STDP_GATE:
-            raise ValueError(
-                f"this model was trained with the {self.stdp_gate!r} STDP gate, which no "
-                f"longer exists; retrain it from scratch (the gate is now {STDP_GATE!r})")
         n_pre = 0 if hvc_prelude is None else int(np.asarray(hvc_prelude).shape[1])
         if n_pre:
             hvc_spikes = np.concatenate(
@@ -587,13 +575,11 @@ class VocalErrorNet:
             aud_spikes = np.concatenate(
                 [np.zeros((aud_spikes.shape[0], n_pre), dtype=np.float32),
                  np.asarray(aud_spikes)], axis=1)
-        dt      = 1.0
-        decay_e = float(np.exp(-dt / self.tau_e))
-        decay_i = float(np.exp(-dt / self.tau_i))
+        dt = 1.0
         # The STDP trace decays at tau_stdp; xi_th is calibrated to the same constant so
         # the I-baseline debiasing stays correct whatever the window.
-        alpha_stdp   = float(np.exp(-dt / self.tau_stdp))
-        xi_th        = float(self.r_i_th * self.tau_stdp * 1e-3)
+        alpha_stdp = float(np.exp(-dt / self.tau_stdp))
+        xi_th      = float(self.r_i_th * self.tau_stdp * 1e-3)
 
         h_hvc = spike_to_rate(hvc_spikes, self.tau_s, dt).astype(np.float64)
         h_aud = spike_to_rate(aud_spikes,  self.tau_s, dt).astype(np.float64)
@@ -602,16 +588,14 @@ class VocalErrorNet:
             s_nmda = nmda_gating(aud_spikes, self.nmda_tau_rise, self.nmda_tau_decay,
                                  self.nmda_alpha, dt)
 
-        # Learning runs on the I->E current (pA); JIE is stored as peak IPSP (mV).
-        f = self._current_factors()
-        cur = self.synaptic_currents()
-        sE_mat, sI_mat, JIE_pa = _simulate(
-            h_aud, h_hvc, cur["B"], cur["B_hvc"], cur["JEI"], cur["JIE"],
-            decay_e, decay_i, self.g_l_e, self.g_l_i,
-            self.e_l_mv, self.v_th_mv, self.v_reset_mv,
+        sE_mat, sI_mat, JIE = _simulate(
+            h_aud, h_hvc,
+            *(np.asarray(getattr(self, k), dtype=np.float64) for k in _ARRAY_KEYS),
+            self.c_e_pf, self.c_i_pf, self.g_l_e, self.g_l_i,
+            self.e_l_mv, self.v_th_mv, self.v_reset_mv, self.e_ampa_mv, self.e_gaba_mv,
             self.i_drive_e_pa, self.i_drive_i_pa, self.noise_e_pa, self.noise_i_pa,
             self.t_refr_ms, self.a_sfa_pa, self.tau_sfa,
-            self.a_jie_mv * f["JIE"], self.j_max_ie_mv * f["JIE"], xi_th,
+            self.a_jie_ns, self.j_max_ie_ns, xi_th,
             learn_weights, alpha_stdp, self._sim_rng if rng is None else rng,
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
@@ -624,163 +608,5 @@ class VocalErrorNet:
         )
 
         if learn_weights:
-            self.JIE = (JIE_pa / f["JIE"]).astype(np.float32)
+            self.JIE = JIE.astype(np.float32)
         return sE_mat[:, n_pre:], sI_mat[:, n_pre:]
-
-
-# ---------------------------------------------------------------------------
-# the earlier dimensionless format
-# ---------------------------------------------------------------------------
-
-#: Keys of the earlier dimensionless file format, and the defaults of keys added to it
-#: later: each default switches its feature off, so such a model reloads with the
-#: dynamics it was trained with. ``tau_stdp`` is not listed: a file without it (or with
-#: 0, the former "reuse the synaptic window") loads it as its own ``tau_s``.
-LEGACY_REQUIRED_KEYS = (
-    "n_e", "n_i", "n_hvc", "n_aud",
-    "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie", "c_B", "c_hvc", "c_JEI", "r_i_th",
-    "drive_e", "drive_i", "noise_e", "noise_i", "theta_e", "theta_i",
-    "B", "B_hvc", "JEI", "JIE",
-)
-LEGACY_OPTIONAL_DEFAULTS: dict[str, Any] = {
-    "t_refr_ms": 0.0,
-    "a_sfa": 0.0,
-    "tau_sfa": 0.0,
-    "tau_inh": 0.0,
-    "tau_exc": 0.0,
-    "aud_delay_ms": 0,
-    "hvc_delay_ms": 0,
-    "g_nmda": 0.0,
-    "nmda_tau_rise": C.NMDA_TAU_RISE,
-    "nmda_tau_decay": C.NMDA_TAU_DECAY,
-    "nmda_alpha": C.NMDA_ALPHA,
-    "mg_mm": C.MG_MM,
-    "e_nmda_mv": C.E_NMDA_MV,
-    "e_l_mv": C.E_L_MV,
-    "v_th_mv": C.V_TH_MV,
-    "stimulus_json": {},
-    "stdp_gate": "drive",
-}
-
-
-def _load_legacy(cls, d, path, seed):
-    """A dimensionless model file, converted to mV / pA (:func:`units.from_dimensionless`).
-
-    Weight statistics (mean / SD) are not stored in that format; they are recorded as
-    the converted matrices' own nonzero mean and SD.
-    """
-    missing = [k for k in LEGACY_REQUIRED_KEYS if k not in d]
-    if missing:
-        raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
-                         f"{', '.join(missing)}")
-    opt = LEGACY_OPTIONAL_DEFAULTS
-    p = {k: uniform_scalar(d[k], k) for k in LEGACY_REQUIRED_KEYS
-         if k not in ("n_e", "n_i", "n_hvc", "n_aud", "B", "B_hvc", "JEI", "JIE")}
-    for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_inh", "tau_exc") + _LEGACY_NMDA_KEYS + (
-            "e_l_mv", "v_th_mv"):
-        p[k] = float(d[k]) if k in d else opt[k]
-    saved_stdp = float(d["tau_stdp"]) if "tau_stdp" in d else 0.0
-    p["tau_stdp"] = saved_stdp if saved_stdp > 0.0 else p["tau_s"]
-    new = U.from_dimensionless(p, C.C_E_PF, C.C_I_PF)
-    wf = new.pop("w_factor")
-    nmda_ns_per_mv = new.pop("nmda_ns_per_mv")
-
-    obj = cls.__new__(cls)
-    obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
-    for k in ("n_e", "n_i", "n_hvc", "n_aud"):
-        setattr(obj, k, int(d[k]))
-    for k in ("aud_delay_ms", "hvc_delay_ms"):
-        setattr(obj, k, int(d[k]) if k in d else opt[k])
-    for k in ("tau_e", "tau_i", "tau_s", "tau_inh", "tau_exc", "tau_stdp", "tau_sfa",
-              "r_i_th", "t_refr_ms", "c_B", "c_hvc", "c_JEI", "nmda_tau_rise",
-              "nmda_tau_decay", "nmda_alpha", "mg_mm", "e_nmda_mv"):
-        setattr(obj, k, float(p[k]))
-    for k, v in new.items():
-        setattr(obj, k, float(v))
-    for k in _ARRAY_KEYS:
-        setattr(obj, k, (np.asarray(d[k], dtype=np.float64) * wf[k]).astype(np.float32))
-    for k, (mk, sk) in {"B": ("b_aud_mean_mv", "b_aud_sd_mv"),
-                        "B_hvc": ("b_hvc_mean_mv", "b_hvc_sd_mv"),
-                        "JEI": ("j_ei_mean_mv", "j_ei_sd_mv")}.items():
-        nz = np.asarray(getattr(obj, k))[np.asarray(getattr(obj, k)) > 0]
-        setattr(obj, mk, float(nz.mean()) if nz.size else 0.0)
-        setattr(obj, sk, float(nz.std()) if nz.size else 0.0)
-    obj.g_nmda_mean_ns = float(nmda_ns_per_mv * obj.b_aud_mean_mv)
-    obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
-                    else dict(opt["stimulus_json"]))
-    obj.stdp_gate = str(d["stdp_gate"]) if "stdp_gate" in d else opt["stdp_gate"]
-    return obj
-
-
-class VocalErrorNetV2(VocalErrorNet):
-    """Earlier name for :class:`VocalErrorNet`, with its earlier dimensionless arguments.
-
-    Takes the parameters the class had before the operating point became its default
-    (no adaptation, no conduction delay, no NMDA, ``n_aud=256``), in the earlier
-    dimensionless units, and converts them (:func:`units.from_dimensionless`): the network
-    behaves as it did, but its attributes are in mV / pA like any other. Kept so code
-    written against it keeps behaving as before. Prefer :class:`VocalErrorNet`.
-    """
-
-    def __init__(
-        self,
-        n_e: int = 600,
-        n_i: int = 150,
-        n_hvc: int = 15,
-        n_aud: int = 256,
-        tau_e: float = 30.0,
-        tau_i: float = 10.0,
-        tau_s: float = 10.0,
-        A_jie: float = 5e-6,
-        J_max_ie: float = 1.0,
-        c_B: float = 0.05,
-        B_scale: float = 5.0,
-        c_hvc: float = 0.3,
-        B_hvc_scale: float = 2.0,
-        c_JEI: float = 0.5,
-        t_refr_ms: float = 2.0,
-        a_sfa: float = 0.0,
-        tau_sfa: float = 100.0,
-        r_i_th: float = 0.0,
-        drive_e: float = 0.155,
-        drive_i: float = 0.058,
-        noise_e: float = 0.1,
-        noise_i: float = 0.0,
-        target_rate: float = 0.025,
-        target_rate_i: float = 0.05,
-        aud_delay_ms: int = 0,
-        hvc_delay_ms: int = 0,
-        tau_stdp: float = 10.0,     # its tau_s: the window it once reused from it
-        seed: int | None = None,
-    ) -> None:
-        # The earlier thresholds: tonic drive alone fires E at target_rate (per ms); I's
-        # from a fixed reference input target_rate_i * 10.
-        theta_e = max(drive_e * (1.0 - np.exp(-1.0 / tau_e) ** (1.0 / target_rate)), 1e-3)
-        theta_i = max(target_rate_i * 10.0
-                      * (1.0 - np.exp(-1.0 / tau_i) ** (1.0 / target_rate_i)), 1e-3)
-        new = U.from_dimensionless(
-            dict(theta_e=theta_e, theta_i=theta_i, tau_e=tau_e, tau_i=tau_i, tau_s=tau_s,
-                 tau_inh=0.0, tau_exc=0.0, drive_e=drive_e, drive_i=drive_i,
-                 noise_e=noise_e, noise_i=noise_i, a_sfa=a_sfa, A_jie=A_jie,
-                 J_max_ie=J_max_ie, g_nmda=0.0, e_l_mv=C.E_L_MV, v_th_mv=C.V_TH_MV,
-                 e_nmda_mv=C.E_NMDA_MV),
-            C.C_E_PF, C.C_I_PF)
-        wf = new["w_factor"]
-        b = B_scale / n_aud * wf["B"]
-        bh = B_hvc_scale * wf["B_hvc"]
-        je = 0.17 / np.sqrt(n_e * c_JEI) * wf["JEI"]
-        super().__init__(
-            n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, tau_e=tau_e, tau_i=tau_i,
-            tau_s=tau_s, tau_inh=0.0, tau_exc=0.0,
-            e_l_mv=new["e_l_mv"], v_th_mv=new["v_th_mv"], v_reset_mv=new["v_reset_mv"],
-            i_drive_e_pa=new["i_drive_e_pa"], i_drive_i_pa=new["i_drive_i_pa"],
-            noise_e_pa=new["noise_e_pa"], noise_i_pa=new["noise_i_pa"],
-            c_B=c_B, b_aud_mean_mv=b, b_aud_sd_mv=0.5 * b,
-            c_hvc=c_hvc, b_hvc_mean_mv=bh, b_hvc_sd_mv=0.5 * bh,
-            c_JEI=c_JEI, j_ei_mean_mv=je, j_ei_sd_mv=0.1 * je,
-            j_max_ie_mv=new["j_max_ie_mv"], a_jie_mv=new["a_jie_mv"],
-            r_i_th=r_i_th, tau_stdp=tau_stdp, t_refr_ms=t_refr_ms,
-            a_sfa_pa=new["a_sfa_pa"], tau_sfa=tau_sfa,
-            aud_delay_ms=aud_delay_ms, hvc_delay_ms=hvc_delay_ms, g_nmda_mean_ns=0.0,
-            seed=seed,
-        )

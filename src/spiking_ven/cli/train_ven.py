@@ -23,22 +23,24 @@ from ..constants import (
     A_SFA_PA,
     AUD_DELAY_MS,
     AUD_MEAN_RATE_HZ,
-    B_AUD_MEAN_MV,
-    B_AUD_SD_MV,
-    B_HVC_MEAN_MV,
-    B_HVC_SD_MV,
+    B_AUD_MEAN_NS,
+    B_AUD_SD_NS,
+    B_HVC_MEAN_NS,
+    B_HVC_SD_NS,
     C_B,
     C_E_PF,
     C_HVC,
     C_I_PF,
+    E_AMPA_MV,
+    E_GABA_MV,
     E_L_MV,
     G_NMDA_MEAN_NS,
     HVC_DELAY_MS,
     HVC_INTRO,
     I_DRIVE_I_PA,
-    J_EI_MEAN_MV,
-    J_EI_SD_MV,
-    J_MAX_IE_MV,
+    J_EI_MEAN_NS,
+    J_EI_SD_NS,
+    J_MAX_IE_NS,
     N_E,
     N_HVC,
     N_I,
@@ -86,7 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sr", type=int, default=None,
                    help="corpus sample rate (Hz); must match the corpus. "
                         "Default: the corpus's own rate")
-    # tuned operating point (units: ms, mV, pA, pF, Hz; weights are peak PSPs in mV)
+    # tuned operating point (units: ms, mV, pA, nS, pF, Hz; weights are peak
+    # synaptic conductances in nS)
     p.add_argument("--n-rend", type=int, default=N_RENDITIONS)
     p.add_argument("--n-e", type=int, default=N_E)
     p.add_argument("--n-i", type=int, default=N_I)
@@ -96,6 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--v-reset-mv", type=float, default=V_RESET_MV, help="reset (mV)")
     p.add_argument("--c-e-pf", type=float, default=C_E_PF, help="E capacitance (pF)")
     p.add_argument("--c-i-pf", type=float, default=C_I_PF, help="I capacitance (pF)")
+    p.add_argument("--e-ampa-mv", type=float, default=E_AMPA_MV,
+                   help="AMPA reversal potential (mV)")
+    p.add_argument("--e-gaba-mv", type=float, default=E_GABA_MV,
+                   help="GABA_A reversal potential (mV)")
     p.add_argument("--tau-e", type=float, default=TAU_E, help="E membrane time constant (ms)")
     p.add_argument("--tau-s", type=float, default=TAU_S,
                    help="aud->E and HVC->I synaptic decay (ms)")
@@ -108,24 +115,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--noise-i-pa", type=float, default=NOISE_I_PA,
                    help="SD of the I current noise per 1 ms step (pA)")
     p.add_argument("--c-b", type=float, default=C_B)
-    p.add_argument("--b-aud-mean-mv", type=float, default=B_AUD_MEAN_MV,
-                   help="aud->E weight mean (peak EPSP, mV)")
-    p.add_argument("--b-aud-sd-mv", type=float, default=B_AUD_SD_MV,
-                   help="aud->E weight SD (peak EPSP, mV)")
+    p.add_argument("--b-aud-mean-ns", type=float, default=B_AUD_MEAN_NS,
+                   help="aud->E peak conductance mean (nS)")
+    p.add_argument("--b-aud-sd-ns", type=float, default=B_AUD_SD_NS,
+                   help="aud->E peak conductance SD (nS)")
     p.add_argument("--c-hvc", type=float, default=C_HVC)
-    p.add_argument("--b-hvc-mean-mv", type=float, default=B_HVC_MEAN_MV,
-                   help="HVC->I weight mean (peak EPSP, mV)")
-    p.add_argument("--b-hvc-sd-mv", type=float, default=B_HVC_SD_MV,
-                   help="HVC->I weight SD (peak EPSP, mV)")
-    p.add_argument("--j-ei-mean-mv", type=float, default=J_EI_MEAN_MV,
-                   help="E->I weight mean (peak EPSP, mV)")
-    p.add_argument("--j-ei-sd-mv", type=float, default=J_EI_SD_MV,
-                   help="E->I weight SD (peak EPSP, mV)")
+    p.add_argument("--b-hvc-mean-ns", type=float, default=B_HVC_MEAN_NS,
+                   help="HVC->I peak conductance mean (nS)")
+    p.add_argument("--b-hvc-sd-ns", type=float, default=B_HVC_SD_NS,
+                   help="HVC->I peak conductance SD (nS)")
+    p.add_argument("--j-ei-mean-ns", type=float, default=J_EI_MEAN_NS,
+                   help="E->I peak conductance mean (nS)")
+    p.add_argument("--j-ei-sd-ns", type=float, default=J_EI_SD_NS,
+                   help="E->I peak conductance SD (nS)")
     p.add_argument("--r-i-th", type=float, default=R_I_TH)
-    p.add_argument("--j-max-ie-mv", type=float, default=J_MAX_IE_MV,
-                   help="upper bound on each I->E weight (peak IPSP, mV)")
-    p.add_argument("--a-jie-mv", type=float, default=None,
-                   help="STDP step (peak IPSP, mV); default a_jie_for(tau_stdp)")
+    p.add_argument("--j-max-ie-ns", type=float, default=J_MAX_IE_NS,
+                   help="upper bound on each I->E peak conductance (nS)")
+    p.add_argument("--a-jie-ns", type=float, default=None,
+                   help="STDP step (nS); default a_jie_for(tau_stdp)")
     p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
                    help="STDP window (ms), > 0: the I trace and the audio gate. "
                         "Independent of the synaptic tau_s")
@@ -170,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
     # Derived rather than a constant: the per-spike STDP integral goes as
     # A_jie * tau, so the amplitude scales inversely with the kernel width. See
     # constants.a_jie_for for why that formula lives with its inputs.
-    a_jie = (args.a_jie_mv if args.a_jie_mv is not None
+    a_jie = (args.a_jie_ns if args.a_jie_ns is not None
              else a_jie_for(args.tau_stdp))
 
     from ..causal_filters import CausalFilterEncoder
@@ -199,21 +206,22 @@ def main(argv: list[str] | None = None) -> None:
         tau_e=args.tau_e, tau_s=args.tau_s, tau_inh=args.tau_inh, tau_exc=args.tau_exc,
         e_l_mv=args.e_l_mv, v_th_mv=args.v_th_mv, v_reset_mv=args.v_reset_mv,
         c_e_pf=args.c_e_pf, c_i_pf=args.c_i_pf,
+        e_ampa_mv=args.e_ampa_mv, e_gaba_mv=args.e_gaba_mv,
         target_rate_hz=args.target_rate_e_hz, i_drive_i_pa=args.i_drive_i_pa,
         noise_e_pa=args.noise_e_pa, noise_i_pa=args.noise_i_pa,
-        c_B=args.c_b, b_aud_mean_mv=args.b_aud_mean_mv, b_aud_sd_mv=args.b_aud_sd_mv,
-        c_hvc=args.c_hvc, b_hvc_mean_mv=args.b_hvc_mean_mv, b_hvc_sd_mv=args.b_hvc_sd_mv,
-        j_ei_mean_mv=args.j_ei_mean_mv, j_ei_sd_mv=args.j_ei_sd_mv,
-        j_max_ie_mv=args.j_max_ie_mv, a_jie_mv=a_jie, r_i_th=args.r_i_th,
+        c_B=args.c_b, b_aud_mean_ns=args.b_aud_mean_ns, b_aud_sd_ns=args.b_aud_sd_ns,
+        c_hvc=args.c_hvc, b_hvc_mean_ns=args.b_hvc_mean_ns, b_hvc_sd_ns=args.b_hvc_sd_ns,
+        j_ei_mean_ns=args.j_ei_mean_ns, j_ei_sd_ns=args.j_ei_sd_ns,
+        j_max_ie_ns=args.j_max_ie_ns, a_jie_ns=a_jie, r_i_th=args.r_i_th,
         tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
         g_nmda_mean_ns=args.g_nmda_mean_ns,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,
     )
 
     print(f"\n{'=' * 65}")
-    print(f"  VEN  a_jie={a_jie:.4f} mV  "
+    print(f"  VEN  a_jie={a_jie:.4f} nS  "
           f"tau_s={args.tau_s} ms  tau_stdp={args.tau_stdp:g} ms")
-    print(f"  E drive={ven.i_drive_e_pa:.1f} pA  aud EPSP={args.b_aud_mean_mv} mV  "
+    print(f"  E drive={ven.i_drive_e_pa:.1f} pA  aud g={args.b_aud_mean_ns} nS  "
           f"threshold={ven.v_th_mv} mV")
     print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
           f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
@@ -282,8 +290,8 @@ def main(argv: list[str] | None = None) -> None:
              final_trained_hz=m["trained_hz"], final_reversed_hz=m["reversed_hz"],
              final_reversed_over_trained=m["reversed_over_trained"],
              final_daf_not_singing_hz=m["daf_not_singing_hz"],
-             b_aud_mean_mv=args.b_aud_mean_mv, i_drive_e_pa=ven.i_drive_e_pa,
-             tau_s=args.tau_s, n_rend=args.n_rend, a_jie_mv=a_jie)
+             b_aud_mean_ns=args.b_aud_mean_ns, i_drive_e_pa=ven.i_drive_e_pa,
+             tau_s=args.tau_s, n_rend=args.n_rend, a_jie_ns=a_jie)
     print(f"Saved {traces_path}")
 
 

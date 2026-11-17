@@ -18,7 +18,8 @@ README and `tests/test_reproduction_causal.py` hold the current numbers.
   the figures alike. A trained model also records the settings and input checksums its stimuli
   were built with (`ven.stimulus`), because a figure rendered at a different auditory rate than
   its model was trained at encodes a different stimulus, with nothing to show it.
-- **`VocalErrorNet` defaults are the operating point; `VocalErrorNetV2` keeps the old ones.** The
+- **`VocalErrorNet` defaults are the operating point; `VocalErrorNetV2` kept the old ones** (removed
+  with conductance synapses; it lives at commit `50f5304` and earlier). The
   class's constructor defaults once differed from `constants.py` in 12 places (no adaptation, no
   delay, `n_hvc = 15`, ...). finchsim builds networks from those old defaults in its tests, so the
   old name stays as a subclass with them.
@@ -406,6 +407,60 @@ stated.
   (responders 60.3 -> 61.1%, extra spikes 0.916 -> 0.915, latency 29.0 -> 29.1 ms, duration
   67.6 -> 66.1 ms, reversed/trained 1.115 -> 1.116). Values in the sections above are in the
   earlier dimensionless units.
+
+## Conductance synapses (adopted)
+
+- **AMPA and GABA_A were current-based**: a spike injected a fixed current whatever the membrane
+  potential, while NMDA already had a driving force. Every synapse is now a conductance through its
+  reversal potential: AMPA and NMDA at 0 mV, GABA_A at -70 mV (Wang 2002), so I -> E inhibition is
+  shunting -- no current at rest, a 20 mV driving force at threshold, never below rest. Weights are
+  peak conductances (nS). The membrane is stepped by exponential Euler, exact for conductances held
+  over the step and stable however large they get. This changes the model, so it was recalibrated,
+  and earlier model files (current-based) are refused rather than converted.
+- **Starting point**: each synapse's conductance gave the same peak current as before at -55 mV
+  (AMPA driving force 55 mV, GABA 15 mV): auditory 38.1 nS, HVC 6.36, E -> I 0.0467, the I -> E
+  bound 503 and the STDP step 1.51 nS (10 ms window). That gave too large a DAF response (extra
+  spikes 1.40, 69% responders) with better selectivity (reversed/trained 1.19). The I -> E bound
+  was never reached in the full model; raising it to 2000 or 10000 nS changed nothing.
+- **What moved it**, seed 42 (tables in the sweep logs):
+  - Faster learning (STDP step x5, x10) and a lower `R_I_TH` (36-40) strengthen the learned
+    inhibition: extra spikes 1.40 -> 0.92-0.98 and responders 69 -> 61-64%, but the response then
+    ends early (45-47 ms) and its 2 ms-bin peak sits at 26 ms.
+  - The auditory AMPA conductance barely matters once NMDA is set independently of it (25-38 nS
+    alike).
+  - More NMDA (2500-5000 nS) lengthens the response (46 -> 61 ms) and enlarges it (extra spikes
+    0.98 -> 1.52): the duration-magnitude trade-off again.
+  - **Stronger E -> I** (x2, x3) trims the response and moves the peak later (26 -> 38 ms): the
+    noise response recruits I sooner, and shunting inhibition acts on exactly the cells it
+    depolarised. x0.5 did the opposite.
+- **First adoption** (`TAU_INH` 5 ms): STDP step 7.55 nS (x5), `R_I_TH` 40, `G_NMDA_MEAN_NS`
+  3000, `J_EI_MEAN_NS` 0.14 (x3). Every target was in range at seed 42, but the DAF response came
+  in volleys ~15 ms apart (10, 25, 38, 55, 70 ms): fast E -> I feedback recruits I in a burst,
+  shunting silences E, and E rebounds. Seed 43 was barely selective (1.02), seed 44 peaked at
+  22 ms, and the 2 ms-bin peak moved from 58 to 30 ms (45 to 22 Hz) between 1 and 10 ms bins.
+- **GABA_A decay, not an E -> I delay, smooths it.** Luo & Perkel (2002, J Neurophysiol) report
+  developmental changes in GABA_A IPSC decay, 5-20 ms in juveniles (a different circuit). Swept
+  `TAU_INH` 5 / 10 / 15 / 20 ms against an E -> I delay of 0 / 2 / 4 ms. Jaggedness (2 ms-bin /
+  10 ms-bin peak) fell 1.74 / 1.45 / 1.28 / 1.21 and the fast share of the response's variance
+  0.57 / 0.28 / 0.13 / 0.11 with the decay; the delays changed little, and at 5 ms made it slightly
+  worse, so they were removed. A slower decay costs selectivity (reversed/trained 1.10 -> 1.04
+  from 5 to 20 ms), which a higher `R_I_TH` buys back at the price of magnitude, and less NMDA and
+  stronger E -> I trim again.
+- **Adopted**: `TAU_INH` 15 ms, `R_I_TH` 46, `G_NMDA_MEAN_NS` 2500, `J_EI_MEAN_NS` 0.187 (x4),
+  STDP step 7.55 nS (x5); auditory, HVC and the I -> E bound unchanged. Training seeds 42 / 43 /
+  44: responders 53 / 48 / 49%, extra spikes 0.95 / 1.07 / 0.82, latency 23.2 / 21.4 / 26.4 ms,
+  duration 50.6 / 54.0 / 49.3 ms, reversed/trained 1.08 / 1.04 / 1.10, peak 38 / 34 / 22 ms. Ten
+  evaluation seeds of the shipped model: duration 51.2 +/- 2.2 ms, latency 22.9 +/- 1.0 ms, extra
+  spikes 0.95, peak 22 Hz at 38 ms on every seed. The peak now barely depends on binning (23 ->
+  18 Hz, 38 -> 30 ms from 1 to 10 ms bins); jaggedness 1.24.
+- **Caveats.**
+  - Selectivity is weaker and more seed-dependent than with current-based synapses (1.04-1.10
+    against 1.10-1.18), and seed 43 is just above the magnitude range (1.07).
+  - Seed 44's response sags mid-burst (22 -> 16 -> 19 Hz at 20 / 30 / 40 ms in 10 ms bins), which
+    puts its 2 ms peak at 22 ms, outside 35-75; seed 43's is at 34. Both hold across every
+    setting tried, so they belong to those seeds' stimulus draws.
+  - NMDA carries ~190x the AMPA charge per spike near threshold.
+  - Duration sits near its 47 ms bound (48.2 ms on the lowest evaluation seed).
 
 ## DAF metrics
 

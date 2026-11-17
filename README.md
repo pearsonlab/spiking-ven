@@ -103,13 +103,13 @@ against the shipped model; `make test-repro` runs it.
 | auditory input rate, per rendition (2.66 Hz during the song itself) | 2.16 Hz | 2.4 ± 2.7 Hz (Schneider & Woolley 2013, broad-spiking higher AC) |
 | baseline, all units | 2.49 Hz | 1–10 Hz (Fig. 7C) |
 | responders | 62% | 41% = 7/17, 95% CI 21–64% |
-| response onset latency | 28.8 ms | 23 ± 12 ms |
-| response duration | 68.0 ms | 90 ± 43 ms |
-| extra spikes per responder per burst | 0.89 | ~0.8–1.0 |
-| peak change, responders | 20.3 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
+| response onset latency | 29.5 ms | 23 ± 12 ms |
+| response duration | 64.4 ms | 90 ± 43 ms |
+| extra spikes per responder per burst | 0.90 | ~0.8–1.0 |
+| peak change, responders | 21.2 Hz | ~20 Hz (Fig. 8E, n = 7) — diagnostic, see caveat |
 | time to peak | 40 ms | ~40–60 ms (Fig. 8E, read off the panel) |
 | late (100–150 ms) / peak | 0.066 | < 0.15 — a transient, not a step (Fig. 8E) |
-| reversed / trained song rate | 1.10 | > 1 |
+| reversed / trained song rate | 1.11 | > 1 |
 
 **Every metric is inside the bird's range.** Training seeds 43 and 44 give extra spikes
 1.02 and 0.95, latency 26.6 and 33.7 ms and duration 68.5 and 70.2 ms; seed 43 is just above
@@ -126,9 +126,9 @@ per motif. With 20 trials the per-neuron tests admit only the strongest responde
 reads as a larger, later, shorter response; and a dense HVC code keeps inhibition on through
 the whole motif, which weakens the response (`docs/design-notes.md`).
 
-Duration is 68.0 ms at the test seed (67.6 ± 2.5 ms over ten evaluation seeds). With
+Duration is 64.4 ms at the test seed (66.1 ± 2.2 ms over ten evaluation seeds). With
 AMPA-fast synapses it comes from the NMDA component of the auditory synapses (below).
-Latency is 28.8 ms at the test seed, 29.0 ± 1.1 ms over ten seeds. Duration follows the paper's rule -- the
+Latency is 29.5 ms at the test seed, 29.1 ± 1.3 ms over ten seeds. Duration follows the paper's rule -- the
 response ends at the first run of ten non-significant 2 ms bins -- searched up to 300 ms
 after onset, so long responses are timed rather than dropped.
 
@@ -148,14 +148,21 @@ gives (for the latency and duration z-tests) and is what we use. So any ratio ag
 and is the quantity the paper's own bootstrap used ("the maximal spike count over
 150 ms").
 
-## Synapses: AMPA, GABA_A and NMDA
+## Units and synapses: AMPA, GABA_A and NMDA
+
+The model is in physiological units: membranes rest and reset at -70 mV and fire at -50 mV
+(500 pF and 16.7 nS for E, 200 pF and 20 nS for I), currents are in pA, and each synaptic weight
+is the peak PSP (mV) one spike produces, drawn log-normally with a stated mean and SD -- e.g. an
+auditory -> E EPSP of 11.5 +/- 5.7 mV, an HVC -> I EPSP of 3.7 +/- 1.8 mV. `docs/MODEL.md` has the
+equations and every value.
 
 Every synapse has a realistic decay. The auditory -> E and HVC -> I inputs and E -> I are AMPA
 (`TAU_S = TAU_EXC = 3 ms`); I -> E is GABA_A (`TAU_INH = 5 ms`). The auditory synapses onto E
 also carry a standard NMDA conductance (Wang 2002: saturating gating with 2 ms rise and
-100 ms decay, Mg2+ block, reversal 0 mV; `G_NMDA = 400`). With fast synapses NMDA is the
-only slow excitation, and it is what holds the DAF response up: without enough of it the
-response peaks ~30 ms after onset and fades while the noise is still on. At 400 it carries
+100 ms decay, Mg2+ block, reversal 0 mV; `G_NMDA = 61.9`, the NMDA current at full gating,
+at rest and unblocked, relative to the fast EPSC). With fast synapses NMDA is the only slow
+excitation, and it is what holds the DAF response up: without enough of it the response peaks
+~30 ms after onset and fades while the noise is still on. It carries
 ~130x the fast charge per spike near threshold (much less at rest, where Mg2+ blocks it).
 Both runtimes implement it; see `docs/MODEL.md` for the equations and
 `docs/design-notes.md` for the sweeps that chose it.

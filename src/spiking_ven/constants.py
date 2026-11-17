@@ -40,16 +40,16 @@ __all__ = [
     "HVC_INTRO",
     # 2. the network operating point
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
-    "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
-    "DRIVE_E", "DRIVE_I",
-    "TAU_S", "TAU_E", "TAU_STDP", "TAU_INH", "TAU_EXC", "J_EI_SCALE",
-    "R_I_TH", "J_MAX_IE",
-    "A_SFA", "TAU_SFA",
-    "TAU_I", "C_JEI", "NOISE_E", "NOISE_I", "TARGET_RATE_E", "TARGET_RATE_I", "T_REFR_MS",
+    "E_L_MV", "V_TH_MV", "V_RESET_MV", "C_E_PF", "C_I_PF",
+    "TAU_E", "TAU_I", "TAU_S", "TAU_INH", "TAU_EXC",
+    "TARGET_RATE_E_HZ", "I_DRIVE_I_PA", "NOISE_E_PA", "NOISE_I_PA",
+    "C_B", "B_AUD_MEAN_MV", "B_AUD_SD_MV",
+    "C_HVC", "B_HVC_MEAN_MV", "B_HVC_SD_MV",
+    "C_JEI", "J_EI_MEAN_MV", "J_EI_SD_MV",
     "G_NMDA", "NMDA_TAU_RISE", "NMDA_TAU_DECAY", "NMDA_ALPHA", "MG_MM", "E_NMDA_MV",
-    "E_L_MV", "V_TH_MV",
+    "T_REFR_MS", "TAU_STDP", "R_I_TH", "J_MAX_IE_MV", "A_SFA_PA", "TAU_SFA",
     "T_POST", "T_BURN", "N_ISTA",
-    "a_jie_for",
+    "A_JIE_MV_AT_10MS", "a_jie_for",
     # 3. the causal encoder operating point
     "CAUSAL_N_BASES", "CAUSAL_K_FRAMES", "CAUSAL_N_COCH_CH", "CAUSAL_FRAME_RATE",
     "CAUSAL_LO_HZ", "CAUSAL_HI_HZ", "CAUSAL_RMS_REF",
@@ -135,9 +135,12 @@ HVC_DELAY_MS = 0
 # =============================================================================
 # 2. The network operating point -- what the fit landed on
 # =============================================================================
-# Units: times in ms; membrane potentials, thresholds, drives, weights and noise are
-# dimensionless (the membrane relaxes toward its input, and a spike is a crossing of
-# theta); rates in Hz unless a name says otherwise. The simulation step is 1 ms.
+# Units: times in ms, membrane potentials in mV, currents in pA, capacitances in pF,
+# rates in Hz. Synaptic weights are the peak PSP (mV) one presynaptic spike produces at
+# rest; see spiking_ven.units for the membrane equation and the conversions. The
+# simulation step is 1 ms. The values were converted from the earlier dimensionless
+# operating point (units.from_dimensionless) and rounded; docs/design-notes.md has the
+# calibration history in those units.
 
 #: Population sizes (E projection neurons, I interneurons, HVC inputs) and training length.
 N_E = 600
@@ -145,82 +148,76 @@ N_I = 150
 N_HVC = 600
 N_RENDITIONS = 600
 
-#: Auditory -> E, fast (AMPA-like) component. Each E cell connects to each encoder channel
-#: with probability ``C_B``, so it samples only a few channels. The mean weight per
-#: connection is ``B_SCALE / n_aud`` (n_aud = the encoder's channel count). Set together
-#: with ``G_NMDA`` (the slow NMDA component carries part of the drive) and with the
-#: encoder's output scale (raw ISTA coefficients, no loudness gain). Each spike's charge
-#: is ``B`` times the ``TAU_S`` filter's sum (3.5 at 3 ms), so ``B_SCALE`` moves with it.
-B_SCALE = 15.0
-C_B = 0.05
+#: Membrane: rest, threshold and reset (mV), shared by E and I -- the values of Wang's
+#: (2002) pyramidal cells and interneurons -- and capacitances (pF): 500 for E, 200 for I.
+#: With the time constants these give leak conductances ``C / tau``: 16.7 nS for E,
+#: 20 nS for I (Wang 2002's interneuron exactly).
+E_L_MV = -70.0
+V_TH_MV = -50.0
+V_RESET_MV = -70.0
+C_E_PF = 500.0
+C_I_PF = 200.0
 
-#: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
-#: E -> I alone supplies 0.28 against a threshold gap of 0.37, so I is effectively an
-#: HVC-driven population. Compensating one limb without the other starves it.
-#: ``B_HVC_SCALE`` is per connection, so it scales with ``N_HVC`` and the burst count, and
-#: per spike with the ``TAU_S`` filter's sum: 0.378 at 3 ms is the mean drive 0.065 gave
-#: at 20 ms (x 20.5 / 3.53), which set the 600-unit singing baseline (docs/design-notes.md).
-B_HVC_SCALE = 0.378
-C_HVC = 0.1
-
-#: Tonic drives. ``theta_e`` is derived from ``DRIVE_E`` inside the network, so raising
-#: the drive raises the threshold with it rather than the firing rate.
-DRIVE_E = 0.06
-DRIVE_I = 0.058
-
-#: Input synaptic time constant (ms) for aud -> E and HVC -> I -- the AMPA EPSC decay,
-#: 2-5 ms (2, 3 and 5 ms calibrate alike; docs/design-notes.md) -- and the membrane time
-#: constants (ms) of E and I. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
-TAU_S = 3.0
+#: Membrane time constants (ms) of E and I.
 TAU_E = 30.0
 TAU_I = 10.0
 
-#: Recurrent synaptic decays (ms): I -> E is GABA_A (IPSC decay ~5-10 ms; 5 as in Brunel &
-#: Wang 2001), E -> I is AMPA (the same 3 ms as ``TAU_S``). Each presynaptic spike adds 1 to
-#: a trace that decays with these; 0 would be the former one-step pulse.
+#: Synaptic decays (ms). The auditory -> E and HVC -> I inputs and E -> I are AMPA
+#: (EPSC decay 2-5 ms; 2, 3 and 5 calibrate alike, docs/design-notes.md); I -> E is GABA_A
+#: (IPSC decay ~5-10 ms; 5 as in Brunel & Wang 2001). Each presynaptic spike adds its
+#: current to a trace that decays with these; 0 for the recurrent pair would be a one-step
+#: pulse. Learning does not depend on ``TAU_S``: ``TAU_STDP`` sets it.
+TAU_S = 3.0
 TAU_INH = 5.0
 TAU_EXC = 3.0
 
+#: Tonic drives. E's is derived inside the network so the drive alone fires E at
+#: ``TARGET_RATE_E_HZ`` (453 pA here, ``units.tonic_drive_pa``). I's is a fixed current
+#: (pA) far below I's threshold current (400 pA), so I fires only when HVC drives it.
+TARGET_RATE_E_HZ = 25.0
+I_DRIVE_I_PA = 53.7
+
+#: SD (pA) of the Gaussian current noise added to each E and I cell every 1 ms step. On E
+#: it gives a free-membrane voltage SD of ~5.8 mV.
+NOISE_E_PA = 754.0
+NOISE_I_PA = 0.0
+
+#: Auditory -> E, fast (AMPA) component: each E cell connects to each encoder channel with
+#: probability ``C_B``, with log-normal weights of this mean and SD (peak EPSP, mV; 183 pA
+#: of EPSC per mV at these time constants). Set together with ``G_NMDA`` (the slow NMDA
+#: component carries part of the drive) and with the encoder's output scale.
+C_B = 0.05
+B_AUD_MEAN_MV = 11.45
+B_AUD_SD_MV = 5.73
+
+#: HVC -> I, the motor prediction limb, and the only thing that moves the interneuron
+#: rate; log-normal weights of this mean and SD (peak EPSP, mV) per connection.
+C_HVC = 0.1
+B_HVC_MEAN_MV = 3.69
+B_HVC_SD_MV = 1.85
+
+#: E -> I, fixed: log-normal weights of this mean and SD (peak EPSP, mV).
+C_JEI = 0.5
+J_EI_MEAN_MV = 0.0271
+J_EI_SD_MV = 0.00271
+
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
-#: Wang (2001). It uses the same connections as the fast weights ``B``; ``G_NMDA`` is its
-#: conductance relative to them, in units of the leak. Per unit it carries 0.32 of the
-#: fast component's charge per isolated spike at threshold with ``TAU_S`` = 3 ms (0.055
-#: at the former 20 ms), so at 400 NMDA carries ~130x the fast charge near threshold (much
-#: less at rest, where Mg2+ blocks it). With AMPA-fast inputs it is the only slow
-#: excitation, and what sustains the DAF response through and past the noise burst;
-#: chosen with ``B_SCALE`` for duration and magnitude (docs/design-notes.md). 0 removes it.
+#: Wang (2001), on the same connections as ``B``. Current:
+#: ``G_NMDA (B s) B(V) (E_NMDA - V) / (E_NMDA - E_L)``, with ``B`` the fast weights'
+#: current (pA) -- so ``G_NMDA`` is the NMDA current at full gating, at rest and unblocked,
+#: relative to the fast EPSC. Near threshold it carries ~130x the fast component's charge
+#: per spike (much less at rest, where Mg2+ blocks it). With AMPA-fast inputs it is the
+#: only slow excitation, and what sustains the DAF response through and past the noise
+#: burst; chosen with the auditory weights for duration and magnitude. 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
 #: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
-#: Current: G_NMDA (B s) B(V) (E_NMDA - V).
-G_NMDA = 400.0
+G_NMDA = 61.9
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5
 MG_MM = 1.0
 E_NMDA_MV = 0.0
-
-#: Voltage scale for the Mg2+ block and the NMDA driving force: the dimensionless E
-#: membrane maps reset (0) to E_L and threshold (theta_e) to V_th, the values of Wang's
-#: pyramidal cells (mV).
-E_L_MV = -70.0
-V_TH_MV = -50.0
-
-#: E -> I connection probability (fixed weights).
-C_JEI = 0.5
-#: E -> I weight scale: the mean weight is ``J_EI_SCALE / sqrt(N_E * C_JEI)``. Fixed, not
-#: learned, so it is tied to ``TAU_EXC`` (a spike's charge is that trace's sum): the former
-#: 0.17 was set for a one-step pulse; 0.048 = 0.17 / 3.53 keeps the charge per spike at 3 ms.
-J_EI_SCALE = 0.048
-
-#: Standard deviation of the Gaussian noise added to the E and I input every 1 ms step.
-NOISE_E = 0.1
-NOISE_I = 0.0
-
-#: Firing rates (spikes per ms) that set the thresholds: ``theta_e`` is chosen so the tonic
-#: drive alone fires E at TARGET_RATE_E, and ``theta_i`` from TARGET_RATE_I.
-TARGET_RATE_E = 0.025
-TARGET_RATE_I = 0.05
 
 #: Absolute refractory period (ms) of the E and I membranes and the input populations.
 T_REFR_MS = 2.0
@@ -229,20 +226,21 @@ T_REFR_MS = 2.0
 #: counts only within this long after an auditory input spike). Independent of ``TAU_S``.
 TAU_STDP = 20.0
 
-#: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
-#: E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the STDP trace is
-#: debiased against. Near the I rate during song (40.6 Hz in the shipped model), I
-#: activity unrelated to an E spike gives no net change; 43, slightly above, makes the
-#: rule mildly depressing and shortens latency by a few ms across training seeds.
-#: ``J_MAX_IE`` caps each weight.
+#: I -> E, the only plastic weights in the model, in peak IPSP (mV). Zero-initialised, so
+#: only song-driven E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the
+#: STDP trace is debiased against. Near the I rate during song (40.6 Hz in the shipped
+#: model), I activity unrelated to an E spike gives no net change; 43, slightly above,
+#: makes the rule mildly depressing and shortens latency by a few ms across training
+#: seeds. ``J_MAX_IE_MV`` caps each weight.
 R_I_TH = 43.0
-J_MAX_IE = 1.0
+J_MAX_IE_MV = 58.2
 
-#: Firing-rate adaptation on E. ``TAU_SFA`` must stay shorter than the 50 ms DAF burst it
-#: has to truncate; a timescale longer than the burst integrates over the motif and acts
-#: as a tonic gain change instead. ``A_SFA`` was chosen by a sweep at this timescale --
-#: see ``docs/design-notes.md``.
-A_SFA = 1.0
+#: Firing-rate adaptation on E: a hyperpolarising current that steps up by ``A_SFA_PA``
+#: on every spike and decays with ``TAU_SFA``. ``TAU_SFA`` must stay shorter than the
+#: 50 ms DAF burst it has to truncate; a timescale longer than the burst integrates over
+#: the motif and acts as a tonic gain change instead. ``A_SFA_PA`` was chosen by a sweep
+#: at this timescale -- see ``docs/design-notes.md``.
+A_SFA_PA = 7540.0
 TAU_SFA = 10.0
 
 #: Protocol: silence after each motif (ms), silent burn-in before the first (ms), and ISTA
@@ -251,9 +249,12 @@ T_POST = 200
 T_BURN = 500
 N_ISTA = 50
 
+#: STDP step (peak IPSP, mV) per pairing at a 10 ms window; see :func:`a_jie_for`.
+A_JIE_MV_AT_10MS = 0.175
+
 
 def a_jie_for(tau_stdp: float = TAU_STDP) -> float:
-    """STDP amplitude for a given kernel width.
+    """STDP step (peak IPSP, mV) for a given kernel width.
 
     Derived, not a constant: the per-spike STDP integral goes as ``A_jie * tau``, so the
     amplitude scales inversely with the window to keep that integral fixed. Storing the
@@ -264,7 +265,7 @@ def a_jie_for(tau_stdp: float = TAU_STDP) -> float:
     """
     if tau_stdp <= 0.0:
         raise ValueError(f"tau_stdp must be > 0 ms, got {tau_stdp}")
-    return 3e-3 * (10.0 / tau_stdp)
+    return A_JIE_MV_AT_10MS * (10.0 / tau_stdp)
 
 
 # =============================================================================

@@ -80,9 +80,9 @@ def test_encoder_then_network_end_to_end(tmp_path, capsys):
         "--encoder", str(encoder_out), "--motifs", str(motifs),
         "--out", str(model_out), "--n-rend", "2",
         "--n-e", "30", "--n-i", "8", "--n-hvc", "6", "--seed", "42",
-        # B_HVC_SCALE is per connection and set for 600 HVC units; 6 need 100x the weight
-        # to drive I at all, and without I spikes JIE never moves.
-        "--b-hvc-scale", "6.5",
+        # The HVC EPSP is set for 600 HVC units; 6 need a much larger one to drive I at
+        # all, and without I spikes JIE never moves.
+        "--b-hvc-mean-mv", "63.5", "--b-hvc-sd-mv", "31.7",
     ])
     assert model_out.exists(), "model artifact not written"
     assert (tmp_path / "ven_traces.npz").exists(), "traces not written alongside the model"

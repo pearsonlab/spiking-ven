@@ -25,7 +25,7 @@ def _tiny_inputs(n_aud: int = 10, n_hvc: int = 6, T_song: int = 120, T_post: int
 
 def test_noise_is_nonzero_by_default():
     """Guard the premise: if noise_e were 0 these tests would pass trivially."""
-    assert _tiny_net(0).noise_e > 0.0
+    assert _tiny_net(0).noise_e_pa > 0.0
 
 
 def test_same_seed_gives_identical_training():

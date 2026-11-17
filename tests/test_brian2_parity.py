@@ -54,17 +54,21 @@ def _run_e(w, aud_times_ms=(), T=100):
     return mon
 
 
-def _strong_aud(w, scale=50.0):
-    """Every E cell driven hard by auditory channel 0, nothing else connected."""
+#: One unit of the earlier dimensionless E input, in pA (452.65 mV x 16.67 nS).
+E_UNIT_PA = 7544.0
+
+
+def _strong_aud(w, scale=50.0 * E_UNIT_PA):
+    """Every E cell driven hard by auditory channel 0 (EPSC, pA), nothing else connected."""
     B = np.zeros_like(w["B"])
     B[:, 0] = scale
     return {"B": B, "JIE": np.zeros_like(w["JIE"]), "JEI": np.zeros_like(w["JEI"]),
-            "noise_e": 0.0, "aud_delay_ms": 0}
+            "noise_e_pa": 0.0, "aud_delay_ms": 0}
 
 
 def test_refractory_period_bounds_the_isi():
     """Under drive that would otherwise fire every step, no ISI is shorter than t_refr_ms."""
-    w = _weights(t_refr_ms=2.0, a_sfa=0.0)
+    w = _weights(t_refr_ms=2.0, a_sfa_pa=0.0)
     w.update(_strong_aud(w))
     mon = _run_e(w, aud_times_ms=range(0, 100, 1))
     t = np.asarray(mon.t[mon.i == 0] / ms)
@@ -75,14 +79,14 @@ def test_refractory_period_bounds_the_isi():
 def test_spike_frequency_adaptation_slows_firing():
     """a_sfa must reach the E membrane: the same drive gives fewer spikes with it on."""
     counts = {}
-    for a_sfa in (0.0, 1.0):
+    for a_sfa in (0.0, E_UNIT_PA):
         brian2.start_scope()
-        w = _weights(t_refr_ms=2.0, a_sfa=a_sfa, tau_sfa=10.0)
+        w = _weights(t_refr_ms=2.0, a_sfa_pa=a_sfa, tau_sfa=10.0)
         # Strong enough to fire well above baseline, weak enough not to sit at the
         # refractory ceiling, where adaptation has nothing left to slow.
-        w.update(_strong_aud(w, scale=0.2))
+        w.update(_strong_aud(w, scale=0.2 * E_UNIT_PA))
         counts[a_sfa] = _run_e(w, aud_times_ms=range(0, 100, 1)).num_spikes
-    assert counts[1.0] < 0.8 * counts[0.0], counts
+    assert counts[E_UNIT_PA] < 0.8 * counts[0.0], counts
 
 
 def test_all_zero_weight_matrices_wire_inactive_synapses():
@@ -101,17 +105,17 @@ def test_all_zero_weight_matrices_wire_inactive_synapses():
 def test_noise_i_reaches_the_i_membrane():
     """noise_i must reach the I equation, and zero noise must stay exactly noiseless."""
     voltages = {}
-    for amp in (0.0, 0.5):
+    for amp in (0.0, 460.0):
         brian2.start_scope()
-        groups = build_ven_groups(_weights(n_i=40, noise_i=amp, drive_i=0.0))
+        groups = build_ven_groups(_weights(n_i=40, noise_i_pa=amp, i_drive_i_pa=0.0))
         mon = StateMonitor(groups["i_group"], "v", record=range(40))
         Network(groups["e_group"], groups["i_group"], mon).run(50 * ms)
         voltages[amp] = float(np.std(mon.v))
     assert voltages[0.0] == 0.0, "zero amplitude must stay exactly noiseless"
-    assert voltages[0.5] > 0.01, "a non-zero noise_i must move the I membrane"
+    assert voltages[460.0] > 0.01, "a non-zero noise_i must move the I membrane"
 
 
-@pytest.mark.parametrize("a_sfa", [0.0, 1.0])
+@pytest.mark.parametrize("a_sfa", [0.0, E_UNIT_PA])
 def test_same_weights_give_the_same_e_rate_regime_in_both_runtimes(a_sfa):
     """End-to-end: the same weights and input must not land in different regimes.
 
@@ -122,8 +126,8 @@ def test_same_weights_give_the_same_e_rate_regime_in_both_runtimes(a_sfa):
     rng = np.random.default_rng(0)
     n_e, n_i, n_aud, n_hvc, T = 60, 15, 12, 6, 400
 
-    net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e=0.0,
-                        noise_i=0.0, t_refr_ms=2.0, a_sfa=a_sfa, tau_sfa=10.0,
+    net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e_pa=0.0,
+                        noise_i_pa=0.0, t_refr_ms=2.0, a_sfa_pa=a_sfa, tau_sfa=10.0,
                         seed=0)
     aud_spikes = (rng.random((n_aud, T)) < 0.02).astype(np.float32)
     hvc_spikes = (rng.random((n_hvc, T)) < 0.02).astype(np.float32)
@@ -171,12 +175,13 @@ def test_nmda_runs_in_brian2_in_the_same_regime_as_numpy():
     aud = (rng.random((n_aud, T)) < 0.03).astype(np.float32)
     hvc = (rng.random((n_hvc, T)) < 0.02).astype(np.float32)
     out = {}
-    for g in (0.0, 40.0):
+    for g in (0.0, 6.2):
         brian2.start_scope()
-        net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e=0.0,
-                            noise_i=0.0, seed=0, g_nmda=g, B_scale=10.0)
+        net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e_pa=0.0,
+                            noise_i_pa=0.0, seed=0, g_nmda=g, b_aud_mean_mv=34.4,
+                            b_aud_sd_mv=17.2)
         out[g] = _rates_both_runtimes(net, aud, hvc, T)
-    (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[40.0]
+    (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[6.2]
     assert len(syns0) == 4 and len(syns1) == 5
     assert np1 > np0 and br1 > br0, out
     assert br1 == pytest.approx(np1, rel=0.5), (np1, br1)

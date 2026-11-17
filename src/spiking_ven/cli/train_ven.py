@@ -20,35 +20,44 @@ import argparse
 import numpy as np
 
 from ..constants import (
-    A_SFA,
+    A_SFA_PA,
     AUD_DELAY_MS,
     AUD_MEAN_RATE_HZ,
-    B_HVC_SCALE,
-    B_SCALE,
+    B_AUD_MEAN_MV,
+    B_AUD_SD_MV,
+    B_HVC_MEAN_MV,
+    B_HVC_SD_MV,
     C_B,
+    C_E_PF,
     C_HVC,
-    J_EI_SCALE,
-    DRIVE_E,
-    DRIVE_I,
+    C_I_PF,
+    E_L_MV,
     G_NMDA,
     HVC_DELAY_MS,
     HVC_INTRO,
-    J_MAX_IE,
+    I_DRIVE_I_PA,
+    J_EI_MEAN_MV,
+    J_EI_SD_MV,
+    J_MAX_IE_MV,
     N_E,
     N_HVC,
     N_I,
     N_ISTA,
     N_RENDITIONS,
+    NOISE_E_PA,
+    NOISE_I_PA,
     R_I_TH,
     T_BURN,
     T_POST,
+    TARGET_RATE_E_HZ,
     TAU_E,
-    TARGET_RATE_E,
+    TAU_EXC,
+    TAU_INH,
     TAU_S,
     TAU_SFA,
-    TAU_INH,
-    TAU_EXC,
     TAU_STDP,
+    V_RESET_MV,
+    V_TH_MV,
     a_jie_for,
 )
 from ..metrics import (
@@ -77,31 +86,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sr", type=int, default=None,
                    help="corpus sample rate (Hz); must match the corpus. "
                         "Default: the corpus's own rate")
-    # tuned operating point
-    p.add_argument("--drive-e", type=float, default=DRIVE_E)
-    p.add_argument("--drive-i", type=float, default=DRIVE_I)
-    p.add_argument("--b-scale", type=float, default=B_SCALE)
-    p.add_argument("--tau-s", type=float, default=TAU_S)
-    p.add_argument("--tau-e", type=float, default=TAU_E,
-                   help="E membrane time constant (ms). theta_e is derived from it, so "
-                        "the tonic rate stays at target_rate as this changes.")
-    p.add_argument("--target-rate-e", type=float, default=TARGET_RATE_E,
-                   help="tonic E rate (spikes/ms) that sets theta_e")
+    # tuned operating point (units: ms, mV, pA, pF, Hz; weights are peak PSPs in mV)
     p.add_argument("--n-rend", type=int, default=N_RENDITIONS)
-    # network
     p.add_argument("--n-e", type=int, default=N_E)
     p.add_argument("--n-i", type=int, default=N_I)
     p.add_argument("--n-hvc", type=int, default=N_HVC)
+    p.add_argument("--e-l-mv", type=float, default=E_L_MV, help="rest (mV)")
+    p.add_argument("--v-th-mv", type=float, default=V_TH_MV, help="threshold (mV)")
+    p.add_argument("--v-reset-mv", type=float, default=V_RESET_MV, help="reset (mV)")
+    p.add_argument("--c-e-pf", type=float, default=C_E_PF, help="E capacitance (pF)")
+    p.add_argument("--c-i-pf", type=float, default=C_I_PF, help="I capacitance (pF)")
+    p.add_argument("--tau-e", type=float, default=TAU_E, help="E membrane time constant (ms)")
+    p.add_argument("--tau-s", type=float, default=TAU_S,
+                   help="aud->E and HVC->I synaptic decay (ms)")
+    p.add_argument("--target-rate-e-hz", type=float, default=TARGET_RATE_E_HZ,
+                   help="rate (Hz) the tonic E drive alone fires E at; sets that drive")
+    p.add_argument("--i-drive-i-pa", type=float, default=I_DRIVE_I_PA,
+                   help="tonic I current (pA)")
+    p.add_argument("--noise-e-pa", type=float, default=NOISE_E_PA,
+                   help="SD of the E current noise per 1 ms step (pA)")
+    p.add_argument("--noise-i-pa", type=float, default=NOISE_I_PA,
+                   help="SD of the I current noise per 1 ms step (pA)")
     p.add_argument("--c-b", type=float, default=C_B)
+    p.add_argument("--b-aud-mean-mv", type=float, default=B_AUD_MEAN_MV,
+                   help="aud->E weight mean (peak EPSP, mV)")
+    p.add_argument("--b-aud-sd-mv", type=float, default=B_AUD_SD_MV,
+                   help="aud->E weight SD (peak EPSP, mV)")
     p.add_argument("--c-hvc", type=float, default=C_HVC)
-    p.add_argument("--j-ei-scale", type=float, default=J_EI_SCALE,
-                   help="E->I weight scale; mean weight = j_ei_scale / sqrt(n_e * c_JEI)")
-    p.add_argument("--b-hvc-scale", type=float, default=B_HVC_SCALE)
+    p.add_argument("--b-hvc-mean-mv", type=float, default=B_HVC_MEAN_MV,
+                   help="HVC->I weight mean (peak EPSP, mV)")
+    p.add_argument("--b-hvc-sd-mv", type=float, default=B_HVC_SD_MV,
+                   help="HVC->I weight SD (peak EPSP, mV)")
+    p.add_argument("--j-ei-mean-mv", type=float, default=J_EI_MEAN_MV,
+                   help="E->I weight mean (peak EPSP, mV)")
+    p.add_argument("--j-ei-sd-mv", type=float, default=J_EI_SD_MV,
+                   help="E->I weight SD (peak EPSP, mV)")
     p.add_argument("--r-i-th", type=float, default=R_I_TH)
-    p.add_argument("--j-max-ie", type=float, default=J_MAX_IE)
-    p.add_argument("--theta-e-init", type=float, default=0.0)
-    p.add_argument("--a-jie", type=float, default=None,
-                   help="STDP rate; default auto-scales as 3e-3 * (10 / tau_stdp)")
+    p.add_argument("--j-max-ie-mv", type=float, default=J_MAX_IE_MV,
+                   help="upper bound on each I->E weight (peak IPSP, mV)")
+    p.add_argument("--a-jie-mv", type=float, default=None,
+                   help="STDP step (peak IPSP, mV); default a_jie_for(tau_stdp)")
     p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
                    help="STDP window (ms), > 0: the I trace and the audio gate. "
                         "Independent of the synaptic tau_s")
@@ -120,8 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auditory spike-rate calibration (Schneider & Woolley 2013)")
     p.add_argument("--n-ista", type=int, default=N_ISTA)
     # Spike-frequency adaptation on E; the sweep behind A_SFA is in docs/design-notes.md.
-    p.add_argument("--a-sfa", type=float, default=A_SFA,
-                   help="adaptation increment per E spike (units of theta_e)")
+    p.add_argument("--a-sfa-pa", type=float, default=A_SFA_PA,
+                   help="adaptation current step per E spike (pA)")
     p.add_argument("--tau-inh", type=float, default=TAU_INH,
                    help="I->E synaptic decay (ms), GABA_A; 0 = one-step pulse")
     p.add_argument("--tau-exc", type=float, default=TAU_EXC,
@@ -129,8 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
                    help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
     p.add_argument("--g-nmda", type=float, default=G_NMDA,
-                   help="NMDA conductance of the aud->E synapse, relative to the fast "
-                        "weights (0 disables it); kinetics and Mg2+ block in constants")
+                   help="NMDA current at full gating, at rest and unblocked, relative to "
+                        "the fast EPSC (0 disables it); kinetics and Mg2+ block in constants")
     return p
 
 
@@ -145,7 +169,7 @@ def main(argv: list[str] | None = None) -> None:
     # Derived rather than a constant: the per-spike STDP integral goes as
     # A_jie * tau, so the amplitude scales inversely with the kernel width. See
     # constants.a_jie_for for why that formula lives with its inputs.
-    a_jie = (args.a_jie if args.a_jie is not None
+    a_jie = (args.a_jie_mv if args.a_jie_mv is not None
              else a_jie_for(args.tau_stdp))
 
     from ..causal_filters import CausalFilterEncoder
@@ -171,25 +195,25 @@ def main(argv: list[str] | None = None) -> None:
     # --- network ----------------------------------------------------------
     ven = VocalErrorNet(
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
-        B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc, j_ei_scale=args.j_ei_scale,
-        B_hvc_scale=args.b_hvc_scale, tau_s=args.tau_s,
-        tau_e=args.tau_e,
-        target_rate=args.target_rate_e,
-        r_i_th=args.r_i_th, A_jie=a_jie, J_max_ie=args.j_max_ie,
-        drive_e=args.drive_e, drive_i=args.drive_i,
-        aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
-        tau_stdp=args.tau_stdp, seed=args.seed,
-        a_sfa=args.a_sfa, tau_sfa=args.tau_sfa, g_nmda=args.g_nmda,
-        tau_inh=args.tau_inh, tau_exc=args.tau_exc,
+        tau_e=args.tau_e, tau_s=args.tau_s, tau_inh=args.tau_inh, tau_exc=args.tau_exc,
+        e_l_mv=args.e_l_mv, v_th_mv=args.v_th_mv, v_reset_mv=args.v_reset_mv,
+        c_e_pf=args.c_e_pf, c_i_pf=args.c_i_pf,
+        target_rate_hz=args.target_rate_e_hz, i_drive_i_pa=args.i_drive_i_pa,
+        noise_e_pa=args.noise_e_pa, noise_i_pa=args.noise_i_pa,
+        c_B=args.c_b, b_aud_mean_mv=args.b_aud_mean_mv, b_aud_sd_mv=args.b_aud_sd_mv,
+        c_hvc=args.c_hvc, b_hvc_mean_mv=args.b_hvc_mean_mv, b_hvc_sd_mv=args.b_hvc_sd_mv,
+        j_ei_mean_mv=args.j_ei_mean_mv, j_ei_sd_mv=args.j_ei_sd_mv,
+        j_max_ie_mv=args.j_max_ie_mv, a_jie_mv=a_jie, r_i_th=args.r_i_th,
+        tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
+        g_nmda=args.g_nmda,
+        aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,
     )
-    if args.theta_e_init > 0.0:
-        ven.theta_e = args.theta_e_init
 
     print(f"\n{'=' * 65}")
-    print(f"  VEN  A_jie={a_jie:.2e}  "
+    print(f"  VEN  a_jie={a_jie:.4f} mV  "
           f"tau_s={args.tau_s} ms  tau_stdp={args.tau_stdp:g} ms")
-    print(f"  drive_e={args.drive_e}  B_scale={args.b_scale}  "
-          f"theta_e_init={ven.theta_e:.4f}")
+    print(f"  E drive={ven.i_drive_e_pa:.1f} pA  aud EPSP={args.b_aud_mean_mv} mV  "
+          f"threshold={ven.v_th_mv} mV")
     print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
           f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
     print(f"{'=' * 65}")
@@ -257,8 +281,8 @@ def main(argv: list[str] | None = None) -> None:
              final_trained_hz=m["trained_hz"], final_reversed_hz=m["reversed_hz"],
              final_reversed_over_trained=m["reversed_over_trained"],
              final_daf_not_singing_hz=m["daf_not_singing_hz"],
-             B_scale=args.b_scale, drive_e=args.drive_e,
-             tau_s=args.tau_s, n_rend=args.n_rend, a_jie=a_jie)
+             b_aud_mean_mv=args.b_aud_mean_mv, i_drive_e_pa=ven.i_drive_e_pa,
+             tau_s=args.tau_s, n_rend=args.n_rend, a_jie_mv=a_jie)
     print(f"Saved {traces_path}")
 
 

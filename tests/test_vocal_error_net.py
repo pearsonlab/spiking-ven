@@ -96,7 +96,8 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
     # The documented defaults, pinned: each switches its feature off, so a model saved
     # before the feature existed reloads with the dynamics it was trained with.
     expected = {
-        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0,
+        "t_refr_ms": 0.0, "a_sfa": 0.0, "tau_sfa": 0.0, "tau_inh": 0.0, "tau_exc": 0.0,
+        "j_ei_scale": 0.17,
         "aud_delay_ms": 0, "hvc_delay_ms": 0,
         "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
         "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
@@ -505,3 +506,28 @@ def test_stdp_gate_is_saved_and_old_models_refuse_to_train(tmp_path):
     loaded.transform(hvc, aud)                      # evaluation still works
     with pytest.raises(ValueError, match="retrain"):
         loaded.fit(hvc, aud)
+
+
+def test_gaba_decay_lengthens_the_inhibition_from_one_i_spike():
+    """A tonically firing E cell is silenced longer by one I spike at tau_inh = 5 ms than
+    by the one-step pulse of tau_inh = 0, at the same weight."""
+    def silence_after_i_spike(tau_inh):
+        net = _quiet_net(tau_inh=tau_inh, tau_exc=0.0)
+        net.drive_e = 1.0                      # E fires tonically
+        net.B_hvc = np.zeros_like(net.B_hvc)
+        net.B_hvc[0, 0] = 20.0                 # HVC 0 -> I0 only
+        net.JIE = np.zeros_like(net.JIE)
+        net.JIE[0, 0] = 3.0                    # I0 -> E0 only
+        hvc, aud = _pulses(net, T=150, hvc_t=[60])
+        sE, sI = net.transform_all(hvc, aud)
+        t_i = int(np.flatnonzero(sI[0])[0])
+        assert sI[1:].sum() == 0 and sE[0, :t_i].sum() > 0, "premise: E fires before I"
+        after = np.flatnonzero(sE[0, t_i:])
+        return int(after[0]) if after.size else 150
+    assert silence_after_i_spike(5.0) > silence_after_i_spike(0.0)
+
+
+def test_recurrent_decay_zero_is_the_instantaneous_pulse():
+    from spiking_ven.vocal_error_net import _decay
+    assert _decay(0.0) == 0.0
+    assert _decay(5.0) == pytest.approx(np.exp(-1 / 5.0))

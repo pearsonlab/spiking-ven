@@ -42,7 +42,7 @@ __all__ = [
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "B_SCALE", "C_B", "B_HVC_SCALE", "C_HVC",
     "DRIVE_E", "DRIVE_I",
-    "TAU_S", "TAU_E", "TAU_STDP",
+    "TAU_S", "TAU_E", "TAU_STDP", "TAU_INH", "TAU_EXC", "J_EI_SCALE",
     "R_I_TH", "J_MAX_IE",
     "A_SFA", "TAU_SFA",
     "TAU_I", "C_JEI", "NOISE_E", "NOISE_I", "TARGET_RATE_E", "TARGET_RATE_I", "T_REFR_MS",
@@ -151,7 +151,7 @@ N_RENDITIONS = 600
 #: with ``G_NMDA`` (the slow NMDA component carries part of the drive) and with the
 #: encoder's output scale (raw ISTA coefficients, no loudness gain). Each spike's charge
 #: is ``B`` times the ``TAU_S`` filter's sum (3.5 at 3 ms), so ``B_SCALE`` moves with it.
-B_SCALE = 35.0
+B_SCALE = 15.0
 C_B = 0.05
 
 #: HVC -> I, the motor prediction limb. The only thing that moves the interneuron rate:
@@ -175,19 +175,25 @@ TAU_S = 3.0
 TAU_E = 30.0
 TAU_I = 10.0
 
+#: Recurrent synaptic decays (ms): I -> E is GABA_A (IPSC decay ~5-10 ms; 5 as in Brunel &
+#: Wang 2001), E -> I is AMPA (the same 3 ms as ``TAU_S``). Each presynaptic spike adds 1 to
+#: a trace that decays with these; 0 would be the former one-step pulse.
+TAU_INH = 5.0
+TAU_EXC = 3.0
+
 #: NMDA component of the aud -> E synapse, as in Wang (2002, Neuron 36:955) and Brunel &
 #: Wang (2001). It uses the same connections as the fast weights ``B``; ``G_NMDA`` is its
 #: conductance relative to them, in units of the leak. Per unit it carries 0.32 of the
 #: fast component's charge per isolated spike at threshold with ``TAU_S`` = 3 ms (0.055
-#: at the former 20 ms), so at 150 NMDA carries ~48x the fast charge near threshold (much
+#: at the former 20 ms), so at 400 NMDA carries ~130x the fast charge near threshold (much
 #: less at rest, where Mg2+ blocks it). With AMPA-fast inputs it is the only slow
-#: excitation, and what sustains the DAF response for the noise burst's 50 ms; chosen
-#: with ``B_SCALE`` for duration and magnitude (docs/design-notes.md). 0 removes it.
+#: excitation, and what sustains the DAF response through and past the noise burst;
+#: chosen with ``B_SCALE`` for duration and magnitude (docs/design-notes.md). 0 removes it.
 #: Gating per auditory channel: dx/dt = -x / NMDA_TAU_RISE + spikes,
 #: ds/dt = -s / NMDA_TAU_DECAY + NMDA_ALPHA x (1 - s)   (ms, 1/ms).
 #: Mg2+ block (Jahr & Stevens 1990): B(V) = 1 / (1 + MG_MM exp(-0.062 V) / 3.57), V in mV.
 #: Current: G_NMDA (B s) B(V) (E_NMDA - V).
-G_NMDA = 150.0
+G_NMDA = 400.0
 NMDA_TAU_RISE = 2.0
 NMDA_TAU_DECAY = 100.0
 NMDA_ALPHA = 0.5
@@ -202,6 +208,10 @@ V_TH_MV = -50.0
 
 #: E -> I connection probability (fixed weights).
 C_JEI = 0.5
+#: E -> I weight scale: the mean weight is ``J_EI_SCALE / sqrt(N_E * C_JEI)``. Fixed, not
+#: learned, so it is tied to ``TAU_EXC`` (a spike's charge is that trace's sum): the former
+#: 0.17 was set for a one-step pulse; 0.048 = 0.17 / 3.53 keeps the charge per spike at 3 ms.
+J_EI_SCALE = 0.048
 
 #: Standard deviation of the Gaussian noise added to the E and I input every 1 ms step.
 NOISE_E = 0.1
@@ -221,9 +231,11 @@ TAU_STDP = 20.0
 
 #: I -> E, the only plastic weights in the model. Zero-initialised, so only song-driven
 #: E cells ever acquire inhibition. ``R_I_TH`` is the I rate (Hz) the STDP trace is
-#: debiased against, set to the I rate during song (40.6 Hz in the shipped model) so that I
-#: activity unrelated to an E spike gives no net change; ``J_MAX_IE`` caps each weight.
-R_I_TH = 40.0
+#: debiased against. Near the I rate during song (40.6 Hz in the shipped model), I
+#: activity unrelated to an E spike gives no net change; 43, slightly above, makes the
+#: rule mildly depressing and shortens latency by a few ms across training seeds.
+#: ``J_MAX_IE`` caps each weight.
+R_I_TH = 43.0
 J_MAX_IE = 1.0
 
 #: Firing-rate adaptation on E. ``TAU_SFA`` must stay shorter than the 50 ms DAF burst it

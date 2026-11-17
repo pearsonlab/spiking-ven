@@ -55,8 +55,8 @@ so one input spike contributes a jump of 1 that decays with `tau_s` -- the posts
 that synapse. This gives `h_aud` (from auditory spikes) and `h_hvc` (from HVC spikes).
 `tau_s = 3 ms`, an AMPA EPSC decay. A spike's total charge is the filter's sum,
 `1 / (1 - exp(-1 / tau_s))` (3.5 at 3 ms, 20.5 at the former 20 ms), so `B_scale` and
-`B_hvc_scale` are tied to `tau_s`. The recurrent E -> I and I -> E synapses are not filtered: each
-spike acts for one step.
+`B_hvc_scale` are tied to `tau_s`. The recurrent synapses are filtered the same way inside the
+loop, with `tau_inh` (I -> E, GABA_A, 5 ms) and `tau_exc` (E -> I, AMPA, 3 ms); see below.
 
 ### Conduction delays
 
@@ -73,9 +73,10 @@ h_hvc_t = h_hvc[:, t - hvc_delay_ms]    if t >= hvc_delay_ms, else 0
 With `decay_e = exp(-1 / tau_e)`, at each step `t`, in this order:
 
 ```
-a_e    = B @ h_aud_t                                    audio drive (also the STDP gate)
+a_e    = B @ h_aud_t                                    audio drive
 w_sfa  = decay_sfa * w_sfa                              adaptation decays (decay_sfa = exp(-1/tau_sfa))
-u_e    = drive_e + a_e - JIE @ sI[t-1] - w_sfa + noise_e * N(0, 1)
+g_inh  = exp(-1 / tau_inh) * g_inh + sI[t-1]            GABA_A trace, one per I cell
+u_e    = drive_e + a_e - JIE @ g_inh - w_sfa + noise_e * N(0, 1)
 refr_e = max(refr_e - 1, 0)
 V_e    = decay_e * V_e + (1 - decay_e) * u_e
 V_e    = v_reset                       where refr_e > 0        (clamped while refractory)
@@ -85,8 +86,10 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 
 - `V_e` relaxes toward its input `u_e` with time constant `tau_e`; a spike is a crossing of the
   per-neuron threshold `theta_e`. `v_reset = 0`, and all state starts at zero.
-- Inhibition uses the I spikes of the **previous** step, `sI[t-1]`. A single I spike acts on E
-  for one step only; its lasting effect comes from the E membrane integrating it.
+- Inhibition is synaptic: each I spike adds 1 to its cell's trace `g_inh`, entering on the
+  step after the spike and decaying with `tau_inh = 5 ms` (GABA_A), so one I spike delivers
+  `1 / (1 - exp(-1/5))` = 5.5 units of charge. `tau_inh = 0` is a one-step pulse, as in models
+  saved before the trace existed.
 - The noise is a fresh Gaussian draw per neuron per step, added to the input (so its effect on
   `V_e` is scaled by `1 - decay_e`).
 - The refractory countdown is decremented before the threshold test, so with `t_refr_ms = 2` a
@@ -97,7 +100,7 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 
 ### NMDA component
 
-The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 150`), following Wang
+The auditory synapses onto E also carry an NMDA conductance (`g_nmda = 400`), following Wang
 (2002). Each auditory channel `j` has a gating variable, computed before the loop
 (`nmda_gating`):
 
@@ -121,8 +124,8 @@ where `s_t` is delayed like `h_aud_t`, `V_e` is the potential from the previous 
 driving force act on a physiological voltage scale. NMDA uses the same connections as `B`;
 `g_nmda` is its conductance relative to them. At threshold, `g_nmda = 1` carries about 0.32 of
 the fast component's charge per isolated spike at `tau_s = 3 ms` (0.055 at the former 20 ms,
-since the fast charge per spike scales with the filter's sum), so the shipped 150 carries
-~48x the fast
+since the fast charge per spike scales with the filter's sum), so the shipped 400 carries
+~130x the fast
 charge (much less at rest, where Mg2+ blocks it). `g_nmda = 0` removes the term. The STDP audio gate reads input
 spikes, not either drive, so NMDA changes learning only through the E spikes it causes. Because
 NMDA uses `B`, its charge scales with `B_scale` as the fast component's does; `g_nmda` is
@@ -133,7 +136,8 @@ relative to `B` so that ratio, not `B_scale`, sets the NMDA share.
 With `decay_i = exp(-1 / tau_i)`, at the same step `t`, after E:
 
 ```
-u_i    = drive_i + JEI @ sE[t-1] + B_hvc @ h_hvc_t + noise_i * N(0, 1)
+g_exc  = exp(-1 / tau_exc) * g_exc + sE[t-1]            AMPA trace, one per E cell
+u_i    = drive_i + JEI @ g_exc + B_hvc @ h_hvc_t + noise_i * N(0, 1)
 refr_i = max(refr_i - 1, 0)
 V_i    = decay_i * V_i + (1 - decay_i) * u_i
 V_i    = v_reset                       where refr_i > 0
@@ -141,7 +145,8 @@ sI[t]  = 1                             where V_i > theta_i and refr_i == 0
 on a spike:  V_i = v_reset,  refr_i = t_refr_ms
 ```
 
-I has no adaptation, one scalar threshold `theta_i`, and sees the E spikes of the previous step.
+I has no adaptation and one scalar threshold `theta_i`. E -> I is synaptic like I -> E, with
+`tau_exc = 3 ms` (AMPA); since `JEI` is fixed, its scale `j_ei_scale` is tied to `tau_exc`.
 Each step draws the E noise first and then the I noise, from the network's own generator
 (`default_rng(seed + 10000)`) unless `transform(..., rng=g)` supplies another.
 
@@ -174,8 +179,8 @@ xi_th   = r_i_th * tau * 1e-3
 - **Threshold `xi_th`.** `r_i_th` (Hz) times the window `tau` (ms, hence `1e-3`) is approximately
   the mean trace of an I cell firing irregularly at `r_i_th`. An E spike potentiates synapses from I
   cells whose trace is above that level and depresses those below it, so I activity that is merely
-  at its baseline rate gives no net change. The shipped `r_i_th = 40` Hz is the I rate during song
-(40.6 Hz); far below it (the former 6 Hz) nearly every gated E spike potentiates whatever I has
+  at its baseline rate gives no net change. The shipped `r_i_th = 43` Hz is just above the I rate
+during song (40.6 Hz), which makes the rule mildly depressing; far below it (the former 6 Hz) nearly every gated E spike potentiates whatever I has
 been doing, and the inhibition loses its song specificity. With `r_i_th = 0` the rule only
 potentiates.
 - **Bounds.** Weights are clipped to `[0, J_max_ie]` after every step, so depression stops at zero.
@@ -217,9 +222,9 @@ All three are drawn from `default_rng(seed)`, in the order below, and stored as 
 
 | Matrix | Connection probability | Mean weight per connection | Std |
 |---|---|---|---|
-| `B` | `c_B` (0.05) | `B_scale / n_aud` (35 / 54 = 0.65) | half the mean |
+| `B` | `c_B` (0.05) | `B_scale / n_aud` (15 / 54 = 0.28) | half the mean |
 | `B_hvc` | `c_hvc` (0.1) | `B_hvc_scale` (0.378), not divided by `n_hvc` | half the mean |
-| `JEI` | `c_JEI` (0.5) | `0.17 / sqrt(n_e * c_JEI)` (0.0098) | 10% of the mean |
+| `JEI` | `c_JEI` (0.5) | `j_ei_scale / sqrt(n_e * c_JEI)` (0.048 / 17.3 = 0.0028) | 10% of the mean |
 | `JIE` | -- | 0 (all zero) | -- |
 
 Starting `JIE` at zero means only E cells that song drives ever acquire inhibition; cells that

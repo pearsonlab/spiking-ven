@@ -27,6 +27,7 @@ from ..constants import (
     B_SCALE,
     C_B,
     C_HVC,
+    J_EI_SCALE,
     DRIVE_E,
     DRIVE_I,
     G_NMDA,
@@ -45,6 +46,8 @@ from ..constants import (
     TARGET_RATE_E,
     TAU_S,
     TAU_SFA,
+    TAU_INH,
+    TAU_EXC,
     TAU_STDP,
     a_jie_for,
 )
@@ -91,6 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n-hvc", type=int, default=N_HVC)
     p.add_argument("--c-b", type=float, default=C_B)
     p.add_argument("--c-hvc", type=float, default=C_HVC)
+    p.add_argument("--j-ei-scale", type=float, default=J_EI_SCALE,
+                   help="E->I weight scale; mean weight = j_ei_scale / sqrt(n_e * c_JEI)")
     p.add_argument("--b-hvc-scale", type=float, default=B_HVC_SCALE)
     p.add_argument("--r-i-th", type=float, default=R_I_TH)
     p.add_argument("--j-max-ie", type=float, default=J_MAX_IE)
@@ -117,6 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     # Spike-frequency adaptation on E; the sweep behind A_SFA is in docs/design-notes.md.
     p.add_argument("--a-sfa", type=float, default=A_SFA,
                    help="adaptation increment per E spike (units of theta_e)")
+    p.add_argument("--tau-inh", type=float, default=TAU_INH,
+                   help="I->E synaptic decay (ms), GABA_A; 0 = one-step pulse")
+    p.add_argument("--tau-exc", type=float, default=TAU_EXC,
+                   help="E->I synaptic decay (ms), AMPA; 0 = one-step pulse")
     p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
                    help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
     p.add_argument("--g-nmda", type=float, default=G_NMDA,
@@ -162,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
     # --- network ----------------------------------------------------------
     ven = VocalErrorNet(
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
-        B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc,
+        B_scale=args.b_scale, c_B=args.c_b, c_hvc=args.c_hvc, j_ei_scale=args.j_ei_scale,
         B_hvc_scale=args.b_hvc_scale, tau_s=args.tau_s,
         tau_e=args.tau_e,
         target_rate=args.target_rate_e,
@@ -171,6 +180,7 @@ def main(argv: list[str] | None = None) -> None:
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
         tau_stdp=args.tau_stdp, seed=args.seed,
         a_sfa=args.a_sfa, tau_sfa=args.tau_sfa, g_nmda=args.g_nmda,
+        tau_inh=args.tau_inh, tau_exc=args.tau_exc,
     )
     if args.theta_e_init > 0.0:
         ven.theta_e[:] = args.theta_e_init

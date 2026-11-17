@@ -342,10 +342,48 @@ stated.
   48.2-54.5 at 150, so 150 is the lowest that keeps every seed above the 47 ms bound. At 150:
   extra spikes 0.92-1.04, latency 24-28 ms, responders 57-59%, reversed/trained 1.11-1.18,
   baseline 2.1-2.6 Hz. Over evaluation seeds 42-51, duration 52.5 +/- 1.9 ms (47.8-54.6).
-- **Adopted:** `TAU_S` 3, `B_SCALE` 35, `B_HVC_SCALE` 0.378, `G_NMDA` 150, `R_I_TH` 40.
-- **Open: the NMDA share.** Near threshold NMDA now carries ~48x the fast charge per spike, against
-  3.3x before. The response duration rests on it. A shorter `TAU_STDP`, a slower auditory
-  input code, or recurrent excitation are the alternatives not yet tried.
+- **Adopted then:** `TAU_S` 3, `B_SCALE` 35, `B_HVC_SCALE` 0.378, `G_NMDA` 150, `R_I_TH` 40.
+  The recurrent synapses were still one-step pulses; superseded by the next section.
+
+## Synaptic recurrent connections and the NMDA duration sweep (adopted)
+
+- **I -> E and E -> I were one-step pulses** (`JIE @ sI[t-1]`, `JEI @ sE[t-1]`; the Brian2 port
+  approximated them with 1 ms decays). They are now traces like the inputs': GABA_A at
+  `TAU_INH` 5 ms (IPSC decay ~5-10 ms; 5 as in Brunel & Wang 2001) and AMPA at `TAU_EXC` 3 ms.
+  0 keeps the one-step pulse, which is how older model files and `VocalErrorNetV2` load.
+- **The GABA charge compensates itself; E -> I does not.** A 5 ms trace gives each I spike 5.5x
+  the charge, and learning settled at ~5x smaller `JIE` (row sum 5.9 -> 1.2): matching
+  `J_MAX_IE` and `A_jie` to it changed little. `JEI` is fixed, so the 3 ms trace made E -> I 3.5x
+  stronger, and that fast feedback inhibition cut the DAF response (extra spikes 0.96 -> 0.75,
+  latency 24 -> 39 ms, duration 54 -> 43 ms, reversed/trained 1.12 -> 1.06). Its scale, once a
+  hard-coded 0.17, is now `J_EI_SCALE`; 0.048 = 0.17 / 3.53 keeps the charge per spike and
+  recovers most of it (0.87, 32 ms, 48 ms, 1.09). 0.034-0.10 behave alike. `TAU_INH` 10 ms was
+  worse on every axis (0.78, 34 ms, 44 ms, 1.07).
+- **NMDA then lengthens the response to ~70 ms**, with `B_SCALE` lowered to hold magnitude
+  (seed 42): `G_NMDA` 150/35 -> 48 ms; 200/30 -> 50; 250/25 -> 55; 300/20 -> 61; 400/15 -> 67;
+  beyond that it saturates at 68-70 ms while magnitude falls (300/15, 400/10, 500/10: extra
+  spikes 0.62-0.72). The response stays a transient (late/peak 0.07).
+- **Latency is the binding constraint**, near the 35 ms bound: at `R_I_TH` 40 training seed 44
+  gave 35.7 ms (400/15) and 35.9 ms (300/20). Raising `R_I_TH` slightly above the I rate
+  (40.6 Hz) shortens it: 46 gave 26.7-32.5 ms but responders 62-63% (CI to 64%) and extra spikes
+  1.07 on one seed. 43 sits between:
+
+| `G_NMDA` 400, `B_SCALE` 15, `R_I_TH` 43, training seed | 42 | 43 | 44 |
+|---|---|---|---|
+| responders | 60% | 59% | 60% |
+| extra spikes | 0.92 | 1.02 | 0.95 |
+| latency (ms) | 28.7 | 26.6 | 33.7 |
+| duration (ms) | 70.6 | 68.5 | 70.2 |
+| late / peak | 0.07 | 0.10 | 0.11 |
+| reversed / trained | 1.105 | 1.103 | 1.157 |
+
+- **Adopted:** `TAU_INH` 5, `TAU_EXC` 3, `J_EI_SCALE` 0.048, `G_NMDA` 400, `B_SCALE` 15,
+  `R_I_TH` 43. Over evaluation seeds 42-51: duration 67.6 +/- 2.5 ms, latency 29.0 +/- 1.1 ms,
+  extra spikes 0.92, responders 60%, peak ~21 Hz at 40 ms (the bird's ~20 Hz).
+- **Open: the NMDA share.** Near threshold NMDA carries ~130x the fast charge per spike (3.3x
+  at the original 20 ms operating point), and duration rests on it; it saturates near 70 ms,
+  short of the bird's 90. A slower auditory input code or recurrent E -> E excitation are the
+  alternatives not yet tried.
 
 ## DAF metrics
 

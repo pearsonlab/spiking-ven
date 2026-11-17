@@ -68,6 +68,11 @@ def nmda_gating(aud_spikes, tau_rise=C.NMDA_TAU_RISE, tau_decay=C.NMDA_TAU_DECAY
 STDP_GATE = "window"
 
 
+def _decay(tau_ms: float, dt: float = 1.0) -> float:
+    """Per-step decay of a synaptic trace; 0 for ``tau_ms <= 0`` (instantaneous)."""
+    return float(np.exp(-dt / tau_ms)) if tau_ms > 0.0 else 0.0
+
+
 def stdp_audio_gate(aud_spikes, B, window_ms: float) -> np.ndarray:
     """``(n_e, T)`` bool: E cell ``e`` received an auditory spike in ``(t - window_ms, t]``.
 
@@ -107,6 +112,8 @@ def _simulate(
     g_nmda: float = 0.0,
     nmda_v: tuple | None = None,
     stdp_gate: np.ndarray | None = None,
+    decay_inh: float = 0.0,
+    decay_exc: float = 0.0,
 ):
     # Membrane noise comes from the caller's seeded generator, never the global np.random.
     # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the per-neuron map from the
@@ -120,6 +127,11 @@ def _simulate(
     sE_prev = np.zeros(n_e)
     sI_prev = np.zeros(n_i)
     x_i     = np.zeros(n_i)
+    # Recurrent synaptic currents, one trace per presynaptic cell: each spike adds 1, which
+    # decays with tau_inh (I->E, GABA_A) or tau_exc (E->I, AMPA). A decay of 0 is the
+    # former instantaneous coupling: the previous step's spikes only.
+    g_inh   = np.zeros(n_i)
+    g_exc   = np.zeros(n_e)
 
     sE_mat  = np.zeros((n_e, T), dtype=np.float32)
     sI_mat  = np.zeros((n_i, T), dtype=np.float32)
@@ -147,7 +159,8 @@ def _simulate(
 
         # --- E dynamics ---
         audio_drive_e = B @ h_aud_t
-        u_e = drive_e + audio_drive_e - JIE @ sI_prev
+        g_inh = decay_inh * g_inh + sI_prev
+        u_e = drive_e + audio_drive_e - JIE @ g_inh
         if g_nmda > 0.0:
             # NMDA conductance through the same connections, Mg2+-blocked at the
             # membrane's current potential (in mV), with driving force E_NMDA - V.
@@ -177,7 +190,8 @@ def _simulate(
         sE_mat[:, t] = sE
 
         # --- I dynamics ---
-        u_i = drive_i + JEI @ sE_prev + B_hvc @ h_hvc_t
+        g_exc = decay_exc * g_exc + sE_prev
+        u_i = drive_i + JEI @ g_exc + B_hvc @ h_hvc_t
         if noise_i > 0.0:
             u_i += rng.normal(0.0, noise_i, n_i)
         if t_refr_ms > 0.0:
@@ -230,6 +244,8 @@ class VocalErrorNet:
     n_e, n_i, n_hvc, n_aud : population sizes. ``n_aud`` has no default: it must equal
                    the encoder's ``n_channels``.
     tau_e, tau_i : membrane time constants (ms)
+    tau_inh      : I->E synaptic decay (ms), GABA_A; 0 = instantaneous (one-step pulse)
+    tau_exc      : E->I synaptic decay (ms), AMPA; 0 = instantaneous
     tau_s        : input synaptic time constant (ms). Sets the decay of the conductance
                    each auditory and HVC spike produces -- `spike_to_rate` on aud_spikes
                    and hvc_spikes -- so it is the EPSC time course of the aud->E and
@@ -286,9 +302,12 @@ class VocalErrorNet:
         c_hvc: float = C.C_HVC,
         B_hvc_scale: float = C.B_HVC_SCALE,
         c_JEI: float = C.C_JEI,
+        j_ei_scale: float = C.J_EI_SCALE,
         t_refr_ms: float = C.T_REFR_MS,
         a_sfa: float = C.A_SFA,
         tau_sfa: float = C.TAU_SFA,
+        tau_inh: float = C.TAU_INH,
+        tau_exc: float = C.TAU_EXC,
         r_i_th: float = C.R_I_TH,
         drive_e: float = C.DRIVE_E,
         drive_i: float = C.DRIVE_I,
@@ -333,6 +352,7 @@ class VocalErrorNet:
         self.c_hvc         = c_hvc
         self.B_hvc_scale   = B_hvc_scale
         self.c_JEI         = c_JEI
+        self.j_ei_scale    = float(j_ei_scale)
         #: Absolute refractory period (ms). 2 ms is the standard cortical value and caps
         #: the instantaneous rate at 500 Hz; 0 disables it (ceiling 1000 Hz).
         self.t_refr_ms     = float(t_refr_ms)
@@ -342,6 +362,8 @@ class VocalErrorNet:
         #: several ``tau_sfa`` unless its auditory input is strong.
         self.a_sfa         = float(a_sfa)
         self.tau_sfa       = float(tau_sfa)
+        self.tau_inh       = float(tau_inh)
+        self.tau_exc       = float(tau_exc)
         self.r_i_th        = r_i_th
         self.drive_e       = drive_e
         self.drive_i       = drive_i
@@ -382,7 +404,7 @@ class VocalErrorNet:
         # E→I: sparse log-normal, fixed (not plastic).
         srKE = np.sqrt(n_e * c_JEI)
         self.JEI = _lognormal_sparse(
-            (n_i, n_e), c_JEI, 1.7 / srKE / 10, 1.7 / srKE / 10 * 0.1, rng
+            (n_i, n_e), c_JEI, j_ei_scale / srKE, j_ei_scale / srKE * 0.1, rng
         )
 
         # I→E: zero-initialised. Starting from zero means only song-driven E neurons ever
@@ -465,6 +487,7 @@ class VocalErrorNet:
             drive_e=self.drive_e, drive_i=self.drive_i,
             noise_e=self.noise_e, noise_i=self.noise_i,
             t_refr_ms=self.t_refr_ms, a_sfa=self.a_sfa, tau_sfa=self.tau_sfa,
+            tau_inh=self.tau_inh, tau_exc=self.tau_exc, j_ei_scale=self.j_ei_scale,
             target_rate=self.target_rate, target_rate_i=self.target_rate_i,
             aud_delay_ms=self.aud_delay_ms, hvc_delay_ms=self.hvc_delay_ms,
             tau_stdp=self.tau_stdp,
@@ -487,13 +510,16 @@ class VocalErrorNet:
     #: Keys added with later features, and the value a file saved before the feature
     #: existed loads with. Each default switches the feature off, so such a model reloads
     #: with the dynamics it was trained with: no refractory period, no adaptation, no
-    #: conduction delay. ``tau_stdp`` is not listed: a file without it (or with 0, the
+    #: conduction delay, instantaneous recurrent synapses. ``tau_stdp`` is not listed: a file without it (or with 0, the
     #: former "reuse the synaptic window") loads it as its own ``tau_s``, the window it
     #: was trained with.
     OPTIONAL_KEY_DEFAULTS: dict[str, Any] = {
         "t_refr_ms": 0.0,
         "a_sfa": 0.0,
         "tau_sfa": 0.0,
+        "tau_inh": 0.0,
+        "tau_exc": 0.0,
+        "j_ei_scale": 0.17,
         "aud_delay_ms": 0,
         "hvc_delay_ms": 0,
         "g_nmda": 0.0,
@@ -531,7 +557,8 @@ class VocalErrorNet:
             setattr(obj, k, float(d[k]))
 
         opt = cls.OPTIONAL_KEY_DEFAULTS
-        for k in ("t_refr_ms", "a_sfa", "tau_sfa") + _NMDA_KEYS:
+        for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_inh", "tau_exc",
+                  "j_ei_scale") + _NMDA_KEYS:
             setattr(obj, k, float(d[k]) if k in d else opt[k])
         saved_stdp = float(d["tau_stdp"]) if "tau_stdp" in d else 0.0
         obj.tau_stdp = saved_stdp if saved_stdp > 0.0 else obj.tau_s
@@ -577,6 +604,8 @@ class VocalErrorNet:
             "v_reset":      float(self.v_reset),
             "a_sfa":        float(self.a_sfa),
             "tau_sfa":      float(self.tau_sfa),
+            "tau_inh":      float(self.tau_inh),
+            "tau_exc":      float(self.tau_exc),
             "t_refr_ms":    float(self.t_refr_ms),
             "aud_delay_ms": int(self.aud_delay_ms),
             "hvc_delay_ms": int(self.hvc_delay_ms),
@@ -647,6 +676,7 @@ class VocalErrorNet:
             s_nmda=s_nmda, g_nmda=g_nmda, nmda_v=nmda_v,
             stdp_gate=(stdp_audio_gate(aud_spikes, self.B, self.tau_stdp)
                        if learn_weights else None),
+            decay_inh=_decay(self.tau_inh), decay_exc=_decay(self.tau_exc),
         )
 
         if learn_weights:
@@ -698,10 +728,11 @@ class VocalErrorNetV2(VocalErrorNet):
         super().__init__(
             n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, tau_e=tau_e, tau_i=tau_i,
             tau_s=tau_s, A_jie=A_jie, J_max_ie=J_max_ie, c_B=c_B, B_scale=B_scale,
-            c_hvc=c_hvc, B_hvc_scale=B_hvc_scale, c_JEI=c_JEI, t_refr_ms=t_refr_ms,
+            c_hvc=c_hvc, B_hvc_scale=B_hvc_scale, c_JEI=c_JEI, j_ei_scale=0.17,
+            t_refr_ms=t_refr_ms,
             a_sfa=a_sfa, tau_sfa=tau_sfa, r_i_th=r_i_th, drive_e=drive_e,
             drive_i=drive_i, noise_e=noise_e, noise_i=noise_i, target_rate=target_rate,
             target_rate_i=target_rate_i, aud_delay_ms=aud_delay_ms,
             hvc_delay_ms=hvc_delay_ms, tau_stdp=tau_stdp, seed=seed,
-            g_nmda=0.0,
+            g_nmda=0.0, tau_inh=0.0, tau_exc=0.0,
         )

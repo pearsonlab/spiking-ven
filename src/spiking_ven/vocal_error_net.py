@@ -34,7 +34,7 @@ from .common import (
 )
 
 __all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_bursts", "spike_to_rate",
-           "nmda_gating", "mg_block"]
+           "nmda_gating", "mg_block", "stdp_audio_gate"]
 
 #: Saved NMDA parameters; files without them load with the NMDA component off.
 _NMDA_KEYS = ("g_nmda", "nmda_tau_rise", "nmda_tau_decay", "nmda_alpha", "mg_mm",
@@ -64,6 +64,27 @@ def nmda_gating(aud_spikes, tau_rise=C.NMDA_TAU_RISE, tau_decay=C.NMDA_TAU_DECAY
     return s
 
 
+#: The STDP audio gate new networks learn with; see :func:`stdp_audio_gate`.
+STDP_GATE = "window"
+
+
+def stdp_audio_gate(aud_spikes, B, window_ms: float) -> np.ndarray:
+    """``(n_e, T)`` bool: E cell ``e`` received an auditory spike in ``(t - window_ms, t]``.
+
+    The STDP audio gate. Only E spikes that fall inside it update ``JIE``, so inhibition
+    is learned only by cells the song drives, and only while it drives them. It is
+    defined on input spike events with the STDP window, not on the filtered synaptic
+    drive: an exponential never returns to zero, so ``B @ h_aud > 0`` stayed open for
+    the rest of the run after a cell's first input spike, whatever ``tau_s`` was.
+    """
+    aud = np.asarray(aud_spikes, dtype=np.float64)
+    w = max(1, int(round(window_ms)))
+    cs = np.concatenate([np.zeros((aud.shape[0], 1)), np.cumsum(aud, axis=1)], axis=1)
+    t = np.arange(aud.shape[1])
+    recent = cs[:, t + 1] - cs[:, np.maximum(t + 1 - w, 0)]     # spikes in (t - w, t]
+    return (np.asarray(B, dtype=np.float64) @ recent) > 0.0
+
+
 def mg_block(v_mv, mg_mm=C.MG_MM):
     """Fraction of NMDA conductance not blocked by Mg2+ at ``v_mv`` (Jahr & Stevens 1990)."""
     return 1.0 / (1.0 + mg_mm * np.exp(-0.062 * np.asarray(v_mv)) / 3.57)
@@ -85,6 +106,7 @@ def _simulate(
     s_nmda: np.ndarray | None = None,
     g_nmda: float = 0.0,
     nmda_v: tuple | None = None,
+    stdp_gate: np.ndarray | None = None,
 ):
     # Membrane noise comes from the caller's seeded generator, never the global np.random.
     # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the per-neuron map from the
@@ -176,8 +198,12 @@ def _simulate(
             # xi_th debiases x_i above the tonic I baseline. The I trace decays with
             # alpha_stdp (tau_stdp), the coincidence window, independently of the
             # synaptic time constant tau_s.
-            audio_gate_e = (audio_drive_e > 0.0).astype(np.float64)
-            gate_sE = sE * audio_gate_e
+            # The audio gate: an E spike counts only if the cell received an auditory
+            # input spike within the last tau_stdp ms (stdp_audio_gate), read with the
+            # same conduction delay as the drive.
+            assert stdp_gate is not None, "learn_weights needs stdp_gate"
+            gate_sE = sE * (stdp_gate[:, t - aud_delay_ms] if t >= aud_delay_ms
+                            else 0.0)
             x_i = alpha_stdp * x_i + sI
             JIE += A_jie * np.outer(gate_sE, x_i - xi_th)
             np.clip(JIE, 0.0, J_max_ie, out=JIE)
@@ -209,9 +235,8 @@ class VocalErrorNet:
                    and hvc_spikes -- so it is the EPSC time course of the aud->E and
                    HVC->I synapses, not a free smoothing parameter.
 
-                   It is NOT the STDP trace constant: ``tau_stdp`` sets that window. One
-                   coupling remains: the LTP audio gate is ``B @ h_aud > 0``, so
-                   shortening tau_s still narrows the window in which LTP can occur.
+                   It plays no part in learning: ``tau_stdp`` sets both the I trace and
+                   the audio gate (:func:`stdp_audio_gate`).
     A_jie        : causal Hebbian STDP amplitude for JIE (I→E)
     J_max_ie     : hard upper bound on JIE weights
     c_B          : auditory→E connection probability
@@ -221,7 +246,8 @@ class VocalErrorNet:
     c_JEI        : E→I connection probability (fixed throughout)
     r_i_th       : I baseline rate threshold for STDP (Hz); x_i below this → LTD on JIE.
                    Set to mean I rate during song so rule is zero-mean for uncorrelated activity.
-    tau_stdp     : STDP coincidence window (ms) for the I trace; 0 falls back to tau_s
+    tau_stdp     : STDP window (ms): the I trace's time constant and the audio gate's
+                   width; 0 falls back to tau_s
     drive_e      : tonic E drive
     drive_i      : tonic I drive
     noise_e      : std of additive Gaussian noise on E input
@@ -335,6 +361,10 @@ class VocalErrorNet:
         self.v_th_mv        = float(v_th_mv)
         self.v_reset: float = 0.0
         self.stimulus: dict = {}
+        #: Which STDP audio gate this network learns with. "window" is
+        #: :func:`stdp_audio_gate`; models saved before it load as "drive" (the old
+        #: ``B @ h_aud > 0``) and can be evaluated but not trained further.
+        self.stdp_gate: str = STDP_GATE
 
         # aud→E: sparse log-normal, fixed
         mean_B = B_scale / n_aud
@@ -439,6 +469,7 @@ class VocalErrorNet:
             **{k: getattr(self, k) for k in _NMDA_KEYS},
             theta_e=self.theta_e, theta_i=self.theta_i,
             stimulus_json=np.array(json.dumps(self.stimulus, sort_keys=True)),
+            stdp_gate=np.array(self.stdp_gate),
         )
 
     #: Keys every saved model must contain. ``load`` refuses a file missing any of them.
@@ -471,6 +502,7 @@ class VocalErrorNet:
         "e_l_mv": C.E_L_MV,
         "v_th_mv": C.V_TH_MV,
         "stimulus_json": {},
+        "stdp_gate": "drive",
     }
 
     @classmethod
@@ -502,6 +534,7 @@ class VocalErrorNet:
             setattr(obj, k, int(d[k]) if k in d else opt[k])
         obj.stimulus = (json.loads(str(d["stimulus_json"])) if "stimulus_json" in d
                         else dict(opt["stimulus_json"]))
+        obj.stdp_gate = str(d["stdp_gate"]) if "stdp_gate" in d else opt["stdp_gate"]
 
         # theta_e is saved per neuron; a scalar is broadcast to every E cell.
         raw_theta = d["theta_e"]
@@ -561,6 +594,10 @@ class VocalErrorNet:
         rng: np.random.Generator | None = None,
         hvc_prelude: np.ndarray | None = None,
     ):
+        if learn_weights and self.stdp_gate != STDP_GATE:
+            raise ValueError(
+                f"this model was trained with the {self.stdp_gate!r} STDP gate, which no "
+                f"longer exists; retrain it from scratch (the gate is now {STDP_GATE!r})")
         n_pre = 0 if hvc_prelude is None else int(np.asarray(hvc_prelude).shape[1])
         if n_pre:
             hvc_spikes = np.concatenate(
@@ -604,6 +641,8 @@ class VocalErrorNet:
             aud_delay_ms=self.aud_delay_ms,
             hvc_delay_ms=self.hvc_delay_ms,
             s_nmda=s_nmda, g_nmda=g_nmda, nmda_v=nmda_v,
+            stdp_gate=(stdp_audio_gate(aud_spikes, self.B, tau_stdp_eff)
+                       if learn_weights else None),
         )
 
         if learn_weights:

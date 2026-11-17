@@ -13,7 +13,7 @@ import pytest
 
 from spiking_ven import constants as C
 from spiking_ven import generate_hvc_bursts
-from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2
+from spiking_ven.vocal_error_net import VocalErrorNet, VocalErrorNetV2, stdp_audio_gate
 
 SHIPPED_MODEL = Path(__file__).resolve().parent.parent / "outputs" / "ven_model.npz"
 
@@ -100,7 +100,7 @@ def test_missing_optional_keys_load_with_documented_defaults(tmp_path):
         "aud_delay_ms": 0, "hvc_delay_ms": 0, "tau_stdp": 0.0,
         "g_nmda": 0.0, "nmda_tau_rise": C.NMDA_TAU_RISE, "nmda_tau_decay": C.NMDA_TAU_DECAY,
         "nmda_alpha": C.NMDA_ALPHA, "mg_mm": C.MG_MM, "e_nmda_mv": C.E_NMDA_MV,
-        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {},
+        "e_l_mv": C.E_L_MV, "v_th_mv": C.V_TH_MV, "stimulus_json": {}, "stdp_gate": "drive",
     }
     assert VocalErrorNet.OPTIONAL_KEY_DEFAULTS == expected
 
@@ -301,14 +301,42 @@ def test_closed_audio_gate_blocks_all_plasticity(r_i_th):
     assert np.all(net.JIE == np.float32(0.3))
 
 
+def test_stdp_audio_gate_is_a_causal_window_of_tau_stdp():
+    B = np.array([[1.0, 0.0], [0.0, 2.0], [0.0, 0.0]])
+    aud = np.zeros((2, 100))
+    aud[0, 10] = 1.0
+    aud[1, 50] = 1.0
+    g = stdp_audio_gate(aud, B, 20.0)
+    assert g.shape == (3, 100)
+    np.testing.assert_array_equal(np.flatnonzero(g[0]), np.arange(10, 30))
+    np.testing.assert_array_equal(np.flatnonzero(g[1]), np.arange(50, 70))
+    assert not g[2].any(), "a cell with no auditory input is never gated"
+
+
+def test_gate_closes_tau_stdp_after_the_last_input_spike():
+    """E spikes driven by tonic drive long after the input must not move JIE."""
+    net = _stdp_net(r_i_th=0.0)
+    net.drive_e = 1.0
+    net.JIE[:] = 0.3
+    hvc, aud = _pulses(net, T=300, aud_t=[20], hvc_t=[100, 140, 180])
+    sE, sI = net.transform_all(hvc, aud)
+    assert sE[0, 100:].sum() > 0 and sI.sum() > 0, "premise: E and I both fire late"
+    assert sI[:, :45].sum() == 0, "premise: I is silent while the gate is open"
+    net.fit(hvc, aud)
+    # I first fires at ~100 ms, long after the gate (20-40 ms) closed: no I trace was
+    # ever read by a gated spike, and r_i_th = 0 means no depression either.
+    assert np.all(net.JIE == np.float32(0.3))
+
+
 def test_e_spike_without_i_activity_depresses_and_clips_at_zero():
     # xi_th = r_i_th * tau_stdp * 1e-3 = 50 * 20 * 1e-3 = 1.0; with I silent the trace is
-    # 0, so every gated E spike lowers the row by A_jie * xi_th.
+    # 0, so every gated E spike (within tau_stdp of the input) lowers the row by
+    # A_jie * xi_th.
     net = _stdp_net(r_i_th=50.0)
     net.JIE[0, 0] = 0.5
     hvc, aud = _pulses(net, aud_t=[20])
     sE = net.fit(hvc, aud)
-    n_spikes = sE[0].sum()
+    n_spikes = sE[0, 20:20 + int(net.tau_stdp)].sum()
     assert n_spikes > 0
     xi_th = net.r_i_th * net.tau_stdp * 1e-3
     assert net.JIE[0, 0] == pytest.approx(0.5 - n_spikes * net.A_jie * xi_th, rel=1e-5)
@@ -435,3 +463,21 @@ def test_a_prelude_is_trimmed_and_changes_no_weights():
     net.fit(np.zeros((6, 0), dtype=np.float32), np.zeros((5, 0), dtype=np.float32),
             hvc_prelude=pre)
     assert not net.JIE.any()
+
+
+def test_stdp_gate_is_saved_and_old_models_refuse_to_train(tmp_path):
+    net = _stdp_net()
+    path = tmp_path / "new.npz"
+    net.save(str(path))
+    assert VocalErrorNet.load(str(path)).stdp_gate == "window"
+
+    old = dict(np.load(path))
+    del old["stdp_gate"]
+    old_path = tmp_path / "old.npz"
+    np.savez(old_path, **old)
+    loaded = VocalErrorNet.load(str(old_path))
+    assert loaded.stdp_gate == "drive"
+    hvc, aud = _pulses(loaded, aud_t=[20])
+    loaded.transform(hvc, aud)                      # evaluation still works
+    with pytest.raises(ValueError, match="retrain"):
+        loaded.fit(hvc, aud)

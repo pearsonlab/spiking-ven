@@ -40,7 +40,6 @@ from ..constants import (
     I_DRIVE_I_PA,
     J_EI_MEAN_NS,
     J_EI_SD_NS,
-    J_MAX_IE_NS,
     N_E,
     N_HVC,
     N_I,
@@ -129,8 +128,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--j-ei-sd-ns", type=float, default=J_EI_SD_NS,
                    help="E->I peak conductance SD (nS)")
     p.add_argument("--r-i-th", type=float, default=R_I_TH)
-    p.add_argument("--j-max-ie-ns", type=float, default=J_MAX_IE_NS,
-                   help="upper bound on each I->E peak conductance (nS)")
     p.add_argument("--a-jie-ns", type=float, default=None,
                    help="STDP step (nS); default a_jie_for(tau_stdp)")
     p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
@@ -212,7 +209,7 @@ def main(argv: list[str] | None = None) -> None:
         c_B=args.c_b, b_aud_mean_ns=args.b_aud_mean_ns, b_aud_sd_ns=args.b_aud_sd_ns,
         c_hvc=args.c_hvc, b_hvc_mean_ns=args.b_hvc_mean_ns, b_hvc_sd_ns=args.b_hvc_sd_ns,
         j_ei_mean_ns=args.j_ei_mean_ns, j_ei_sd_ns=args.j_ei_sd_ns,
-        j_max_ie_ns=args.j_max_ie_ns, a_jie_ns=a_jie, r_i_th=args.r_i_th,
+        a_jie_ns=a_jie, r_i_th=args.r_i_th,
         tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
         g_nmda_mean_ns=args.g_nmda_mean_ns,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,

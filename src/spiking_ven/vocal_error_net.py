@@ -31,6 +31,7 @@ from .common import (
     _lognormal_sparse,
     generate_hvc_bursts,  # re-exported for convenience
     spike_to_rate,        # re-exported for convenience
+    uniform_scalar,
 )
 
 __all__ = ["VocalErrorNet", "VocalErrorNetV2", "generate_hvc_bursts", "spike_to_rate",
@@ -116,7 +117,7 @@ def _simulate(
     decay_exc: float = 0.0,
 ):
     # Membrane noise comes from the caller's seeded generator, never the global np.random.
-    # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the per-neuron map from the
+    # ``nmda_v`` is (e_l_mv, mv_per_unit, e_nmda_units, mg_mm): the map from the
     # dimensionless membrane to mV, and the NMDA reversal in membrane units.
     n_e = B.shape[0]
     n_i = JEI.shape[0]
@@ -411,11 +412,11 @@ class VocalErrorNet:
         # get trained (via STDP in fit()), leaving novel-E rows at zero.
         self.JIE = np.zeros((n_e, n_i), dtype=np.float32)
 
-        # E threshold, per neuron, set so the tonic drive alone fires at target_rate.
+        # E threshold, shared by every E cell, set so the tonic drive alone fires at
+        # target_rate.
         _decay_e  = float(np.exp(-1.0 / tau_e))
         _isi_e    = 1.0 / target_rate
-        _theta_e0 = float(max(drive_e * (1.0 - _decay_e ** _isi_e), 1e-3))
-        self.theta_e: np.ndarray = np.full(n_e, _theta_e0, dtype=np.float64)
+        self.theta_e: float = float(max(drive_e * (1.0 - _decay_e ** _isi_e), 1e-3))
 
         # I threshold, from a fixed 10 ms reference so it does not move with tau_s.
         # theta_i >> drive_i, so I fires only when HVC drives it, not from tonic E
@@ -503,9 +504,9 @@ class VocalErrorNet:
         "tau_e", "tau_i", "tau_s", "A_jie", "J_max_ie",
         "c_B", "B_scale", "c_hvc", "B_hvc_scale", "c_JEI", "r_i_th",
         "drive_e", "drive_i", "noise_e", "noise_i",
-        "target_rate", "target_rate_i", "theta_i",
+        "target_rate", "target_rate_i", "theta_e", "theta_i",
     )
-    _REQUIRED_ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE", "theta_e")
+    _REQUIRED_ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE")
 
     #: Keys added with later features, and the value a file saved before the feature
     #: existed loads with. Each default switches the feature off, so such a model reloads
@@ -553,8 +554,10 @@ class VocalErrorNet:
         obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
         for k in cls._REQUIRED_INT_KEYS:
             setattr(obj, k, int(d[k]))
+        # Older files saved theta_e once per E cell, always uniform; uniform_scalar
+        # collapses that and refuses anything else.
         for k in cls._REQUIRED_FLOAT_KEYS:
-            setattr(obj, k, float(d[k]))
+            setattr(obj, k, uniform_scalar(d[k], k))
 
         opt = cls.OPTIONAL_KEY_DEFAULTS
         for k in ("t_refr_ms", "a_sfa", "tau_sfa", "tau_inh", "tau_exc",
@@ -568,11 +571,7 @@ class VocalErrorNet:
                         else dict(opt["stimulus_json"]))
         obj.stdp_gate = str(d["stdp_gate"]) if "stdp_gate" in d else opt["stdp_gate"]
 
-        # theta_e is saved per neuron; a scalar is broadcast to every E cell.
-        raw_theta = d["theta_e"]
-        obj.theta_e = (raw_theta.copy() if raw_theta.ndim > 0
-                       else np.full(obj.n_e, float(raw_theta), dtype=np.float64))
-        obj.B        = d["B"]
+        obj.B       = d["B"]
         obj.B_hvc    = d["B_hvc"]
         obj.JEI      = d["JEI"]
         obj.JIE      = d["JIE"]
@@ -582,7 +581,7 @@ class VocalErrorNet:
     def to_brian_weights(self) -> dict:
         """Everything :mod:`spiking_ven.brian2_runtime` needs to run this network.
 
-        Weight matrices (float64, post x pre), the per-neuron E thresholds, and every
+        Weight matrices (float64, post x pre), the E and I thresholds, and every
         scalar the dynamics use -- including spike-frequency adaptation, the refractory
         period and the conduction delays, without which the Brian2 network would not be
         the one that was trained.
@@ -592,7 +591,7 @@ class VocalErrorNet:
             "B_hvc":        self.B_hvc.astype(np.float64),
             "JIE":          self.JIE.astype(np.float64),
             "JEI":          self.JEI.astype(np.float64),
-            "theta_e":      self.theta_e.astype(np.float64),
+            "theta_e":      float(self.theta_e),
             "theta_i":      float(self.theta_i),
             "tau_s":        float(self.tau_s),
             "tau_e":        float(self.tau_e),
@@ -665,7 +664,7 @@ class VocalErrorNet:
             self.JEI.astype(np.float64),
             self.JIE.astype(np.float64),
             decay_e, decay_i,
-            self.theta_e, float(self.theta_i),
+            float(self.theta_e), float(self.theta_i),
             float(self.v_reset), float(self.noise_e), float(self.noise_i),
             self.t_refr_ms, self.a_sfa, self.tau_sfa,
             float(self.A_jie), float(self.J_max_ie), xi_th,

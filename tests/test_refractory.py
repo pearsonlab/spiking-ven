@@ -23,7 +23,7 @@ def test_membrane_refractory_sets_the_isi_floor(refr):
     """Under saturating drive a cell fires exactly every ``refr`` ms -- not refr + 1."""
     v = VocalErrorNet(n_e=20, n_i=10, n_aud=4, n_hvc=4, seed=0, t_refr_ms=refr,
                       noise_e=0.0, noise_i=0.0, a_sfa=0.0)   # adaptation would slow it
-    v.theta_e = np.full(v.n_e, 1e-6)                      # fire whenever permitted
+    v.theta_e = 1e-6                      # fire whenever permitted
     sE, _ = v.transform_all(np.zeros((4, 150), dtype=np.float32),
                             np.ones((4, 150), dtype=np.float32))
     assert _min_isi(sE) == int(refr)
@@ -34,7 +34,7 @@ def test_membrane_refractory_off_is_unbounded():
     """t_refr_ms=0 disables the period, so models saved without one reload as trained."""
     v = VocalErrorNet(n_e=20, n_i=10, n_aud=4, n_hvc=4, seed=0, t_refr_ms=0.0,
                       noise_e=0.0, noise_i=0.0, a_sfa=0.0)
-    v.theta_e = np.full(v.n_e, 1e-6)
+    v.theta_e = 1e-6
     sE, _ = v.transform_all(np.zeros((4, 150), dtype=np.float32),
                             np.ones((4, 150), dtype=np.float32))
     assert _min_isi(sE) == 1

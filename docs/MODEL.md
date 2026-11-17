@@ -85,7 +85,7 @@ on a spike:  V_e = v_reset,  refr_e = t_refr_ms,  w_sfa += a_sfa
 ```
 
 - `V_e` relaxes toward its input `u_e` with time constant `tau_e`; a spike is a crossing of the
-  per-neuron threshold `theta_e`. `v_reset = 0`, and all state starts at zero.
+  threshold `theta_e`, shared by every E cell. `v_reset = 0`, and all state starts at zero.
 - Inhibition is synaptic: each I spike adds 1 to its cell's trace `g_inh`, entering on the
   step after the spike and decaying with `tau_inh = 5 ms` (GABA_A), so one I spike delivers
   `1 / (1 - exp(-1/5))` = 5.5 units of charge. `tau_inh = 0` is a one-step pulse, as in models
@@ -201,8 +201,8 @@ Both are set once, in the constructor.
 theta_e = max(drive_e * (1 - decay_e ** (1 / target_rate)), 1e-3)     # same for every E cell
 ```
 
-At the operating point `theta_e = 0.06 * (1 - exp(-40/30)) = 0.044`. It is stored per neuron and
-saved per neuron, so it can be set cell by cell.
+At the operating point `theta_e = 0.06 * (1 - exp(-40/30)) = 0.044`, one value shared by every E
+cell, like `theta_i`. Older models, which stored it once per E cell (always uniform), still load.
 
 **`theta_i`** -- the same construction for a fixed reference input `target_rate_i * 10` (the 10 is a
 fixed 10 ms reference, so `theta_i` does not move with `tau_s`):

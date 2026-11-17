@@ -53,7 +53,7 @@ def _assert_same_value(a, b, name):
 def test_save_load_round_trips_every_attribute(tmp_path):
     net = _small_net(tau_e=25.0, a_sfa=0.7, aud_delay_ms=3, hvc_delay_ms=1, r_i_th=4.0)
     net.JIE = np.random.default_rng(1).random(net.JIE.shape).astype(np.float32)
-    net.theta_e = net.theta_e * np.linspace(0.9, 1.1, net.n_e)
+    net.theta_e = net.theta_e * 1.1
     net.stimulus = {"n_ista": 50, "rate_scale": 1.25, "checksums": {"aud": "ab12"}}
     path = tmp_path / "ven.npz"
     net.save(str(path))
@@ -140,14 +140,19 @@ def test_tau_stdp_must_be_positive(bad):
         C.a_jie_for(bad)
 
 
-def test_scalar_theta_e_is_broadcast(tmp_path):
-    full, scalar = tmp_path / "full.npz", tmp_path / "scalar.npz"
+def test_per_cell_theta_e_from_older_files_loads_as_a_scalar(tmp_path):
+    full, old = tmp_path / "full.npz", tmp_path / "old.npz"
     _small_net().save(str(full))
     d = dict(np.load(full))
-    d["theta_e"] = np.array(0.05)
-    np.savez(scalar, **d)
-    theta = VocalErrorNet.load(str(scalar)).theta_e
-    assert theta.shape == (30,) and np.all(theta == 0.05)
+    d["theta_e"] = np.full(30, 0.05)            # older files stored it once per E cell
+    np.savez(old, **d)
+    theta = VocalErrorNet.load(str(old)).theta_e
+    assert type(theta) is float and theta == 0.05
+
+    d["theta_e"] = np.linspace(0.04, 0.06, 30)  # never written by this code: refuse it
+    np.savez(old, **d)
+    with pytest.raises(ValueError, match="theta_e"):
+        VocalErrorNet.load(str(old))
 
 
 @pytest.mark.skipif(not SHIPPED_MODEL.exists(), reason="shipped model missing")
@@ -445,7 +450,7 @@ def test_mg_block_follows_jahr_stevens():
 def _burst_response(g_nmda):
     net = VocalErrorNet(n_e=40, n_i=10, n_hvc=3, n_aud=4, seed=0, noise_e=0.0,
                         a_sfa=0.0, drive_e=0.0, aud_delay_ms=0, g_nmda=g_nmda)
-    net.theta_e = np.full(net.n_e, 0.03)
+    net.theta_e = 0.03
     aud = np.zeros((4, 400), dtype=np.float32)
     aud[:, 50:100:4] = 1.0                  # a 50 ms burst at 250 Hz per channel
     sE = net.transform(np.zeros((3, 400), dtype=np.float32), aud)

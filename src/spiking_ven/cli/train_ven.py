@@ -34,7 +34,6 @@ from ..constants import (
     E_AMPA_MV,
     E_GABA_MV,
     E_L_MV,
-    EI_DELAY_MS,
     G_NMDA_MEAN_NS,
     HVC_DELAY_MS,
     HVC_INTRO,
@@ -145,8 +144,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hvc-intro", type=int, nargs=3, default=list(HVC_INTRO),
                    metavar=("NOTES", "NOTE_MS", "GAP_MS"),
                    help="HVC introductory notes before each motif (no sound); 0 0 0 for none")
-    p.add_argument("--ei-delay-ms", type=int, default=EI_DELAY_MS,
-                   help="E->I conduction delay (ms) beyond the one-step recurrent arrival")
     p.add_argument("--hvc-delay-ms", type=int, default=HVC_DELAY_MS,
                    help="HVC->AIV-I (estimated)")
     # encoding
@@ -218,8 +215,7 @@ def main(argv: list[str] | None = None) -> None:
         j_max_ie_ns=args.j_max_ie_ns, a_jie_ns=a_jie, r_i_th=args.r_i_th,
         tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
         g_nmda_mean_ns=args.g_nmda_mean_ns,
-        aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms,
-        ei_delay_ms=args.ei_delay_ms, seed=args.seed,
+        aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,
     )
 
     print(f"\n{'=' * 65}")

@@ -128,7 +128,6 @@ def _simulate(
     stdp_gate: np.ndarray | None = None,
     decay_inh: float = 0.0,
     decay_exc: float = 0.0,
-    ei_delay_ms: int = 0,
 ):
     # Potentials in mV, currents in pA, conductances in nS, capacitances in pF (nS / pF =
     # 1 / ms). Every weight matrix is a peak conductance (nS) per unit of its trace;
@@ -140,6 +139,7 @@ def _simulate(
 
     V_e     = np.full(n_e, float(e_l))
     V_i     = np.full(n_i, float(e_l))
+    sE_prev = np.zeros(n_e)
     sI_prev = np.zeros(n_i)
     x_i     = np.zeros(n_i)
     # Recurrent synaptic traces, one per presynaptic cell: each spike adds 1, which
@@ -147,9 +147,6 @@ def _simulate(
     # one-step pulse: the previous step's spikes only.
     g_inh   = np.zeros(n_i)
     g_exc   = np.zeros(n_e)
-    # E -> I conduction delay: E spikes reach the AMPA trace of I 1 + ei_delay_ms steps
-    # after they occur. A ring of the last ei_delay_ms + 1 steps' E spikes.
-    sE_ring = np.zeros((ei_delay_ms + 1, n_e))
 
     sE_mat  = np.zeros((n_e, T), dtype=np.float32)
     sI_mat  = np.zeros((n_i, T), dtype=np.float32)
@@ -207,7 +204,7 @@ def _simulate(
         sE_mat[:, t] = sE
 
         # --- I dynamics ---
-        g_exc = decay_exc * g_exc + sE_ring[t % (ei_delay_ms + 1)]
+        g_exc = decay_exc * g_exc + sE_prev
         syn_i = [(JEI @ g_exc + B_hvc @ h_hvc_t, e_ampa)]
         I_i = np.full(n_i, float(i_drive_i))
         if noise_i > 0.0:
@@ -237,7 +234,7 @@ def _simulate(
             JIE += A_jie * np.outer(gate_sE, x_i - xi_th)
             np.clip(JIE, 0.0, J_max_ie, out=JIE)
 
-        sE_ring[t % (ei_delay_ms + 1)] = sE
+        sE_prev = sE
         sI_prev = sI
 
     return sE_mat, sI_mat, JIE
@@ -256,7 +253,7 @@ _FLOAT_KEYS = (
     "c_JEI", "j_ei_mean_ns", "j_ei_sd_ns", "j_max_ie_ns", "a_jie_ns", "r_i_th",
     "t_refr_ms",
 ) + _NMDA_KEYS
-_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "aud_delay_ms", "hvc_delay_ms", "ei_delay_ms")
+_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "aud_delay_ms", "hvc_delay_ms")
 _ARRAY_KEYS = ("B", "B_hvc", "JEI", "JIE")
 
 #: Marks a file in these units with conductance synapses. Files with another marker, or
@@ -288,8 +285,6 @@ class VocalErrorNet:
                    learning: ``tau_stdp`` sets both the I trace and the audio gate.
     tau_inh      : I->E synaptic decay (ms), GABA_A; 0 = a one-step pulse
     tau_exc      : E->I synaptic decay (ms), AMPA; 0 = a one-step pulse
-    ei_delay_ms  : E->I conduction delay (ms) beyond the one-step arrival of every
-                   recurrent spike
     e_l_mv, v_th_mv, v_reset_mv : rest, threshold and reset (mV), shared by E and I
     c_e_pf, c_i_pf : membrane capacitances (pF)
     e_ampa_mv, e_gaba_mv : AMPA and GABA_A reversal potentials (mV)
@@ -333,7 +328,6 @@ class VocalErrorNet:
         tau_s: float = C.TAU_S,
         tau_inh: float = C.TAU_INH,
         tau_exc: float = C.TAU_EXC,
-        ei_delay_ms: int = C.EI_DELAY_MS,
         e_l_mv: float = C.E_L_MV,
         v_th_mv: float = C.V_TH_MV,
         v_reset_mv: float = C.V_RESET_MV,
@@ -385,9 +379,6 @@ class VocalErrorNet:
         self.n_e, self.n_i, self.n_hvc, self.n_aud = int(n_e), int(n_i), int(n_hvc), int(n_aud)
         self.tau_e, self.tau_i, self.tau_s = float(tau_e), float(tau_i), float(tau_s)
         self.tau_inh, self.tau_exc = float(tau_inh), float(tau_exc)
-        if int(ei_delay_ms) < 0:
-            raise ValueError(f"ei_delay_ms must be >= 0, got {ei_delay_ms}")
-        self.ei_delay_ms = int(ei_delay_ms)
         self.e_l_mv, self.v_th_mv, self.v_reset_mv = float(e_l_mv), float(v_th_mv), float(v_reset_mv)
         self.c_e_pf, self.c_i_pf = float(c_e_pf), float(c_i_pf)
         self.e_ampa_mv, self.e_gaba_mv = float(e_ampa_mv), float(e_gaba_mv)
@@ -527,17 +518,14 @@ class VocalErrorNet:
                 f"{path}: a model with current-based synapses ({units!r}); this version "
                 f"has conductance synapses and cannot run it. Retrain, or use spiking-ven "
                 f"at commit {_LAST_CURRENT_BASED} or earlier.")
-        # Optional keys, with the value a file saved before them was trained with.
-        optional = {"ei_delay_ms": 0}
-        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
-                   if k not in d and k not in optional]
+        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS if k not in d]
         if missing:
             raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
                              f"{', '.join(missing)}")
         obj = cls.__new__(cls)
         obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
         for k in _INT_KEYS:
-            setattr(obj, k, int(d[k]) if k in d else optional[k])
+            setattr(obj, k, int(d[k]))
         for k in _FLOAT_KEYS:
             setattr(obj, k, float(d[k]))
         for k in _ARRAY_KEYS:
@@ -562,7 +550,6 @@ class VocalErrorNet:
             "g_l_i": self.g_l_i,
             "aud_delay_ms": int(self.aud_delay_ms),
             "hvc_delay_ms": int(self.hvc_delay_ms),
-            "ei_delay_ms": int(self.ei_delay_ms),
             "n_e": int(self.n_e),
             "n_i": int(self.n_i),
             "n_aud": int(self.n_aud),
@@ -618,7 +605,6 @@ class VocalErrorNet:
             stdp_gate=(stdp_audio_gate(aud_spikes, self.B, self.tau_stdp)
                        if learn_weights else None),
             decay_inh=_decay(self.tau_inh), decay_exc=_decay(self.tau_exc),
-            ei_delay_ms=self.ei_delay_ms,
         )
 
         if learn_weights:

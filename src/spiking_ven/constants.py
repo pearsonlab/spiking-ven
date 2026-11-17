@@ -41,7 +41,7 @@ __all__ = [
     # 2. the network operating point
     "N_E", "N_I", "N_HVC", "N_RENDITIONS",
     "E_L_MV", "V_TH_MV", "V_RESET_MV", "C_E_PF", "C_I_PF",
-    "TAU_E", "TAU_I", "TAU_S", "TAU_INH", "TAU_EXC", "EI_DELAY_MS",
+    "TAU_E", "TAU_I", "TAU_S", "TAU_INH", "TAU_EXC",
     "TARGET_RATE_E_HZ", "I_DRIVE_I_PA", "NOISE_E_PA", "NOISE_I_PA",
     "E_AMPA_MV", "E_GABA_MV",
     "C_B", "B_AUD_MEAN_NS", "B_AUD_SD_NS",
@@ -172,9 +172,6 @@ TAU_I = 10.0
 TAU_S = 3.0
 TAU_INH = 5.0
 TAU_EXC = 3.0
-
-#: E -> I conduction delay (ms) beyond the one step every recurrent spike takes to arrive.
-EI_DELAY_MS = 0
 
 #: Synaptic reversal potentials (mV): AMPA and NMDA at 0, GABA_A at rest (Wang 2002), so
 #: I -> E inhibition is shunting -- it does nothing at rest and grows as E depolarises.

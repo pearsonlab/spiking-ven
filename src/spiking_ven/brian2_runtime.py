@@ -235,7 +235,7 @@ def build_ven_synapses(
     syns = [
         _syn(aud_group, e_group, "g_aud", w["B"], w["aud_delay_ms"], "b"),
         _syn(hvc_group, i_group, "g_hvc", w["B_hvc"], w["hvc_delay_ms"], "b_hvc"),
-        _syn(e_group, i_group, "g_exc", w["JEI"], w.get("ei_delay_ms", 0), "jei"),
+        _syn(e_group, i_group, "g_exc", w["JEI"], 0.0, "jei"),
         _syn(i_group, e_group, "g_inh", w["JIE"], 0.0, "jie"),
     ]
     if float(w.get("g_nmda_mean_ns", 0.0)) > 0.0:

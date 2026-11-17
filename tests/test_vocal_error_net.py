@@ -514,22 +514,3 @@ def test_recurrent_decay_zero_is_the_instantaneous_pulse():
     assert _decay(0.0) == 0.0
     assert _decay(5.0) == pytest.approx(np.exp(-1 / 5.0))
 
-
-def test_ei_delay_shifts_when_e_spikes_reach_i():
-    """One E spike reaches I's AMPA trace 1 + ei_delay_ms steps later."""
-    def first_i_spike(delay):
-        net = _quiet_net(ei_delay_ms=delay, tau_exc=0.0)
-        net.JEI = np.zeros_like(net.JEI)
-        net.JEI[0, 0] = 400.0                  # E0 -> I0, strong enough to fire I0 alone
-        net.B_hvc = np.zeros_like(net.B_hvc)
-        net.B = np.zeros_like(net.B)
-        net.B[0, 0] = 500.0                    # one auditory spike fires E0
-        hvc, aud = _pulses(net, T=60, aud_t=[10])
-        sE, sI = net.transform_all(hvc, aud)
-        t_e = int(np.flatnonzero(sE[0])[0])
-        return t_e, int(np.flatnonzero(sI[0])[0])
-    t_e0, t_i0 = first_i_spike(0)
-    t_e3, t_i3 = first_i_spike(3)
-    assert t_e0 == t_e3
-    assert t_i3 - t_i0 == 3
-

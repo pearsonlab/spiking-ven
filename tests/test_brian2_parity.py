@@ -54,12 +54,13 @@ def _run_e(w, aud_times_ms=(), T=100):
     return mon
 
 
-#: One unit of the earlier dimensionless E input, in pA (452.65 mV x 16.67 nS).
+#: An adaptation step (pA) large enough to slow a strongly driven cell.
 E_UNIT_PA = 7544.0
 
 
-def _strong_aud(w, scale=50.0 * E_UNIT_PA):
-    """Every E cell driven hard by auditory channel 0 (EPSC, pA), nothing else connected."""
+def _strong_aud(w, scale=5000.0):
+    """Every E cell driven hard by auditory channel 0 (peak conductance, nS), nothing else
+    connected."""
     B = np.zeros_like(w["B"])
     B[:, 0] = scale
     return {"B": B, "JIE": np.zeros_like(w["JIE"]), "JEI": np.zeros_like(w["JEI"]),
@@ -84,7 +85,7 @@ def test_spike_frequency_adaptation_slows_firing():
         w = _weights(t_refr_ms=2.0, a_sfa_pa=a_sfa, tau_sfa=10.0)
         # Strong enough to fire well above baseline, weak enough not to sit at the
         # refractory ceiling, where adaptation has nothing left to slow.
-        w.update(_strong_aud(w, scale=0.2 * E_UNIT_PA))
+        w.update(_strong_aud(w, scale=25.0))
         counts[a_sfa] = _run_e(w, aud_times_ms=range(0, 100, 1)).num_spikes
     assert counts[E_UNIT_PA] < 0.8 * counts[0.0], counts
 
@@ -178,8 +179,8 @@ def test_nmda_runs_in_brian2_in_the_same_regime_as_numpy():
     for g in (0.0, 558.0):
         brian2.start_scope()
         net = VocalErrorNet(n_e=n_e, n_i=n_i, n_hvc=n_hvc, n_aud=n_aud, noise_e_pa=0.0,
-                            noise_i_pa=0.0, seed=0, g_nmda_mean_ns=g, b_aud_mean_mv=34.4,
-                            b_aud_sd_mv=17.2)
+                            noise_i_pa=0.0, seed=0, g_nmda_mean_ns=g, b_aud_mean_ns=105.0,
+                            b_aud_sd_ns=52.5)
         out[g] = _rates_both_runtimes(net, aud, hvc, T)
     (np0, br0, syns0), (np1, br1, syns1) = out[0.0], out[558.0]
     assert len(syns0) == 4 and len(syns1) == 5

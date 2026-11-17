@@ -30,7 +30,7 @@ from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav
 from .common import acts_to_spikes, generate_hvc_bursts, spike_to_rate
 from .filterbank import centre_frequencies, gammatone_spectrogram
-from .vocal_error_net import VocalErrorNet, VocalErrorNetV2
+from .vocal_error_net import VocalErrorNet
 
 __all__ = [
     "__version__",
@@ -44,7 +44,6 @@ __all__ = [
     "acts_to_spikes",
     # stage 2: vocal error network
     "VocalErrorNet",
-    "VocalErrorNetV2",
     "generate_hvc_bursts",
     "spike_to_rate",
 ]

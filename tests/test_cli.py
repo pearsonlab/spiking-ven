@@ -202,12 +202,13 @@ def test_train_encoder_front_end_is_sane():
         ("c_e_pf", "C_E_PF"), ("c_i_pf", "C_I_PF"),
         ("target_rate_e_hz", "TARGET_RATE_E_HZ"), ("i_drive_i_pa", "I_DRIVE_I_PA"),
         ("noise_e_pa", "NOISE_E_PA"), ("noise_i_pa", "NOISE_I_PA"),
-        ("c_b", "C_B"), ("b_aud_mean_mv", "B_AUD_MEAN_MV"), ("b_aud_sd_mv", "B_AUD_SD_MV"),
-        ("c_hvc", "C_HVC"), ("b_hvc_mean_mv", "B_HVC_MEAN_MV"),
-        ("b_hvc_sd_mv", "B_HVC_SD_MV"),
-        ("j_ei_mean_mv", "J_EI_MEAN_MV"), ("j_ei_sd_mv", "J_EI_SD_MV"),
+        ("e_ampa_mv", "E_AMPA_MV"), ("e_gaba_mv", "E_GABA_MV"),
+        ("c_b", "C_B"), ("b_aud_mean_ns", "B_AUD_MEAN_NS"), ("b_aud_sd_ns", "B_AUD_SD_NS"),
+        ("c_hvc", "C_HVC"), ("b_hvc_mean_ns", "B_HVC_MEAN_NS"),
+        ("b_hvc_sd_ns", "B_HVC_SD_NS"),
+        ("j_ei_mean_ns", "J_EI_MEAN_NS"), ("j_ei_sd_ns", "J_EI_SD_NS"),
         ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
-        ("r_i_th", "R_I_TH"), ("j_max_ie_mv", "J_MAX_IE_MV"),
+        ("r_i_th", "R_I_TH"), ("j_max_ie_ns", "J_MAX_IE_NS"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
         ("a_sfa_pa", "A_SFA_PA"), ("tau_sfa", "TAU_SFA"), ("g_nmda_mean_ns", "G_NMDA_MEAN_NS"),
         ("tau_inh", "TAU_INH"), ("tau_exc", "TAU_EXC"),
@@ -222,7 +223,7 @@ def test_train_ven_a_jie_is_derived_not_stored():
     the width so the per-spike integral stays fixed, which is the reason the operating
     point is a module and not a data file -- a stored value would desynchronise the
     learning rule the first time the window changed."""
-    assert cli_train_ven.build_parser().parse_args([]).a_jie_mv is None
+    assert cli_train_ven.build_parser().parse_args([]).a_jie_ns is None
     assert C.a_jie_for(C.TAU_STDP) == pytest.approx(C.a_jie_for(2 * C.TAU_STDP) * 2)
 
 

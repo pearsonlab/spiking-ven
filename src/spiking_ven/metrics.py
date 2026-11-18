@@ -22,32 +22,47 @@ from .constants import DAF_N_TRIALS
 from .targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
 
 __all__ = [
+    "daf_inputs",
     "daf_trials",
     "daf_responders",
     "daf_response",
     "format_responders",
     "rendition_rates",
+    "song_contrast",
     "format_rendition_rates",
 ]
 
 
-def daf_trials(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42):
-    """E spikes for ``n_trials`` DAF renditions: ``(n_trials, n_e, T_rend)`` float32.
+def daf_inputs(encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42):
+    """Auditory spikes for ``n_trials`` DAF renditions: ``(n_trials, n_aud, T_rend)``.
 
-    Trials are renditions with independent noise draws; the song and the HVC drive are
-    fixed, as in the experiment. ``st`` is :func:`~spiking_ven.stimuli.build_stimuli`'s
-    output, so the trials are encoded exactly like every other stimulus, with the noise
-    in ``st["daf_window_s"]``.
+    Trials are renditions with independent noise draws; the song is fixed, as in the
+    experiment. ``st`` is :func:`~spiking_ven.stimuli.build_stimuli`'s output, so the
+    trials are encoded exactly like every other stimulus, with the noise in
+    ``st["daf_window_s"]``. They depend only on the encoder, the stimuli and ``seed``, so
+    one set can score many networks.
     """
-    out = np.zeros((n_trials, int(ven.n_e), st["T_rend"]), dtype=np.float32)
-    for t in range(n_trials):
-        aud = encode_stimulus(
+    return np.stack([
+        encode_stimulus(
             daf_waveform(st["sig_train"], st["sr"], seed=seed + 1000 + t,
                          window_s=st["daf_window_s"]), encoder,
             sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
             rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
             n_ista=st["n_ista"], seed=seed + 2000 + t,
-        )
+        ) for t in range(n_trials)])
+
+
+def daf_trials(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42,
+               inputs: np.ndarray | None = None):
+    """E spikes for ``n_trials`` DAF renditions while singing: ``(n_trials, n_e, T_rend)``.
+
+    The HVC drive is the same every trial. ``inputs`` are precomputed
+    :func:`daf_inputs` (same ``n_trials`` and ``seed``); otherwise they are encoded here.
+    """
+    if inputs is None:
+        inputs = daf_inputs(encoder, st, n_trials=n_trials, seed=seed)
+    out = np.zeros((len(inputs), int(ven.n_e), st["T_rend"]), dtype=np.float32)
+    for t, aud in enumerate(inputs):
         out[t] = ven.transform(st["hvc_on"], aud, hvc_prelude=st.get("hvc_prelude"))
     return out
 
@@ -77,7 +92,7 @@ def daf_responders(trials, *, onset_ms: int, window_ms: int = 150, alpha: float 
 
 def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window_ms: int = 150,
                  alpha: float = 0.02, seed: int = 42,
-                 duration_window_ms: int = 300) -> dict:
+                 duration_window_ms: int = 300, inputs: np.ndarray | None = None) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Per neuron, in windows either side of noise onset (from ``st["daf_window_s"]``),
@@ -89,13 +104,13 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window
     so that a response outlasting ``window_ms`` is timed rather than lost.
 
     Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
-    :func:`daf_responders`.
+    :func:`daf_responders`. ``inputs`` are precomputed :func:`daf_inputs`.
     """
     from scipy import stats
 
     onset, burst_ms = daf_window_ms(st["daf_window_s"])
     W = int(window_ms)
-    trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed)
+    trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed, inputs=inputs)
     n_e = int(ven.n_e)
     resp, pre, post = daf_responders(trials, onset_ms=onset, window_ms=W, alpha=alpha)
     psth = trials[:, :, onset - W:onset + W] * 1000
@@ -265,6 +280,39 @@ def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed,
         "reversed_over_trained": (reversed_hz / trained_hz) if trained_hz > 0 else nan,
         "daf_not_singing_hz": daf_not_singing_hz,
     }
+
+
+def song_contrast(ven, st: dict, *, n_trials: int = 10, seed: int = 7) -> dict:
+    """Trained vs reversed song, on the song-driven part of the response only.
+
+    :func:`rendition_rates`' ratio averages over the whole rendition -- 200 ms of silence
+    included -- and over every E cell, including those with no auditory input, and does not
+    subtract what HVC input alone does. This measures the same contrast where the song can
+    act: E cells with at least one auditory synapse, during the motif, as the excess over
+    an HVC-only run (singing, no sound), averaged over ``n_trials`` noise draws. It is a
+    different measure, not a better model: report it alongside the ratio, not instead.
+
+    Returns the three rates (Hz), the excesses over HVC-only, ``excess_diff_hz``
+    (reversed minus trained) and ``excess_ratio`` (reversed / trained excess).
+    """
+    rng = np.random.default_rng(seed)
+    cells = np.flatnonzero(np.asarray(ven.A).any(axis=1))
+    T = int(st["T_song"])
+    pre = st.get("hvc_prelude")
+
+    def rate(aud):
+        r = [ven.transform(st["hvc_on"], aud, rng=rng, hvc_prelude=pre)[cells, :T].mean()
+             for _ in range(n_trials)]
+        return float(np.mean(r) * 1000)
+
+    hvc_only = rate(np.zeros_like(st["aud_correct"]))
+    trained = rate(st["aud_correct"])
+    reversed_ = rate(st["aud_reversed"])
+    ex_t, ex_r = trained - hvc_only, reversed_ - hvc_only
+    return {"n_cells": int(cells.size), "hvc_only_hz": hvc_only, "trained_hz": trained,
+            "reversed_hz": reversed_, "trained_excess_hz": ex_t, "reversed_excess_hz": ex_r,
+            "excess_diff_hz": ex_r - ex_t,
+            "excess_ratio": ex_r / ex_t if ex_t > 0 else float("nan")}
 
 
 def format_rendition_rates(m: dict) -> str:

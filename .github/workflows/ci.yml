@@ -20,22 +20,19 @@ jobs:
       - name: Lint
         run: uv run --extra dev ruff check .
 
-      # All extras so the optional imports (brian2, matplotlib, soundfile) resolve.
+      # All extras so the optional imports (matplotlib, soundfile) resolve.
       - name: Type check (ty)
         run: uv run --all-extras ty check
 
-      # The core must import on numpy + scipy alone: no Brian2, no matplotlib, no
-      # soundfile. Installed with NO extras, which is the thing being tested.
+      # The core must import without the optional extras (matplotlib, soundfile).
+      # Installed with NO extras, which is the thing being tested.
       - name: Core imports without optional extras
         run: uv run python -c "import spiking_ven; print(spiking_ven.__version__)"
 
       # Includes the hermetic end-to-end smoke test (synthetic corpus -> encoder ->
       # network) and the guards that every subpackage and console script resolves.
-      - name: Unit tests, core only (Brian2 tests should skip here)
+      - name: Unit tests, core only
         run: uv run --extra dev pytest -m "not slow" -q -rs
-
-      - name: Unit tests with the Brian2 extra (Brian2 tests should run)
-        run: uv run --extra brian2 --extra dev pytest -m "not slow" -q
 
       - name: Unit tests with all extras
         run: uv run --all-extras pytest -m "not slow" -q

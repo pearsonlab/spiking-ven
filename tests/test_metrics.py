@@ -40,7 +40,7 @@ def _trials(latency_ms, length_ms, *, base_hz=5.0, resp_hz=150.0, n_resp=10, see
 
 
 def _response(monkeypatch, trials, **kw):
-    monkeypatch.setattr(metrics, "daf_trials", lambda ven, enc, st, *, n_trials, seed: trials)
+    monkeypatch.setattr(metrics, "daf_trials", lambda ven, enc, st, *, n_trials, seed, **kw: trials)
     st = {"daf_window_s": (ONSET / 1000, (ONSET + 50) / 1000), "T_song": T}
     return daf_response(_Ven(), None, st, n_trials=N_TRIALS, **kw)
 
@@ -73,7 +73,7 @@ def test_a_response_still_running_at_the_window_end_is_counted_as_censored(monke
 
 def test_the_duration_window_stops_at_the_end_of_the_motif(monkeypatch):
     trials = _trials(20, 40)
-    monkeypatch.setattr(metrics, "daf_trials", lambda ven, enc, st, *, n_trials, seed: trials)
+    monkeypatch.setattr(metrics, "daf_trials", lambda ven, enc, st, *, n_trials, seed, **kw: trials)
     st = {"daf_window_s": (ONSET / 1000, (ONSET + 50) / 1000), "T_song": ONSET + 200}
     r = daf_response(_Ven(), None, st, n_trials=N_TRIALS, duration_window_ms=300)
     assert r["duration_window_ms"] == 200

@@ -462,6 +462,69 @@ stated.
   - NMDA carries ~190x the AMPA charge per spike near threshold.
   - Duration sits near its 47 ms bound (48.2 ms on the lowest evaluation seed).
 
+## Brian2 port (adopted)
+
+- **The network is now Brian2 equations** (`network.py`), integrated by exponential Euler at
+  0.1 ms, where it was a hand-written 1 ms discrete-time numpy loop (`_simulate`). The equations
+  are the paper's, with physical units checked by Brian2: conductances that jump by the weight and
+  decay, an auditory trace for the STDP gate, NMDA gating per auditory channel, adaptation, and
+  white current noise. The motivation was readability (the math defines the model, not a loop of
+  update rules) and one engine with finchsim's basal ganglia models, which are Brian2 at 0.1 ms.
+  The old numpy engine and the inference-only `brian2_runtime` are gone, and with them the
+  parity between two implementations of one model.
+- **Two things changed in the math**, both to make it a differential equation:
+  - *The STDP audio gate* was a box window (any auditory input spike in the last `tau_stdp` ms).
+    It is now a trace `a_i` of the cell's auditory input spikes, decaying with `tau_stdp`, and the
+    gate is open while `a_i > 1/e` -- the same window for isolated spikes, a little longer after
+    several.
+  - *Noise* was an SD per 1 ms step. It is now a white-noise intensity (pA sqrt(ms)), the same
+    number (754), so the membrane fluctuates the same at any step (checked: free-membrane SD
+    ~5.8 mV at 1 and 0.1 ms).
+  - The E -> I and HVC -> I AMPA decays (`TAU_EXC`, `TAU_S`, both 3 ms) are one `TAU_AMPA`; the
+    recurrent "one-step pulse" option (`tau = 0`) is gone.
+- **The port is faithful at 1 ms.** With the shipped numpy weights, Brian2 at `dt = 1 ms` gives
+  E rates within 4% of numpy on every stimulus (trained song 4.49 vs 4.66 Hz, reversed 4.83 vs
+  4.99, DAF not singing 21.8 vs 22.2). Trained from scratch at 1 ms with the numpy operating point:
+  responders 57% (numpy 53%), extra spikes 1.12 (0.95), latency 22.4 ms (23.2), duration 53.5 ms
+  (50.6), peak at 38 ms (38), reversed/trained 1.15 (1.08). The remaining differences are timing
+  details of the discrete loop (an input spike in bin `t` reaches the membrane one step later in
+  Brian2) and the gate.
+- **At 0.1 ms the operating point moves**: responders 63%, extra spikes 2.11, peak change 40 Hz --
+  twice the target -- with latency, duration and peak time still in range. The cause is the 1 ms
+  loop's step: exponential Euler held each conductance at its peak for the whole first step, so
+  a synapse decaying with `tau` delivered `1 / (1 - exp(-1/tau))` ms of peak conductance per
+  spike instead of `tau` -- 3.53 against 3 ms for AMPA (+18%), +5% for adaptation, +3% for GABA_A.
+  At 0.1 ms the HVC drive to I fell (I rate during song 36 -> 28 Hz with the numpy weights), so the
+  learned inhibition was weaker.
+- **Recalibration** (seed 42, 600 renditions, 100 DAF trials; `scripts/sweep.py`, results in
+  `outputs/sweeps/`):
+  - *Charge matching*: every AMPA weight (auditory, HVC, E -> I) x1.176 and adaptation x1.05
+    brings extra spikes 2.11 -> 1.19 and responders 63 -> 56%. Scaling HVC alone (x1.1 / x1.18 /
+    x1.25) gives 1.55 / 1.34 / 1.23: the I drive is most of it.
+  - *STDP baseline* `R_I_HZ`: with charge matching, 52 / 46 / 40 / 36 Hz give extra spikes 1.48 /
+    1.19 / 1.12 / 1.05 and reversed/trained 1.17 / 1.13 / 1.09 / 1.07: a lower baseline makes the
+    rule potentiate more, which cancels more of the noise response too.
+  - *Adaptation* x1.05 / 1.2 / 1.35 at 36 Hz: extra spikes 1.05 / 0.99 / 0.96. 10% less NMDA
+    (2250 nS) changed little.
+- **Adopted**: `DT_MS` 0.1; AMPA weights x1.176 (auditory 44.8 nS, HVC 7.48, E -> I 0.220);
+  `BETA_ADAPT_PA` 10180 (x1.35); `R_I_HZ` 36. Everything else, NMDA included, unchanged. Training
+  seeds 42 / 1 / 2 / 3: responders 46 / 41 / 43 / 47%, extra spikes 0.96 / 0.89 / 0.88 / 0.93,
+  latency 29.7 / 30.4 / 31.0 / 32.5 ms, duration 52.3 / 49.8 / 47.7 / 51.8 ms, peak 38 / 34 / 26 /
+  48 ms, late/peak 0.08 / 0.08 / 0.10 / 0.18, reversed/trained 1.07 / 1.11 / 1.05 / 1.08. (Before
+  rounding the weights; the shipped model's numbers are in the README.) The β x1.2 alternative
+  scored the same over these seeds; x1.35 is closer to the latency and responder targets.
+- **Caveats.**
+  - `R_I_HZ` is now *below* the I rate during song (36 vs ~42 Hz), so the rule is mildly
+    potentiating where it was mildly depressing. Selectivity is a little lower than numpy's
+    (1.05-1.11 against 1.04-1.10 over seeds -- similar range, lower at seed 42).
+  - Latency moved from ~23 to ~30 ms, still inside 23 +/- 12.
+  - Peak time is seed-dependent (26-48 ms); seeds 1 and 2 fall below the 35 ms bound, as two of
+    the numpy model's three seeds did.
+- **Runtime.** See `outputs/figures/compare_runtime.png` and the README. Brian2 compiles the
+  equations with Cython on first use (~45 s, then cached). **Two processes compiling the same code
+  at once can make one fall back to Brian2's numpy code generation**, silently (a warning) and ~7x
+  slower: run one short simulation before starting parallel jobs, as `scripts/sweep.py` does.
+
 ## DAF metrics
 
 - **Responder-windowed, not rendition-averaged.** A whole-rendition E rate dilutes a 50 ms burst

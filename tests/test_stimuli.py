@@ -129,7 +129,7 @@ def test_daf_trials_use_the_stimulus_window(monkeypatch):
 def test_daf_response_takes_onset_and_burst_from_the_stimulus(monkeypatch):
     onset, burst = 250, 30
     monkeypatch.setattr(metrics, "daf_trials",
-                        lambda ven, enc, st, *, n_trials, seed: _trials(onset, burst))
+                        lambda ven, enc, st, *, n_trials, seed, **kw: _trials(onset, burst))
     st = {"daf_window_s": (onset / 1000, (onset + burst) / 1000)}
     r = daf_response(_FakeVen(), None, st, n_trials=20)
     assert r["burst_ms"] == pytest.approx(burst)

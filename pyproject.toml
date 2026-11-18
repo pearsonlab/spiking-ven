@@ -18,19 +18,20 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
-# Deliberately minimal: the model + training core needs numpy and scipy only.
-# The ERB/gammatone filterbank is vendored (see THIRD_PARTY_NOTICES.md) rather
-# than depended on, so there is no `gammatone` requirement.
+# The network is simulated in Brian2; the encoder needs numpy and scipy. The ERB/gammatone
+# filterbank is vendored (see THIRD_PARTY_NOTICES.md) rather than depended on, so there is
+# no `gammatone` requirement. Brian2 compiles its code with Cython when a C compiler is
+# available (much faster), and falls back to numpy otherwise.
 dependencies = [
     "numpy>=2.2.6",
     "scipy>=1.15",
+    "brian2>=2.8.0,<2.9",
+    "cython>=3.0",
 ]
 
 [project.optional-dependencies]
 # Reading song WAVs during data preparation.
 data = ["soundfile>=0.13"]
-# Brian2 runtime glue: turns a trained numpy VEN into live NeuronGroups.
-brian2 = ["brian2>=2.8.0,<2.9"]
 # Figure generation.
 plots = ["matplotlib>=3.10"]
 dev = ["pytest>=8", "ruff>=0.6", "ty"]

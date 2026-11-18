@@ -365,3 +365,39 @@ time-locked (~0.15 Hz of it is).
 Verdict: balance and a weak HVC basis that leaves mean I unchanged both work; the auditory
 calibration needs revisiting -- the song should raise E's *mean* rate by a few Hz (per input
 spike ~+25-35 Hz: auditory ~45 nS with NMDA ~600-1250 nS on this base), not each input spike.
+
+## S5. Balanced, asynchronous network with strong auditory drive (single I population)
+
+Async balance needed sparse, heterogeneous E -> I (`C_EI` 0.05, 11 nS, SD = mean): dense
+E -> I gave a ~30 Hz E/I rhythm (population-rate CV of I 3.6; 1.4 at `C_EI` 0.05; I noise
+alone did not remove it). Auditory gain (extra E spikes per input spike): 2.0 / 3.9 / 6.5 /
+10.7 at 90 / 150 / 250 / 400 nS (NMDA off). Trained with HVC -> I at 2 nS: STDP doubled the
+mean I -> E weight but built generic feedback inhibition -- trained, HVC-shifted and
+reversed song all +0.6-1.0 Hz -- because with weak HVC drive, I's timing comes from E.
+
+## H1. Two inhibitory populations: I_bal (balance, fixed) + I_HVC (HVC basis, plastic)
+
+New option `n_ih`: a second inhibitory population driven only by HVC (no E input), with
+plastic I_HVC -> E (from zero); I_bal -> E fixed (`rho_ns` 0), HVC -> I_bal off. Base: S5
+(`C_EI` 0.05 / 11 nS, auditory 400 nS, NMDA off, E drive 1500 pA, I -> E 20% at 20 nS).
+I_HVC: 150 cells; untrained, 6 HVC inputs x 20 nS gives 9 Hz, each cell active ~7% of the
+motif, the population tiling all of it, identical whatever the sound.
+
+| HVC -> I_HVC | r_IH | rho_h | E sing/silent | xs | resp | lat | dur | pk | late/pk | song no HVC | trained | trained, HVC +100 ms | reversed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6 x 20 nS | 5 | 3.8 | 0.75 | 0.83 | 0.46 | 35.0 | 22.2 | 34 | 0.04 | +2.71 | **+0.01** | +0.53 | +0.54 |
+| 6 x 20 nS | 9 | 3.8 | 0.76 | 0.93 | 0.48 | 42.2 | 24.8 | 34 | 0.04 | +2.77 | **+0.03** | +0.74 | +0.71 |
+| 6 x 20 nS | 5 | 11.3 | 0.76 | 0.78 | 0.44 | 34.6 | 21.9 | 34 | 0.03 | +2.75 | **+0.01** | +0.48 | +0.46 |
+| 12 x 10 nS | 5 | 3.8 | 0.76 | 0.87 | 0.55 | 31.4 | 25.2 | 30 | 0.05 | +2.74 | **+0.04** | +0.65 | +0.79 |
+| 12 x 10 nS | 9 | 3.8 | 0.77 | 1.08 | 0.55 | 31.5 | 27.3 | 30 | 0.06 | +2.69 | **+0.17** | +1.14 | +1.21 |
+| 12 x 10 nS | 5 | 11.3 | 0.75 | 0.83 | 0.53 | 33.1 | 25.3 | 30 | 0.04 | +2.75 | **+0.02** | +0.51 | +0.70 |
+
+(last four columns: song-driven E cells, excess over singing without sound, Hz.)
+
+Verdict: **time-locked, song-specific cancellation** -- the trained song is cancelled almost
+completely (+2.7 -> +0.01-0.17 Hz) only when HVC is aligned; shifting HVC by 100 ms or
+reversing the song leaves +0.5-1.2 Hz. The singing/not-singing target is met (0.75), and the
+DAF response is now transient (late/peak 0.03-0.06) with magnitude and responders in range.
+Fails: DAF duration 22-27 ms (bound 47; NMDA is off) and peak 30-34 ms (bound 35). I_bal
+falls with singing (0.59x) because cancelled E drives it less. Single seed (42).
+Rasters: `rasters_ih_c01_w20_untrained.png`, `rasters_ih_c01_w20_trained.png`.

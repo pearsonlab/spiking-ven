@@ -38,7 +38,7 @@ from brian2 import (
     nS,
 )
 
-__all__ = ["E_EQS", "I_EQS", "NMDA_EQS", "STDP_ON_POST", "build_network", "spike_events",
+__all__ = ["E_EQS", "I_EQS", "NMDA_EQS", "STDP_ON_POST", "STDP_ON_PRE", "build_network", "spike_events",
            "bin_spikes"]
 
 # ---------------------------------------------------------------------------
@@ -87,6 +87,12 @@ ds/dt = -s / tau_nmda_decay + alpha_nmda * x * (1 - s) : 1
 #: ``rho`` times (the presynaptic trace minus its baseline ``theta``), only while the E
 #: cell's audio gate is open, and never below zero. ``rho`` is 0 outside training.
 STDP_ON_POST = "w = clip(w + rho * gate_post * (x_stdp_pre - theta), 0*nS, inf*nS)"
+
+#: Optional presynaptic depression (after Vogels et al. 2011), at each I spike: the weight
+#: falls by ``rho_dep`` while the E cell's audio gate is open, so I activity that does not
+#: precede the E cell's spikes costs weight. ``rho_dep`` is 0 by default and outside
+#: training.
+STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)"
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +161,8 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     _connect(hvc_i, weights["B"])
     e_i = Synapses(E, I, "w : siemens", on_pre="g_ampa_post += w", dt=dt, name="e_i")
     _connect(e_i, weights["J_EI"])
-    i_e = Synapses(I, E, "w : siemens\nrho : siemens (shared)",
-                   on_pre="g_gaba_post += w", on_post=STDP_ON_POST,
+    i_e = Synapses(I, E, "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
+                   on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
                    namespace=shared, dt=dt, name="i_e")
     _connect(i_e, weights["J_IE"], dense=True)
 

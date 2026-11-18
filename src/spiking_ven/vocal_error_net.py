@@ -44,7 +44,7 @@ _FLOAT_KEYS = (
     "c_aud", "aud_mean_ns", "aud_sd_ns",
     "c_hvc", "hvc_mean_ns", "hvc_sd_ns",
     "c_ei", "ei_mean_ns", "ei_sd_ns",
-    "rho_ns", "r_i_hz", "tau_stdp",
+    "rho_ns", "rho_pre_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
@@ -85,6 +85,7 @@ class VocalErrorNet:
     c_hvc, hvc_mean_ns, hvc_sd_ns : the same for HVC -> I -- ``B``
     c_ei, ei_mean_ns, ei_sd_ns : the same for E -> I -- ``J_EI``
     rho_ns       : STDP step (nS); ``None`` is ``constants.rho_for(tau_stdp)``
+    rho_pre_ns   : presynaptic depression per I spike while the audio gate is open (nS)
     r_i_hz       : I rate (Hz) setting the STDP baseline ``theta = r_i tau_stdp``
     tau_stdp     : STDP window (ms): the I trace's decay and the audio gate's
     aud_delay_ms, hvc_delay_ms : conduction delays (ms)
@@ -134,6 +135,7 @@ class VocalErrorNet:
         ei_mean_ns: float = C.EI_MEAN_NS,
         ei_sd_ns: float = C.EI_SD_NS,
         rho_ns: float | None = None,
+        rho_pre_ns: float = C.RHO_PRE_NS,
         r_i_hz: float = C.R_I_HZ,
         tau_stdp: float = C.TAU_STDP,
         aud_delay_ms: float = C.AUD_DELAY_MS,
@@ -305,7 +307,9 @@ class VocalErrorNet:
         if fmt != MODEL_FORMAT:
             raise ValueError(f"{path}: a {fmt!r} model; this version runs {MODEL_FORMAT!r} "
                              f"models only. Retrain with sven-train-ven.")
-        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS if k not in d]
+        defaults = {"rho_pre_ns": 0.0}           # added after brian2-v1 first shipped
+        missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
+                   if k not in d and k not in defaults]
         if missing:
             raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
                              f"{', '.join(missing)}")
@@ -315,7 +319,7 @@ class VocalErrorNet:
         for k in _INT_KEYS:
             setattr(obj, k, int(d[k]))
         for k in _FLOAT_KEYS:
-            setattr(obj, k, float(d[k]))
+            setattr(obj, k, float(d[k]) if k in d else defaults[k])
         for k in _ARRAY_KEYS:
             setattr(obj, k, d[k])
         obj.stimulus = json.loads(str(d["stimulus_json"])) if "stimulus_json" in d else {}
@@ -365,6 +369,7 @@ class VocalErrorNet:
         i_e.w[:] = np.asarray(self.J_IE, dtype=np.float64)[np.asarray(i_e.j),
                                                            np.asarray(i_e.i)] * nS
         i_e.rho = (self.rho_ns if learn else 0.0) * nS
+        i_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS
         brian_seed(int((self._sim_rng if rng is None else rng).integers(2**31)))
         o["net"].run(T * ms)
 

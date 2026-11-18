@@ -339,3 +339,29 @@ time-locked (~0.15 Hz of it is).
 - Song-specific cancellation is weak in the balanced regime: the balance quenches most of
   the song drive itself (+1.9 vs +14 Hz), and the learned cancellation is mostly not
   time-locked.
+
+## S1-S4. Staged calibration (balance -> auditory -> HVC basis -> learning)
+
+`scripts/staged_balance.py` (untrained screens), then training.
+
+1. **Balance without inputs**: `C_IE` 0.2, I -> E initial 20 nS, E -> I 1.1 nS, E drive
+   1500 pA, I drive 0: E 4.5 Hz, I 27 Hz (driven by E); without I -> E, E would fire 21 Hz
+   (adaptation caps it there). Shallower variants: E 4-6 Hz at 700-1000 pA.
+2. **Auditory -> E**, as E's rate in the 30 ms after an input spike on one of its channels
+   (song, no HVC): NMDA dominates -- +35-94 Hz at 1250-5000 nS. "A few Hz" needs NMDA off:
+   +2.6 / +5.2 / +9.2 Hz at 10 / 20 / 45 nS AMPA; any NMDA (150-600 nS) gives +12-25 Hz.
+3. **HVC -> I basis** (`C_HVC` 0.02, 12 inputs per I cell): at 1-2 nS the mean I rate barely
+   moves with singing (0.94-0.96x; single-I CV 0.6-0.8, peak/mean 1.9 -- modest); at 4-8 nS
+   single I cells are strongly time-modulated (CV 1.3-1.9, peak/mean 5-7) but the mean I
+   rate *halves* (0.51x) -- the paradoxical response of an inhibition-stabilised network.
+4. **Learning** (600 renditions): HVC 2-3 nS, auditory 20-45 nS with NMDA 0-75, `R_I_HZ`
+   20-32, rho x1/x3. E singing/silent 0.93-1.11 (target met), E silent 5.2-6.2 Hz, I 32-38 Hz
+   changing 0.66-0.92x with singing. But the song drives song-driven E cells by only +0.1 to
+   +0.5 Hz averaged over the motif (sparse inputs: +5 Hz per input spike averages to little),
+   so there is nothing to cancel: trained, HVC-shifted and reversed song give the same
+   excess (+0.1-0.7 Hz). DAF too small and short (0.45-0.67 extra spikes, 14-24%
+   responders, 22-39 ms, latency 48-62 ms).
+
+Verdict: balance and a weak HVC basis that leaves mean I unchanged both work; the auditory
+calibration needs revisiting -- the song should raise E's *mean* rate by a few Hz (per input
+spike ~+25-35 Hz: auditory ~45 nS with NMDA ~600-1250 nS on this base), not each input spike.

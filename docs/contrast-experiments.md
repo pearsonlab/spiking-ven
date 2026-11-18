@@ -156,3 +156,53 @@ rendition), although k32 raises the song-driven `diff` a little (+0.68-0.75 vs +
 shipped) -- the two measures disagree, so this is not a clear win. Encoders retrained;
 the network was not retuned for them.
 
+## C7. Cap on each E cell's total inhibition (heterosynaptic normalisation)
+
+`J_IE_ROW_MAX_NS` (an option added for this, off by default): after every training
+rendition, each E row of `J_IE` whose sum exceeds the cap is scaled down, preserving its
+pattern -- a slow homeostatic scaling, which is biologically plausible in kind. Caps at the
+shipped model's 75th (2300 nS) and 50th (1600 nS) percentile row sums.
+
+| configuration | seed | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| cap 2300 | 42 | 2.27 | 1.45 | 0.40 | 27.6 | 58.3 | 34 | 1.057 | +0.55 |
+| cap 2300 | 1 | 1.68 | 1.33 | 0.37 | 30.6 | 55.9 | 34 | 1.109 | +0.65 |
+| cap 1600 | 42 | 6.04 | 2.21 | 0.38 | 23.0 | 65.7 | 36 | 1.040 | +0.52 |
+| cap 1600 | 1 | 4.97 | 1.99 | 0.40 | 23.4 | 64.9 | 34 | 1.073 | +0.55 |
+| C05 + cap 2300 | 42 | 2.19 | 1.43 | 0.44 | 24.8 | 63.0 | 34 | 1.096 | +0.77 |
+| C05 + cap 2300 | 1 | 3.48 | 1.70 | 0.49 | 31.2 | 63.1 | 38 | 1.102 | +0.64 |
+| C05 + cap 1600 | 42 | 5.85 | 2.17 | 0.43 | 20.9 | 64.1 | 34 | 1.069 | +0.74 |
+| C05 + cap 1600 | 1 | 7.36 | 2.47 | 0.48 | 23.5 | 70.9 | 38 | 1.082 | +0.65 |
+
+Verdict: the cells the cap binds are the strongly driven ones whose inhibition keeps the
+DAF response small, so capping them enlarges it (1.3-2.5 extra spikes) without improving
+contrast. Rejected.
+
+## Summary (as of the end of C7)
+
+Tried, against 4 (or 2) training seeds unless noted: sparser HVC -> I (`C_HVC` 0.05, 0.03,
+0.02, with matched or scaled weights), `TAU_GABA` 8 ms, noise on I, both together,
+`TAU_STDP` 10 ms, 1200 renditions, presynaptic depression (new option), a cap on total
+inhibition per E cell (new option), faster NMDA decay (70 ms), and three retrained encoders
+(24 and 32 frames; 24 frames with lambda 0.5).
+
+- **Nothing robustly raised contrast while keeping the DAF metrics in range.** The best
+  multi-seed means (`C_HVC` 0.05, with or without `TAU_GABA` 8) gain ~+0.02-0.05 Hz in
+  `diff` and ~+0.005 in rev/tr over the shipped model, within seed-to-seed spread, and push
+  extra spikes to ~1.02-1.07 (seed 1: 1.2).
+- **What does raise contrast** -- weaker or sparser HVC drive to I, a lower STDP baseline,
+  less inhibition -- does so by weakening the learned inhibition overall, which enlarges the
+  DAF response in proportion: contrast and DAF magnitude are coupled through the strength
+  of the learned inhibition, as the brainstorm predicted.
+- **On the song-driven measure (C1) the trained song is already almost fully cancelled**
+  (~0.06 Hz above singing without sound); the reversed motif is cancelled almost as well
+  because it drives the same cells, and the learned inhibition is a per-cell gain on a
+  nearly flat I drive (I ~42 Hz throughout). Raising contrast likely needs a structural
+  change that makes I activity time-specific or E responses direction-selective, not a
+  parameter change -- e.g. HVC -> I plasticity, or I cells with their own auditory tuning
+  (not tried; outside the brainstormed list).
+- **Biological flags for review**: HVC -> I weights of 15 nS (`C_HVC` 0.05) are strong but
+  plausible; 25-37 nS per synapse (`C_HVC` 0.03-0.02) are large. Presynaptic depression and
+  the row cap are new mechanisms (both off by default); neither helped. Retrained encoders
+  were not followed by a network retune.
+- **The shipped model is unchanged** by these experiments.

@@ -44,7 +44,7 @@ _FLOAT_KEYS = (
     "c_aud", "aud_mean_ns", "aud_sd_ns",
     "c_hvc", "hvc_mean_ns", "hvc_sd_ns",
     "c_ei", "ei_mean_ns", "ei_sd_ns",
-    "rho_ns", "rho_pre_ns", "r_i_hz", "tau_stdp",
+    "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
@@ -86,6 +86,8 @@ class VocalErrorNet:
     c_ei, ei_mean_ns, ei_sd_ns : the same for E -> I -- ``J_EI``
     rho_ns       : STDP step (nS); ``None`` is ``constants.rho_for(tau_stdp)``
     rho_pre_ns   : presynaptic depression per I spike while the audio gate is open (nS)
+    j_ie_row_max_ns : cap on each E cell's total I -> E weight (nS), enforced by scaling
+                   the row down after each ``fit``; 0 = no cap
     r_i_hz       : I rate (Hz) setting the STDP baseline ``theta = r_i tau_stdp``
     tau_stdp     : STDP window (ms): the I trace's decay and the audio gate's
     aud_delay_ms, hvc_delay_ms : conduction delays (ms)
@@ -136,6 +138,7 @@ class VocalErrorNet:
         ei_sd_ns: float = C.EI_SD_NS,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
+        j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
         r_i_hz: float = C.R_I_HZ,
         tau_stdp: float = C.TAU_STDP,
         aud_delay_ms: float = C.AUD_DELAY_MS,
@@ -307,7 +310,7 @@ class VocalErrorNet:
         if fmt != MODEL_FORMAT:
             raise ValueError(f"{path}: a {fmt!r} model; this version runs {MODEL_FORMAT!r} "
                              f"models only. Retrain with sven-train-ven.")
-        defaults = {"rho_pre_ns": 0.0}           # added after brian2-v1 first shipped
+        defaults = {"rho_pre_ns": 0.0, "j_ie_row_max_ns": 0.0}   # added after brian2-v1
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults]
         if missing:
@@ -376,6 +379,11 @@ class VocalErrorNet:
         if learn:
             J = np.zeros((self.n_e, self.n_i), dtype=np.float32)
             J[np.asarray(i_e.j), np.asarray(i_e.i)] = np.asarray(i_e.w / nS)
+            if self.j_ie_row_max_ns > 0.0:
+                # Homeostatic cap on each cell's total inhibition, between renditions:
+                # rows above it are scaled down, preserving their pattern.
+                tot = J.sum(axis=1, keepdims=True)
+                J *= np.minimum(1.0, self.j_ie_row_max_ns / np.maximum(tot, 1e-12))
             self.J_IE = J
         sE = bin_spikes(o["mon_e"], self.n_e, T)
         sI = bin_spikes(o["mon_i"], self.n_i, T)

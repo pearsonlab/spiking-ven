@@ -98,6 +98,58 @@ class VocalErrorNet:
     model so later evaluation can rebuild them.
     """
 
+    # Every parameter is an attribute (units in the docstring above), set by __init__
+    # or load.
+    n_e: int
+    n_i: int
+    n_hvc: int
+    n_aud: int
+    dt_ms: float
+    tau_e: float
+    tau_i: float
+    c_e_pf: float
+    c_i_pf: float
+    e_l_mv: float
+    v_th_mv: float
+    v_reset_mv: float
+    t_refr_ms: float
+    i_drive_e_pa: float
+    i_drive_i_pa: float
+    noise_e: float
+    noise_i: float
+    tau_ampa: float
+    tau_gaba: float
+    e_ampa_mv: float
+    e_gaba_mv: float
+    beta_adapt_pa: float
+    tau_adapt: float
+    c_aud: float
+    aud_mean_ns: float
+    aud_sd_ns: float
+    c_hvc: float
+    hvc_mean_ns: float
+    hvc_sd_ns: float
+    c_ei: float
+    ei_mean_ns: float
+    ei_sd_ns: float
+    rho_ns: float
+    r_i_hz: float
+    tau_stdp: float
+    aud_delay_ms: float
+    hvc_delay_ms: float
+    g_nmda_mean_ns: float
+    tau_nmda_rise: float
+    tau_nmda_decay: float
+    alpha_nmda: float
+    mg_mm: float
+    e_nmda_mv: float
+    A: np.ndarray
+    B: np.ndarray
+    J_EI: np.ndarray
+    J_IE: np.ndarray
+    stimulus: dict
+    _built: tuple[str, dict] | None
+
     def __init__(
         self,
         n_e: int = C.N_E,
@@ -157,16 +209,16 @@ class VocalErrorNet:
         # simulation cannot perturb each other.
         self._sim_rng = default_rng(None if seed is None else seed + 10_000)
         self.n_e, self.n_i, self.n_hvc, self.n_aud = int(n_e), int(n_i), int(n_hvc), int(n_aud)
-        p = dict(locals())
+        args = dict(locals())                        # every float parameter, by name
         for k in _FLOAT_KEYS:
-            if k in p and p[k] is not None:
-                setattr(self, k, float(p[k]))
+            if args.get(k) is not None:
+                setattr(self, k, float(args[k]))
         self.i_drive_e_pa = float(
             i_drive_e_pa if i_drive_e_pa is not None else
             U.tonic_drive_pa(target_rate_hz, self.tau_e, self.g_l_e,
                              self.e_l_mv, self.v_th_mv, self.v_reset_mv))
         self.rho_ns = float(C.rho_for(tau_stdp) if rho_ns is None else rho_ns)
-        self.stimulus: dict = {}
+        self.stimulus = {}
 
         # Fixed weights: sparse log-normal peak conductances (nS), drawn in this order.
         self.A = _lognormal_sparse((n_e, n_aud), c_aud, aud_mean_ns, aud_sd_ns, rng)
@@ -174,7 +226,7 @@ class VocalErrorNet:
         self.J_EI = _lognormal_sparse((n_i, n_e), c_ei, ei_mean_ns, ei_sd_ns, rng)
         # I -> E starts at zero, so only song-driven E cells ever acquire inhibition.
         self.J_IE = np.zeros((n_e, n_i), dtype=np.float32)
-        self._built: tuple | None = None
+        self._built = None
 
     # ------------------------------------------------------------------
     # derived quantities
@@ -336,12 +388,13 @@ class VocalErrorNet:
     def _network(self) -> dict:
         """The cached Brian2 network, rebuilt when a parameter or fixed weight changed."""
         key = self._structure_key()
-        if getattr(self, "_built", None) is None or self._built[0] != key:
+        built = getattr(self, "_built", None)
+        if built is None or built[0] != key:
             objs = self.build()
             objs["net"].store("initial")
-            self._built = (key, objs)
-        assert self._built is not None
-        return self._built[1]
+            built = (key, objs)
+            self._built = built
+        return built[1]
 
     def _sim(self, hvc_spikes, aud_spikes, learn: bool = False,
              rng: np.random.Generator | None = None, hvc_prelude=None):

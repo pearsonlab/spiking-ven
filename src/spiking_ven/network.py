@@ -27,6 +27,8 @@ Parameters arrive as a :class:`dict` of Brian2 quantities from
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from brian2 import (
     Network,
@@ -162,7 +164,7 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     mon_e = SpikeMonitor(E, name="mon_e")
     mon_i = SpikeMonitor(I, name="mon_i")
-    objs = dict(aud=aud, hvc=hvc, E=E, I=I, nmda=nmda, aud_e=aud_e, aud_nmda=aud_nmda,
+    objs: dict[str, Any] = dict(aud=aud, hvc=hvc, E=E, I=I, nmda=nmda, aud_e=aud_e, aud_nmda=aud_nmda,
                 nmda_e=nmda_e, hvc_i=hvc_i, e_i=e_i, i_e=i_e, mon_e=mon_e, mon_i=mon_i)
     objs["net"] = Network(*objs.values())
     return objs

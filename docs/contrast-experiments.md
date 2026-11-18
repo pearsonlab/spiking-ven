@@ -110,3 +110,49 @@ nearly flat I drive (I ~42 Hz throughout the motif), so network-side timing knob
 little to work with. The remaining lever that changes *which* cells the reversed motif
 drives is the encoder (C5).
 
+## C5. Encoder context and NMDA decay
+
+**Longer encoder context** (`CAUSAL_K_FRAMES` 16 -> 24, i.e. 32 -> 48 ms of past; encoder
+retrained, `outputs/encoders/enc_k24.npz`, 59 filters, 2.2 Hz). Idea: longer
+spectro-temporal kernels can prefer one sweep direction, so the reversed motif drives
+partly different channels. Biology: 48 ms integration windows are well within auditory
+forebrain STRF durations. Shipped network otherwise.
+
+| seed | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|
+| 42 | 0.05 | 0.87 | 0.49 | 32.0 | 42.5 | 40 | 1.005 | +0.62 |
+| 1 | 0.03 | 0.88 | 0.47 | 35.4 | 64.3 | 50 | 1.044 | +0.65 |
+| 2 | 0.53 | 0.88 | 0.49 | 40.3 | 43.9 | 26 | 0.998 | +0.42 |
+| 3 | 0.71 | 0.85 | 0.45 | 47.5 | 53.1 | 54 | 0.976 | +0.45 |
+| mean | 0.33 | 0.87 | 0.48 | 38.8 | 50.9 | 42.5 | **1.006** | +0.53 |
+
+Verdict: worse -- whole-rendition contrast falls to ~1.0, latency rises. Rejected.
+
+**Faster NMDA decay** (`TAU_NMDA_DECAY` 100 -> 70 ms). Biology: NMDA decay shortens with
+development in songbird forebrain (Livingston & Mooney 1997); 70 ms is plausible.
+
+| seed | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|
+| 42 | 0.09 | 0.86 | 0.45 | 27.2 | **39.6** | 38 | 1.081 | +0.52 |
+| 1 | 0.24 | 0.79 | 0.42 | 33.3 | **34.7** | 34 | 1.126 | +0.60 |
+
+Verdict: duration drops below the 47 ms bound and contrast does not improve. Rejected.
+
+## C6. Two more encoders (shipped network)
+
+`enc_k32`: `CAUSAL_K_FRAMES` 32 (64 ms of past), 59 filters, 2.0 Hz. `enc_k24_lam05`:
+24 frames and `CAUSAL_LAMBDA` 0.5 (sparser code), only 34 filters, 2.3 Hz.
+
+| encoder | seed | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| k32 | 42 | 0.08 | 0.97 | 0.57 | 25.2 | 54.9 | 42 | 0.976 | +0.68 |
+| k32 | 1 | 0.12 | 0.93 | 0.56 | 22.5 | 63.6 | 50 | 0.965 | +0.75 |
+| k24, lambda 0.5 | 42 | 0.33 | 1.06 | 0.35 | 35.6 | 47.4 | 40 | 0.940 | +0.52 |
+| k24, lambda 0.5 | 1 | 0.04 | 1.00 | 0.40 | 29.4 | 49.3 | 52 | 0.950 | +0.56 |
+
+Verdict: longer encoder kernels make the whole-rendition contrast *worse* (below 1: the
+reversed motif now drives E slightly less than the trained song does over the whole
+rendition), although k32 raises the song-driven `diff` a little (+0.68-0.75 vs +0.64 mean
+shipped) -- the two measures disagree, so this is not a clear win. Encoders retrained;
+the network was not retuned for them.
+

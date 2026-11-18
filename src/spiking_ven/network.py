@@ -101,14 +101,14 @@ STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)
 # Builders
 # ---------------------------------------------------------------------------
 
-def _connect(syn: Synapses, W: np.ndarray, *, dense: bool = False) -> None:
+def _connect(syn: Synapses, W: np.ndarray, *, mask: np.ndarray | None = None) -> None:
     """Connect ``syn`` from a ``(post, pre)`` weight matrix in nS and set ``syn.w``.
 
-    Only nonzero entries become synapses unless ``dense``, which wires every pair (for a
-    plastic matrix that starts at zero).
+    Only nonzero entries become synapses, unless ``mask`` (same shape, bool) says which
+    pairs are connected -- for a plastic matrix, whose weights may start at zero.
     """
     W = np.asarray(W, dtype=np.float64)
-    post, pre = np.nonzero(np.ones_like(W) if dense else W)
+    post, pre = np.nonzero(W if mask is None else np.asarray(mask, dtype=bool))
     if pre.size == 0:
         syn.active = False
         return
@@ -122,7 +122,8 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     ``ns`` is the namespace of Brian2 quantities (``VocalErrorNet.namespace()``):
     population-specific constants under ``"E"``, ``"I"``, the rest shared. ``weights``
-    holds the ``(post, pre)`` matrices ``A``, ``G``, ``B``, ``J_EI``, ``J_IE`` in nS.
+    holds the ``(post, pre)`` matrices ``A``, ``G``, ``B``, ``J_EI``, ``J_IE`` in nS, and
+    ``M_IE``, which I -> E pairs are connected (plastic synapses exist only there).
     Returns a dict of the Brian2 objects, with the network under ``"net"``.
     """
     shared = {k: v for k, v in ns.items() if k not in ("E", "I")}
@@ -166,7 +167,7 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     i_e = Synapses(I, E, "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
                    on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
                    namespace=shared, dt=dt, name="i_e")
-    _connect(i_e, weights["J_IE"], dense=True)
+    _connect(i_e, weights["J_IE"], mask=weights["M_IE"])
 
     mon_e = SpikeMonitor(E, name="mon_e")
     mon_i = SpikeMonitor(I, name="mon_i")

@@ -61,13 +61,17 @@ dg_ampa/dt = -g_ampa / tau_ampa : siemens
 dg_gaba/dt = -g_gaba / tau_gaba : siemens
 dI_adapt/dt = -I_adapt / tau_adapt : amp
 da_aud/dt = -a_aud / tau_stdp : 1
+dx_e/dt = -x_e / tau_stdp : 1
+alpha_e : 1
 g_nmda : siemens
 mg_block = 1 / (1 + Mg / (3.57*mM) * exp(-0.062 * v/mV)) : 1 (constant over dt)
 gate = int(a_aud > exp(-1)) : 1
 I_noise = sigma * randn() / sqrt(dt) : amp (constant over dt)
 """
 # ``a_aud`` counts recent auditory input spikes, each decaying with tau_stdp; ``gate``
-# is open while it exceeds 1/e, i.e. for tau_stdp after an isolated input spike.
+# is open while it exceeds 1/e, i.e. for tau_stdp after an isolated input spike. ``x_e``
+# is the cell's own spike trace and ``alpha_e`` its rate target (``2 r tau_stdp``), used
+# only by the optional rate-target rule (``VOGELS_ON_PRE``).
 # ``g_nmda`` is summed from the NMDA synapses (see ``build_network``).
 
 #: Inhibitory interneurons. ``x_stdp`` is the presynaptic STDP trace.
@@ -95,6 +99,14 @@ STDP_ON_POST = "w = clip(w + rho * gate_post * (x_stdp_pre - theta), 0*nS, inf*n
 #: precede the E cell's spikes costs weight. ``rho_dep`` is 0 by default and outside
 #: training.
 STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)"
+
+#: Rate-target inhibitory STDP (Vogels et al. 2011, Science 334:1569), an option for
+#: I_HVC -> E: at each I spike the weight moves by ``eta`` times (the E cell's spike trace
+#: minus its target ``alpha_e = 2 r_target tau_stdp``); at each E spike it grows by ``eta``
+#: times the I trace. Each E cell settles at its target rate; with a sparse, reproducible
+#: presynaptic basis, the learned inhibition follows the E cell's excess drive in time.
+VOGELS_ON_PRE = "g_gaba_post += w; w = clip(w + eta * (x_e_post - alpha_e_post), 0*nS, inf*nS)"
+VOGELS_ON_POST = "w = clip(w + eta * x_stdp_pre, 0*nS, inf*nS)"
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +147,7 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     # E and I are the paper's population names.
     E = NeuronGroup(n_e, E_EQS, threshold="v > V_th",
-                    reset=f"{reset_v}; I_adapt += beta", refractory="t_ref",
+                    reset=f"{reset_v}; I_adapt += beta; x_e += 1", refractory="t_ref",
                     method="exponential_euler", namespace={**shared, **ns["E"]},
                     dt=dt, name="E")
     I = NeuronGroup(n_i, I_EQS, threshold="v > V_th",  # noqa: E741
@@ -186,9 +198,16 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
         hvc_ih = Synapses(hvc, IH, "w : siemens", on_pre="g_ampa_post += w",
                           delay=hvc_delay, dt=dt, name="hvc_ih")
         _connect(hvc_ih, weights["B_H"])
-        ih_e = Synapses(IH, E, "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
-                        on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
-                        namespace={**shared, "theta": shared["theta_h"]}, dt=dt, name="ih_e")
+        if shared.get("vogels_h", False):
+            ih_e = Synapses(IH, E, "w : siemens\neta : siemens (shared)",
+                            on_pre=VOGELS_ON_PRE, on_post=VOGELS_ON_POST,
+                            namespace=shared, dt=dt, name="ih_e")
+        else:
+            ih_e = Synapses(IH, E,
+                            "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
+                            on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
+                            namespace={**shared, "theta": shared["theta_h"]}, dt=dt,
+                            name="ih_e")
         _connect(ih_e, weights["J_HE"], mask=weights["M_HE"])
         objs.update(IH=IH, hvc_ih=hvc_ih, ih_e=ih_e, mon_ih=SpikeMonitor(IH, name="mon_ih"))
     objs["net"] = Network(*objs.values())

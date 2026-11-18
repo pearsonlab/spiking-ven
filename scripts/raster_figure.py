@@ -60,7 +60,7 @@ def main() -> None:
                              gridspec_kw={"hspace": 0.08, "wspace": 0.05})
     for c, ((title, _), (aud, si, ih, se)) in enumerate(zip(cols, runs)):
         data = {"aud": aud, "I": si[pick["I"]], "E": se[pick["E"]]}
-        if order is not None:
+        if order is not None and ih is not None:
             data["IH"] = ih[order]
         for r, key in enumerate(rows):
             ax = axes[r, c]
@@ -74,6 +74,7 @@ def main() -> None:
                 ax.set_ylim(-1, m.shape[0])
                 ax.set_yticks([])
                 full = {"aud": aud, "I": si, "IH": ih, "E": se}[key]
+                assert full is not None
                 ax.text(0.99, 0.92, f"{full.mean() * 1000:.0f} Hz", transform=ax.transAxes,
                         ha="right", fontsize=7, color="#5f5e58")
             if c == 0:

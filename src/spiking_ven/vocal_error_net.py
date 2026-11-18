@@ -46,12 +46,13 @@ _FLOAT_KEYS = (
     "c_ei", "ei_mean_ns", "ei_sd_ns",
     "c_ie", "ie_init_mean_ns", "ie_init_sd_ns",
     "c_hvc_h", "hvc_h_mean_ns", "hvc_h_sd_ns", "rho_h_ns", "r_ih_hz", "i_drive_ih_pa",
+    "vogels_h", "eta_h_ns",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
 _INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "n_ih")
-_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE")
+_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE", "R_TARGET")
 
 
 class VocalErrorNet:
@@ -96,6 +97,9 @@ class VocalErrorNet:
     c_hvc_h, hvc_h_mean_ns, hvc_h_sd_ns : HVC -> I_HVC probability and weights (``B_H``)
     rho_h_ns, r_ih_hz : STDP step (``None`` = ``rho_ns``) and baseline rate for I_HVC -> E
     i_drive_ih_pa : tonic current on I_HVC (pA)
+    vogels_h     : 1 = I_HVC -> E learns by the rate-target rule of Vogels et al. 2011
+                   instead (each E cell held at its rate in ``R_TARGET``); 0 = the STDP rule
+    eta_h_ns     : its learning rate (nS)
     rho_ns       : STDP step (nS); ``None`` is ``constants.rho_for(tau_stdp)``
     rho_pre_ns   : presynaptic depression per I spike while the audio gate is open (nS)
     j_ie_row_max_ns : cap on each E cell's total I -> E weight (nS), enforced by scaling
@@ -175,6 +179,9 @@ class VocalErrorNet:
     rho_h_ns: float
     r_ih_hz: float
     i_drive_ih_pa: float
+    vogels_h: float
+    eta_h_ns: float
+    R_TARGET: np.ndarray
     c_ie: float
     ie_init_mean_ns: float
     ie_init_sd_ns: float
@@ -226,6 +233,8 @@ class VocalErrorNet:
         rho_h_ns: float | None = None,
         r_ih_hz: float = 5.0,
         i_drive_ih_pa: float = 0.0,
+        vogels_h: float = 0.0,
+        eta_h_ns: float = 1.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -294,6 +303,7 @@ class VocalErrorNet:
             self.B_H = np.zeros((0, n_hvc), dtype=np.float32)
         self.J_HE = np.zeros((n_e, self.n_ih), dtype=np.float32)
         self.M_HE = np.ones((n_e, self.n_ih), dtype=bool)
+        self.R_TARGET = np.zeros(n_e, dtype=np.float32)
         self.last_ih = None
         self._built = None
 
@@ -344,6 +354,7 @@ class VocalErrorNet:
             "alpha_nmda": self.alpha_nmda * per_ms, "Mg": self.mg_mm * mM,
             "theta": self.theta,
             "theta_h": self.r_ih_hz * self.tau_stdp * 1e-3,
+            "vogels_h": bool(self.vogels_h),
             "E": {"C": self.c_e_pf * pF, "g_L": self.g_l_e * nS,
                   "I_tonic": self.i_drive_e_pa * pA, "sigma": self.noise_e * pA * sqrt_ms,
                   "beta": self.beta_adapt_pa * pA},
@@ -379,6 +390,21 @@ class VocalErrorNet:
     # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
+
+    def set_rate_targets(self, n_hvc_t: int, n_aud: int, T: int = 1000,
+                         n_trials: int = 10, seed: int = 0) -> np.ndarray:
+        """Set ``R_TARGET`` to each E cell's rate (Hz) in silence, not singing.
+
+        Measured on the network as it stands (before training, for the rate-target rule),
+        over ``n_trials`` runs of ``T`` ms with no HVC or auditory input.
+        """
+        rng = np.random.default_rng(seed)
+        z_h = np.zeros((n_hvc_t, T), dtype=np.float32)
+        z_a = np.zeros((n_aud, T), dtype=np.float32)
+        r = np.mean([self.transform(z_h, z_a, rng=rng) for _ in range(n_trials)],
+                    axis=(0, 2)) * 1000.0
+        self.R_TARGET = r.astype(np.float32)
+        return self.R_TARGET
 
     def fit(self, hvc_spikes: np.ndarray, aud_spikes: np.ndarray, *,
             hvc_prelude: np.ndarray | None = None) -> np.ndarray:
@@ -438,8 +464,9 @@ class VocalErrorNet:
                     "ie_init_mean_ns": 0.0, "ie_init_sd_ns": 0.0, "n_ih": 0, "c_hvc_h": 0.02,
                     "hvc_h_mean_ns": 20.0, "hvc_h_sd_ns": 10.0,
                     "rho_h_ns": float(d["rho_ns"]) if "rho_ns" in d else 0.0,
-                    "r_ih_hz": 5.0, "i_drive_ih_pa": 0.0}   # the constructor's defaults
-        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE")
+                    "r_ih_hz": 5.0, "i_drive_ih_pa": 0.0, "vogels_h": 0.0,
+                    "eta_h_ns": 1.0}   # the constructor's defaults
+        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "R_TARGET")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults and k not in optional_arrays]
         if missing:
@@ -458,6 +485,8 @@ class VocalErrorNet:
                 setattr(obj, k, d[k])
             elif k == "M_IE":
                 obj.M_IE = np.ones(d["J_IE"].shape, dtype=bool)
+            elif k == "R_TARGET":
+                obj.R_TARGET = np.zeros(int(d["n_e"]), dtype=np.float32)
             elif k == "B_H":
                 obj.B_H = np.zeros((0, int(d["n_hvc"])), dtype=np.float32)
             else:                                    # J_HE, M_HE: no I_HVC
@@ -516,8 +545,13 @@ class VocalErrorNet:
         if ih_e is not None:
             ih_e.w[:] = np.asarray(self.J_HE, dtype=np.float64)[np.asarray(ih_e.j),
                                                                np.asarray(ih_e.i)] * nS
-            ih_e.rho = (self.rho_h_ns if learn else 0.0) * nS
-            ih_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS
+            if self.vogels_h:
+                ih_e.eta = (self.eta_h_ns if learn else 0.0) * nS
+                o["E"].alpha_e = 2.0 * np.asarray(self.R_TARGET, dtype=np.float64) \
+                    * self.tau_stdp * 1e-3
+            else:
+                ih_e.rho = (self.rho_h_ns if learn else 0.0) * nS
+                ih_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS
         brian_seed(int((self._sim_rng if rng is None else rng).integers(2**31)))
         o["net"].run(T * ms)
 

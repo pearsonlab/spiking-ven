@@ -78,6 +78,8 @@ def run_one(args) -> dict:
     st = _stimuli()
     t0 = time.time()
     ven = VocalErrorNet(n_aud=st["n_channels"], seed=seed, **overrides)
+    if ven.vogels_h:              # per-cell targets: each cell's untrained not-singing rate
+        ven.set_rate_targets(ven.n_hvc, ven.n_aud)
     traces = train(ven, st, n_rend, seed=seed, verbose=False)
     t_train = time.time() - t0
     m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],

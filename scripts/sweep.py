@@ -60,6 +60,7 @@ def score(r: dict, m: dict) -> dict:
         "late": outside(r["late_over_peak"], -1.0, 0.15),
         "extra_spikes": outside(r["extra_spikes_responders"], 0.8, 1.0),
         "specificity": outside(m["reversed_over_trained"], 1.0, 10.0),
+        "singing_vs_not": outside(m["singing_over_not_singing"], 0.5, 2.0),
     }
     s["total"] = float(sum(s.values()))
     return s

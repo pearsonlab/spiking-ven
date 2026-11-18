@@ -136,6 +136,8 @@ class VocalErrorNet:
     ei_mean_ns: float
     ei_sd_ns: float
     rho_ns: float
+    rho_pre_ns: float
+    j_ie_row_max_ns: float
     r_i_hz: float
     tau_stdp: float
     aud_delay_ms: float

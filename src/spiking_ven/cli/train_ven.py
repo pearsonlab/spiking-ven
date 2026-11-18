@@ -244,6 +244,7 @@ def main(argv: list[str] | None = None) -> None:
              final_trained_hz=m["trained_hz"], final_reversed_hz=m["reversed_hz"],
              final_reversed_over_trained=m["reversed_over_trained"],
              final_daf_not_singing_hz=m["daf_not_singing_hz"],
+             final_singing_over_not_singing=m["singing_over_not_singing"],
              aud_mean_ns=args.aud_mean_ns, i_drive_e_pa=ven.i_drive_e_pa,
              tau_ampa=args.tau_ampa, n_rend=args.n_rend, rho_ns=rho, dt_ms=args.dt_ms)
     print(f"Saved {traces_path}")

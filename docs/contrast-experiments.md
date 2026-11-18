@@ -206,3 +206,136 @@ inhibition per E cell (new option), faster NMDA decay (70 ms), and three retrain
   the row cap are new mechanisms (both off by default); neither helped. Retrained encoders
   were not followed by a network retune.
 - **The shipped model is unchanged** by these experiments.
+
+# Part 2: singing vs not singing (new target, Fig 7D)
+
+New target `singing_over_not_singing` (0.5-2.0): E rate over the motif while singing the
+trained song, over the rate in silence without singing. Shipped model: 0.24 (E ~2.3 Hz
+singing vs ~9.6 Hz silent). An HVC-shift test showed ~96% of the cancellation is not
+time-locked: HVC-driven inhibition (I ~40 Hz throughout singing) suppresses E whatever the
+sound.
+
+## T1-T2. Lower tonic E drive (seed 42)
+
+`TARGET_RATE_E_HZ` 25 -> 16/12/8/5 barely lowers the silent rate (9.6 -> 7.4 Hz; noise
+dominates). Setting the drive directly (`i_drive_e_pa` 150-300 pA, from 453) gives a silent
+rate of 2.4-5.7 Hz, but singing still pulls E to ~1/4 of it: ratio 0.25-0.31 in every case.
+Contrast improves with the quieter background (drive 150 pA, `R_I_HZ` 46: rev/tr 1.35, diff
++1.16 Hz, but extra spikes 1.21). Verdict: the blanket inhibition is structural (HVC drives
+I hard), not a matter of E's background rate.
+
+## B1. E/I-balanced start (new options `C_IE`, `IE_INIT_MEAN_NS`; seed 42)
+
+Sparse plastic I -> E (`C_IE` 0.2) with log-normal initial weights (5-10 nS), E -> I x5-10
+(1.1-2.2 nS) so E recruits I, and HVC -> I weakened (x0.2 / x0.35) so HVC re-times I rather
+than adding to its mean. Untrained screen: at HVC x0.2-0.35 the mean I rate barely changes
+with singing (13.5 -> 11.0-12.6 Hz) and E singing/silent ~1.0; song while not singing drives
+E to 8-15 Hz from a 2-4 Hz background. Biology: E -> I of ~1 nS and I -> E of 5-10 nS per
+synapse are conventional cortical values; HVC -> I of 1.5-2.6 nS is weaker than shipped.
+
+| HVC x | aud x | `R_I_HZ` | E sing/silent | I singing/silent | xs | resp | lat | dur | late/pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.2 | 1 | 12 | 0.95 | 1.12 | 1.25 | 0.27 | 42.0 | 79.0 | 0.54 | 1.070 | +0.09 |
+| 0.2 | 1 | 20 | 1.07 | 1.13 | 1.38 | 0.29 | 36.8 | 106.5 | 0.59 | 1.013 | +0.06 |
+| 0.2 | 1.5 | 12 | 0.97 | 1.09 | 1.23 | 0.28 | 40.5 | 75.7 | 0.56 | 1.011 | +0.11 |
+| 0.2 | 2 | 12 | 0.97 | 1.19 | 1.25 | 0.27 | 44.4 | 77.8 | 0.55 | 1.057 | +0.11 |
+| 0.2 (I->E 10 nS) | 1 | 12 | 1.03 | 1.09 | 1.24 | 0.28 | 37.4 | 95.9 | 0.58 | 1.009 | +0.09 |
+| 0.2 (E->I x10) | 1 | 15 | 1.04 | 1.18 | 0.87 | 0.23 | 43.1 | 118.6 | 0.59 | 1.042 | +0.04 |
+| 0.35 | 1 | 12 | 0.64 | 2.44 | 1.01 | 0.29 | 44.5 | 69.7 | 0.42 | 1.113 | +0.26 |
+| 0.35 | 1 | 20 | 0.79 | 2.00 | 1.27 | 0.28 | 35.8 | 92.5 | 0.47 | 1.051 | +0.23 |
+| 0.35 | 1.5 | 12 | 0.71 | 2.31 | 1.05 | 0.28 | 40.2 | 77.6 | 0.47 | 1.131 | +0.25 |
+| 0.35 (I->E 10 nS) | 1.5 | 20 | 0.82 | 1.49 | 1.26 | 0.29 | 44.8 | 63.3 | 0.50 | 1.064 | +0.22 |
+
+Verdict: **the new target is met (0.64-1.07) and HVC x0.2 leaves the mean I rate within
+~10-20%**, but song-specific learning is lost (diff ~+0.1 Hz) -- with weak HVC drive, I's
+timing carries too little information -- and the DAF response becomes sustained (late/peak
+~0.55 vs <= 0.15), longer, and reaches fewer cells (23-29%). I rates fell to 3-6 Hz after
+training (13 Hz untrained).
+
+## B2. Balanced start + sparse, strong HVC -> I (seed 42)
+
+Base as B1 (`C_IE` 0.2, I -> E 5 nS initial, E -> I 1.1 nS, `R_I_HZ` 12), with fewer HVC
+inputs per I cell (`C_HVC` 0.02 = 12 inputs, or 0.05 = 30) at the same total drive as HVC
+x0.2 / x0.35 (per-synapse 7.5 / 13.1 nS at 0.02; 3.0 / 5.2 nS at 0.05).
+
+| `C_HVC` | HVC nS | other | E sing/silent | I singing/silent | xs | resp | lat | dur | late/pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.02 | 13.1 | | 0.35 | 4.82 | 1.01 | 0.37 | 35.6 | 61.4 | 0.25 | 1.322 | +0.75 |
+| 0.02 | 13.1 | rho x3 | 0.28 | 4.67 | 0.96 | 0.38 | 38.8 | 60.4 | 0.22 | **1.410** | **+0.79** |
+| 0.02 | 13.1 | `R_I_HZ` 20 | 0.66 | 3.98 | 1.14 | 0.37 | 39.0 | 70.2 | 0.40 | 1.121 | +0.60 |
+| 0.02 | 13.1 | `C_IE` 0.1, 10 nS | 0.66 | 3.86 | 1.15 | 0.36 | 39.4 | 65.0 | 0.41 | 1.067 | +0.45 |
+| 0.02 | 7.5 | | 0.80 | 2.51 | 1.10 | 0.35 | 37.2 | 56.5 | 0.44 | 1.077 | +0.42 |
+| 0.02 | 7.5 | rho x3 | 0.76 | 2.50 | 1.10 | 0.34 | 41.4 | 51.0 | 0.41 | 1.138 | +0.45 |
+| 0.02 | 7.5 | beta x1.5 | 0.79 | 2.64 | 1.03 | 0.36 | 43.5 | 44.7 | 0.48 | 1.083 | +0.38 |
+| 0.02 | 7.5 | `C_IE` 0.1, 10 nS | 0.95 | 2.27 | 1.25 | 0.32 | 43.7 | 66.4 | 0.48 | 1.079 | +0.17 |
+| 0.05 | 5.2 | | 0.47 | 3.34 | 1.03 | 0.29 | 33.8 | 66.8 | 0.28 | 1.179 | +0.38 |
+| 0.05 | 3.0 | | 0.91 | 1.52 | 1.30 | 0.28 | 38.3 | 83.7 | 0.55 | 1.079 | +0.20 |
+
+Verdict: sparse, strong HVC inputs restore song-specific cancellation (rev/tr up to 1.41,
+diff +0.79 Hz -- the best contrast so far, with extra spikes ~1.0) but multiply the I rate
+4-5x while singing, which brings back the blanket suppression (E ratio 0.28-0.35). Weaker
+HVC keeps E's ratio in range but loses contrast. The trade-off runs through I's trained
+baseline (~3 Hz): any HVC input is a large relative change. Next: raise I's baseline
+(tonic I drive near threshold, or noise on I) so HVC re-times I without multiplying it.
+Biology flag: 12 HVC inputs of ~13 nS per I cell is sparse and strong but not implausible.
+
+## B3. Raised I baseline (tonic I drive near threshold) (seed 42)
+
+Base as B2 with `C_HVC` 0.02; `I_DRIVE_I_PA` 300 or 380 (threshold current 400 pA; shipped
+53.7), `R_I_HZ` raised to 20-30 to sit near the new I rate.
+
+| HVC nS | I drive | `R_I_HZ` | other | E sing/silent (Hz) | I singing/silent | xs | resp | lat | dur | late/pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 7.5 | 300 | 20 | | 1.03/1.25 = 0.83 | 17.3/10.7 = 1.61 | 0.71 | 0.25 | 33.2 | 97.3 | 0.35 | 1.210 | +0.27 |
+| 7.5 | 300 | 30 | | 1.47/1.26 = 1.17 | 17.3/10.6 = 1.64 | 0.86 | 0.26 | 43.1 | 67.5 | 0.40 | 1.102 | +0.22 |
+| 7.5 | 380 | 20 | | 0.19/0.36 = 0.54 | 23.3/16.6 = 1.40 | 0.59 | 0.16 | 32.6 | 97.0 | 0.21 | 1.707 | +0.21 |
+| 7.5 | 380 | 30 | | 0.39/0.36 = 1.08 | 23.0/17.0 = 1.36 | 0.65 | 0.19 | 45.8 | 52.0 | 0.26 | 1.421 | +0.21 |
+| 13.1 | 300 | 20 | | 0.49/1.25 = 0.39 | 24.1/10.7 = 2.25 | 0.68 | 0.26 | 38.3 | 93.0 | 0.31 | 1.441 | +0.46 |
+| 13.1 | 300 | 30 | | 1.06/1.19 = 0.89 | 24.1/11.1 = 2.17 | 0.81 | 0.26 | 43.7 | 59.9 | 0.36 | 1.206 | +0.33 |
+| 13.1 | 380 | 20 | | 0.10/0.36 = 0.29 | 29.4/16.5 = 1.78 | 0.59 | 0.15 | 36.3 | 64.9 | 0.19 | 2.220 | +0.25 |
+| 13.1 | 380 | 30 | | 0.24/0.36 = 0.67 | 29.6/17.0 = 1.74 | 0.63 | 0.18 | 53.4 | 41.9 | 0.25 | 1.746 | +0.26 |
+| 13.1 | 380 | 30 | rho x3 | 0.21/0.36 = 0.59 | 29.6/17.0 = 1.74 | 0.60 | 0.18 | 48.9 | 41.8 | 0.24 | 1.841 | +0.26 |
+| 13.1 | 300 | 20 | noise_i 300 | 0.03/0.25 = 0.11 | 35.1/16.0 = 2.19 | 0.55 | 0.18 | 48.9 | 46.5 | 0.19 | 3.679 | +0.28 |
+
+Verdict: a higher I baseline makes HVC's effect on the mean I rate smaller (1.4-1.6x at
+7.5 nS) while keeping song-specific cancellation (diff +0.2-0.3 Hz), but the extra
+inhibition silences E's background (0.25-1.3 Hz, below AIV's ~2-15 Hz) and shrinks the
+DAF response (0.55-0.86 extra spikes, 15-26% responders). The large rev/tr values here
+are inflated by the low E rates; `diff` is the fair comparison. Next: more E drive to
+rebalance (B4).
+
+## B4. Raised I baseline + more E drive (seed 42)
+
+Base as B3 (`C_HVC` 0.02, `I_DRIVE_I_PA` 300 unless noted), with `i_drive_e_pa` 600-900
+(shipped 453).
+
+| HVC nS | E drive | `R_I_HZ` | other | E sing/silent (Hz) | I singing/silent | xs | resp | lat | dur | pk | late/pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 7.5 | 600 | 30 | | 1.49/1.38 = 1.08 | 1.22 | 0.87 | 0.26 | 37.3 | 90.5 | 38 | 0.40 | 1.117 | +0.22 |
+| 7.5 | 600 | 20 | | 1.09/1.45 = 0.75 | 1.20 | 0.69 | 0.25 | 39.2 | 97.0 | 12 | 0.36 | 1.158 | +0.28 |
+| 7.5 | 750 | 30 | | 1.51/1.61 = 0.94 | 1.01 | 0.87 | 0.24 | 32.9 | 88.8 | 12 | 0.41 | 1.100 | +0.24 |
+| 7.5 | 750 | 20 | | 1.21/1.61 = 0.75 | 1.06 | 0.66 | 0.24 | 43.8 | 73.6 | 12 | 0.38 | 1.138 | +0.26 |
+| 7.5 | 900 | 30 | | 1.55/1.90 = 0.82 | 1.02 | 0.85 | 0.24 | 42.0 | 88.0 | 12 | 0.44 | 1.092 | +0.25 |
+| 7.5 | 900 | 20 | | 1.35/1.90 = 0.71 | 1.02 | 0.61 | 0.23 | 43.5 | 84.0 | 36 | 0.39 | 1.105 | +0.24 |
+| 7.5 | 750 | 30 | I drive 340 | 0.97/1.16 = 0.84 | 1.12 | 0.75 | 0.22 | 37.4 | 105.7 | 12 | 0.38 | 1.169 | +0.23 |
+| 10.0 | 750 | 30 | | 1.36/1.61 = 0.85 | 1.08 | 0.85 | 0.24 | 40.5 | 84.7 | 12 | 0.39 | 1.119 | +0.27 |
+| 13.1 | 600 | 30 | | 1.08/1.44 = 0.75 | 1.53 | 0.80 | 0.26 | 40.1 | 87.5 | 12 | 0.34 | 1.232 | +0.33 |
+| 13.1 | 750 | 30 | | 1.14/1.61 = 0.71 | 1.29 | 0.80 | 0.26 | 36.3 | 91.1 | 12 | 0.34 | 1.185 | +0.34 |
+
+Best (HVC 7.5 nS, E drive 600, `R_I_HZ` 30): singing/silent 1.08, I rate 1.22x with
+singing, extra spikes 0.87, latency 37 ms, duration 90 ms, peak 38 ms -- but late/peak
+0.40 (sustained), responders 26%, E background only ~1.4 Hz. HVC-shift test on it (song-
+driven cells): HVC-only 0.51 Hz; song without HVC adds only +1.9 Hz (shipped: +14.4 -- the
+balance quenches the song drive); trained song with HVC aligned +1.04, shifted 25-200 ms
++1.06-1.19, reversed +1.24-1.28. So cancellation is now partial (~46%) and still mostly not
+time-locked (~0.15 Hz of it is).
+
+## Summary of part 2 (as of B4)
+
+- The singing ~ not-singing target and a near-constant mean I rate can both be met in an
+  E/I-balanced start with weak or sparse HVC -> I and a raised I baseline (B3-B4).
+- Every balanced configuration so far fails the DAF shape (late/peak 0.3-0.6, target
+  <= 0.15) and has few responders (15-29%) and a low E background (~1-2 Hz).
+- Song-specific cancellation is weak in the balanced regime: the balance quenches most of
+  the song drive itself (+1.9 vs +14 Hz), and the learned cancellation is mostly not
+  time-locked.

@@ -53,3 +53,60 @@ Verdict: `C_HVC` 0.05 raises contrast ~45% (diff +0.83 vs +0.57, rev/tr 1.12 vs 
 with every target in range. Sparser, or weaker HVC weights, raise contrast further but
 re-couple it to the DAF magnitude.
 
+## C3. Around `C_HVC` 0.05 (`C05` = `C_HVC` 0.05, `HVC_MEAN_NS` 14.96, SD 7.48)
+
+| change (on C05 unless stated) | seed | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| C05 | 42 | 0.03 | 0.98 | 0.45 | 27.3 | 51.1 | 34 | 1.117 | +0.83 |
+| C05 | 1 | 1.04 | **1.21** | 0.52 | 26.9 | 51.5 | 38 | 1.107 | +0.64 |
+| C05 | 2 | 0.54 | **1.11** | 0.43 | 32.4 | 67.5 | 44 | 1.036 | +0.47 |
+| shipped (`C_HVC` 0.1), for comparison | 1 | 0.03 | 0.89 | 0.41 | 30.4 | 49.8 | 34 | 1.114 | +0.65 |
+| 1200 renditions | 42 | 0.04 | 0.93 | 0.45 | 26.3 | **43.8** | 36 | 1.120 | +0.81 |
+| `C_HVC` 0.03, HVC 29.9 nS (x1.2) | 42 | 0.70 | 1.13 | 0.46 | 28.2 | 56.8 | 34 | 1.120 | +0.84 |
+| `C_HVC` 0.03, HVC 34.9 nS (x1.4) | 42 | 0.20 | 1.04 | 0.41 | 26.1 | 50.2 | 34 | 1.068 | +0.55 |
+| HVC 17.95 nS (x1.2) | 42 | 0.03 | 0.82 | 0.39 | 35.1 | 48.8 | 34 | 1.055 | +0.48 |
+| `TAU_STDP` 10 ms | 42 | 0.31 | 0.75 | 0.46 | 24.6 | 41.9 | 36 | 1.047 | +0.48 |
+| presyn. depression 0.38 nS | 42 | 6.91 | 2.33 | 0.61 | 18.6 | 62.0 | 34 | 1.144 | +1.44 |
+| presyn. depression 1.13 nS | 42 | 9.65 | 2.90 | 0.58 | 17.6 | 63.6 | 34 | 1.077 | +1.02 |
+| presyn. depression 1.13 nS, `R_I_HZ` 32 | 42 | 9.66 | 2.92 | 0.55 | 18.2 | 67.0 | 34 | 1.064 | +0.98 |
+| **`TAU_GABA` 8 ms** | 42 | **0.00** | 0.96 | 0.48 | 28.5 | 47.7 | 52 | **1.122** | **+0.86** |
+| `TAU_GABA` 8 ms, `NOISE_I` 150 pA sqrt(ms) | 42 | 0.00 | 0.91 | 0.47 | 28.7 | 46.8 | 54 | 1.102 | +0.73 |
+| `NOISE_I` 150 pA sqrt(ms) | 42 | 0.03 | 0.93 | 0.46 | 23.3 | 51.5 | 34 | 1.106 | +0.74 |
+
+Verdicts:
+- **The C05 gain does not survive other seeds** (+0.64 and +0.47 Hz at seeds 1 and 2, against
+  +0.65 for the shipped model at seed 1), and seeds 1-2 push extra spikes above range.
+  Seed-to-seed spread (~0.15-0.2 Hz in `diff`, ~0.03-0.04 in `rev/tr`) is as large as most
+  effects here, so single-seed wins are not trustworthy; from here on, candidates are
+  compared over 4 seeds.
+- **Presynaptic depression** (`RHO_PRE_NS`, an option added for this) erodes the learned
+  inhibition: E rate 5-8 Hz, DAF response 2-3x too large. Rejected as implemented.
+- **Shorter STDP window** (10 ms) and **longer training** (1200 renditions) do not help; the
+  latter shortens the response below range.
+- **`TAU_GABA` 8 ms** was the best single-seed result with every target in range; peak
+  time moves later (52 ms, inside 35-75). Biology: GABA_A IPSC decay 5-10 ms is typical of
+  adult cortex (the shipped 15 ms was chosen from the juvenile 5-20 ms range, Luo & Perkel
+  2002), so 8 ms is, if anything, more conventional. Noise on I (1.7 mV free-membrane SD)
+  did not help.
+
+## C4. Multi-seed comparison (training seeds 42, 1, 2, 3)
+
+`python scripts/summarize_sweeps.py --min-seeds 3` prints the per-seed rows. Means over the
+four seeds (the shipped row's seed 42 is the retuned model itself):
+
+| configuration | score | xs | resp | lat | dur | pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|
+| shipped | 0.07 | 0.90 | 0.44 | 31.5 | 52.3 | 36.5 | 1.080 | +0.64 |
+| `TAU_GABA` 8 ms | 0.23 | 0.83 | 0.47 | 30.4 | 47.9 | 33.0 | 1.071 | +0.61 |
+| C05 | 0.41 | **1.07** | 0.47 | 29.1 | 54.0 | 41.5 | 1.083 | +0.66 |
+| C05 + `TAU_GABA` 8 ms | 0.37 | **1.02** | 0.53 | 32.9 | 43.9 | 46.0 | 1.086 | +0.69 |
+
+Verdict: **no change so far moves contrast beyond seed-to-seed spread** (per-seed SD
+~0.03 in rev/tr, ~0.1 Hz in diff), and the `C_HVC` 0.05 variants enlarge the DAF response
+on average (seed 1: 1.21-1.22 extra spikes). The single-seed wins in C2-C3 were seed 42's
+draw. This supports the brainstorm's diagnosis: the reversed motif drives the same E
+cells with the same total input, and the learned inhibition is a per-cell gain on a
+nearly flat I drive (I ~42 Hz throughout the motif), so network-side timing knobs have
+little to work with. The remaining lever that changes *which* cells the reversed motif
+drives is the encoder (C5).
+

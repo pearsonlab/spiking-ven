@@ -18,14 +18,15 @@ choices are what they are.
 ## Install
 
 ```bash
-uv sync                       # core: numpy + scipy only
-uv sync --extra brian2        # + Brian2 runtime (run a trained network in a Brian2 circuit)
+uv sync                       # core: numpy, scipy, Brian2 (+ Cython)
 uv sync --all-extras          # + data prep (soundfile) and plotting (matplotlib)
 ```
 
-Dependencies are deliberately minimal. The ERB/gammatone filterbank is **vendored**, not
-depended on (see `THIRD_PARTY_NOTICES.md`), so the model and training core install from
-numpy and scipy alone. No PyTorch, numba, seaborn or scikit-learn.
+The network is written as Brian2 equations (`src/spiking_ven/network.py`) and simulated
+by Brian2, which compiles it with Cython when a C compiler is available (the first run
+in a fresh environment spends ~1 min compiling; later runs reuse the cache). The
+ERB/gammatone filterbank is **vendored**, not depended on (see `THIRD_PARTY_NOTICES.md`).
+No PyTorch, numba, seaborn or scikit-learn.
 
 ## Reproduce the cancellation figure
 

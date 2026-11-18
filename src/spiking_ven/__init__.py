@@ -14,14 +14,10 @@ filter bank: minimum phase puts each filter's energy as early as its magnitude r
 allows, which is what keeps the modelled DAF response latency inside the bird's
 23 +/- 12 ms.
 
-The public surface is deliberately split so that the model and training core import with
-numpy and scipy alone:
-
-- pure numpy/scipy (always available): everything re-exported below
-- Brian2 runtime glue (requires the ``brian2`` extra): :mod:`spiking_ven.brian2_runtime`
-
-``brian2_runtime`` is intentionally NOT imported here, so ``import spiking_ven`` never
-pulls in Brian2. Import it explicitly when you need live NeuronGroups.
+The network's dynamics are Brian2 equations (:mod:`spiking_ven.network`). Brian2 is
+imported lazily, on the first simulation, so ``import spiking_ven`` stays fast and the
+encoder stages never pull it in. To host the network inside a larger Brian2 circuit,
+use :meth:`VocalErrorNet.build`.
 """
 
 __version__ = "0.6.0"

@@ -1,7 +1,7 @@
 """The seed must govern the simulation, not just weight initialisation.
 
-The vocal error network injects Gaussian membrane noise every timestep. That noise comes
-from a generator seeded by ``seed=``, so two runs with identical arguments must agree
+The vocal error network injects white current noise into every membrane. Its Brian2 seed
+is drawn from a generator seeded by ``seed=``, so two runs with identical arguments must agree
 exactly, in training and in inference.
 """
 
@@ -25,7 +25,7 @@ def _tiny_inputs(n_aud: int = 10, n_hvc: int = 6, T_song: int = 120, T_post: int
 
 def test_noise_is_nonzero_by_default():
     """Guard the premise: if noise_e were 0 these tests would pass trivially."""
-    assert _tiny_net(0).noise_e_pa > 0.0
+    assert _tiny_net(0).noise_e > 0.0
 
 
 def test_same_seed_gives_identical_training():
@@ -34,7 +34,7 @@ def test_same_seed_gives_identical_training():
     for _ in range(2):
         ven = _tiny_net(42)
         ven.fit(hvc, aud)
-        out.append(ven.JIE.copy())
+        out.append(ven.J_IE.copy())
     np.testing.assert_array_equal(out[0], out[1])
 
 
@@ -50,9 +50,10 @@ def test_same_seed_gives_identical_inference():
 def test_different_seeds_diverge():
     """Sanity: the seed must actually reach the noise, not be ignored entirely."""
     hvc, aud, _, _ = _tiny_inputs()
-    a = float(_tiny_net(1).transform(hvc, aud).mean())
-    b = float(_tiny_net(2).transform(hvc, aud).mean())
-    assert a != b
+    # Compare rasters, not rates: two seeds can give the same spike count by chance.
+    a = _tiny_net(1).transform(hvc, aud)
+    b = _tiny_net(2).transform(hvc, aud)
+    assert not np.array_equal(a, b)
 
 
 def test_loaded_model_can_be_pinned(tmp_path):

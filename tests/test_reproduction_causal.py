@@ -79,14 +79,13 @@ def test_auditory_input_matches_schneider_woolley(setup):
 def test_model_carries_the_operating_point(setup):
     _, _, ven = setup
     assert ven.t_refr_ms == pytest.approx(2.0)
-    assert ven.a_sfa_pa == pytest.approx(7540.0)
+    assert ven.beta_adapt_pa == pytest.approx(7540.0)
     assert (ven.e_l_mv, ven.v_th_mv) == (-70.0, -50.0)
     assert (ven.e_ampa_mv, ven.e_gaba_mv) == (0.0, -70.0)   # conductance synapses
-    assert ven.tau_sfa == pytest.approx(10.0)
-    assert ven.tau_s == pytest.approx(3.0)           # AMPA-fast input synapses
-    assert ven.r_i_th == pytest.approx(46.0)         # just above the I rate during song
-    assert (ven.tau_inh, ven.tau_exc) == (15.0, 3.0)  # GABA_A I->E, AMPA E->I
-    assert ven.stdp_gate == "window"
+    assert ven.tau_adapt == pytest.approx(10.0)
+    assert ven.tau_ampa == pytest.approx(3.0)        # AMPA: aud->E, HVC->I, E->I
+    assert ven.r_i_hz == pytest.approx(46.0)         # just above the I rate during song
+    assert ven.tau_gaba == pytest.approx(15.0)       # GABA_A I->E
     assert (ven.aud_delay_ms, ven.hvc_delay_ms) == (AUD_DELAY_MS, HVC_DELAY_MS)
     assert AUD_MEAN_RATE_HZ == pytest.approx(2.5)
     # The peak is bin-width dependent, so the bin width is part of the metric's

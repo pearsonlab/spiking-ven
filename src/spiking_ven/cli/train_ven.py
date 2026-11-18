@@ -20,14 +20,15 @@ import argparse
 import numpy as np
 
 from ..constants import (
-    A_SFA_PA,
+    BETA_ADAPT_PA,
+    DT_MS,
     AUD_DELAY_MS,
     AUD_MEAN_RATE_HZ,
-    B_AUD_MEAN_NS,
-    B_AUD_SD_NS,
-    B_HVC_MEAN_NS,
-    B_HVC_SD_NS,
-    C_B,
+    AUD_MEAN_NS,
+    AUD_SD_NS,
+    HVC_MEAN_NS,
+    HVC_SD_NS,
+    C_AUD,
     C_E_PF,
     C_HVC,
     C_I_PF,
@@ -38,28 +39,27 @@ from ..constants import (
     HVC_DELAY_MS,
     HVC_INTRO,
     I_DRIVE_I_PA,
-    J_EI_MEAN_NS,
-    J_EI_SD_NS,
+    EI_MEAN_NS,
+    EI_SD_NS,
     N_E,
     N_HVC,
     N_I,
     N_ISTA,
     N_RENDITIONS,
-    NOISE_E_PA,
-    NOISE_I_PA,
-    R_I_TH,
+    NOISE_E,
+    NOISE_I,
+    R_I_HZ,
     T_BURN,
     T_POST,
     TARGET_RATE_E_HZ,
+    TAU_AMPA,
     TAU_E,
-    TAU_EXC,
-    TAU_INH,
-    TAU_S,
-    TAU_SFA,
+    TAU_GABA,
+    TAU_ADAPT,
     TAU_STDP,
     V_RESET_MV,
     V_TH_MV,
-    a_jie_for,
+    rho_for,
 )
 from ..metrics import (
     daf_response,
@@ -69,10 +69,9 @@ from ..metrics import (
 )
 from ..paths import encoder_npz, ensure_parent, motifs_npz, ven_model_npz
 from ..stimuli import build_stimuli, stimulus_record
+from ..training import train
 from ..vocal_error_net import VocalErrorNet
 
-# Renditions at which progress is logged.
-LOG_AT = {1, 5, 10, 20, 30, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,36 +102,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--e-gaba-mv", type=float, default=E_GABA_MV,
                    help="GABA_A reversal potential (mV)")
     p.add_argument("--tau-e", type=float, default=TAU_E, help="E membrane time constant (ms)")
-    p.add_argument("--tau-s", type=float, default=TAU_S,
-                   help="aud->E and HVC->I synaptic decay (ms)")
+    p.add_argument("--tau-ampa", type=float, default=TAU_AMPA,
+                   help="AMPA decay (ms): aud->E, HVC->I and E->I")
+    p.add_argument("--dt-ms", type=float, default=DT_MS, help="simulation step (ms)")
     p.add_argument("--target-rate-e-hz", type=float, default=TARGET_RATE_E_HZ,
                    help="rate (Hz) the tonic E drive alone fires E at; sets that drive")
     p.add_argument("--i-drive-i-pa", type=float, default=I_DRIVE_I_PA,
                    help="tonic I current (pA)")
-    p.add_argument("--noise-e-pa", type=float, default=NOISE_E_PA,
+    p.add_argument("--noise-e", type=float, default=NOISE_E,
                    help="SD of the E current noise per 1 ms step (pA)")
-    p.add_argument("--noise-i-pa", type=float, default=NOISE_I_PA,
+    p.add_argument("--noise-i", type=float, default=NOISE_I,
                    help="SD of the I current noise per 1 ms step (pA)")
-    p.add_argument("--c-b", type=float, default=C_B)
-    p.add_argument("--b-aud-mean-ns", type=float, default=B_AUD_MEAN_NS,
+    p.add_argument("--c-aud", type=float, default=C_AUD)
+    p.add_argument("--aud-mean-ns", type=float, default=AUD_MEAN_NS,
                    help="aud->E peak conductance mean (nS)")
-    p.add_argument("--b-aud-sd-ns", type=float, default=B_AUD_SD_NS,
+    p.add_argument("--aud-sd-ns", type=float, default=AUD_SD_NS,
                    help="aud->E peak conductance SD (nS)")
     p.add_argument("--c-hvc", type=float, default=C_HVC)
-    p.add_argument("--b-hvc-mean-ns", type=float, default=B_HVC_MEAN_NS,
+    p.add_argument("--hvc-mean-ns", type=float, default=HVC_MEAN_NS,
                    help="HVC->I peak conductance mean (nS)")
-    p.add_argument("--b-hvc-sd-ns", type=float, default=B_HVC_SD_NS,
+    p.add_argument("--hvc-sd-ns", type=float, default=HVC_SD_NS,
                    help="HVC->I peak conductance SD (nS)")
-    p.add_argument("--j-ei-mean-ns", type=float, default=J_EI_MEAN_NS,
+    p.add_argument("--ei-mean-ns", type=float, default=EI_MEAN_NS,
                    help="E->I peak conductance mean (nS)")
-    p.add_argument("--j-ei-sd-ns", type=float, default=J_EI_SD_NS,
+    p.add_argument("--ei-sd-ns", type=float, default=EI_SD_NS,
                    help="E->I peak conductance SD (nS)")
-    p.add_argument("--r-i-th", type=float, default=R_I_TH)
-    p.add_argument("--a-jie-ns", type=float, default=None,
-                   help="STDP step (nS); default a_jie_for(tau_stdp)")
+    p.add_argument("--r-i-hz", type=float, default=R_I_HZ)
+    p.add_argument("--rho-ns", type=float, default=None,
+                   help="STDP step (nS); default rho_for(tau_stdp)")
     p.add_argument("--tau-stdp", type=float, default=TAU_STDP,
                    help="STDP window (ms), > 0: the I trace and the audio gate. "
-                        "Independent of the synaptic tau_s")
+                        "Independent of the synaptic tau_ampa")
     # protocol
     p.add_argument("--t-post", type=int, default=T_POST)
     p.add_argument("--t-burn", type=int, default=T_BURN)
@@ -148,13 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auditory spike-rate calibration (Schneider & Woolley 2013)")
     p.add_argument("--n-ista", type=int, default=N_ISTA)
     # Spike-frequency adaptation on E; the sweep behind A_SFA is in docs/design-notes.md.
-    p.add_argument("--a-sfa-pa", type=float, default=A_SFA_PA,
+    p.add_argument("--beta-adapt-pa", type=float, default=BETA_ADAPT_PA,
                    help="adaptation current step per E spike (pA)")
-    p.add_argument("--tau-inh", type=float, default=TAU_INH,
-                   help="I->E synaptic decay (ms), GABA_A; 0 = one-step pulse")
-    p.add_argument("--tau-exc", type=float, default=TAU_EXC,
-                   help="E->I synaptic decay (ms), AMPA; 0 = one-step pulse")
-    p.add_argument("--tau-sfa", type=float, default=TAU_SFA,
+    p.add_argument("--tau-gaba", type=float, default=TAU_GABA,
+                   help="I->E synaptic decay (ms), GABA_A")
+    p.add_argument("--tau-adapt", type=float, default=TAU_ADAPT,
                    help="adaptation decay (ms); keep it shorter than the 50 ms DAF burst")
     p.add_argument("--g-nmda-mean-ns", type=float, default=G_NMDA_MEAN_NS,
                    help="mean peak NMDA conductance (nS) per aud->E connection, at full "
@@ -173,9 +171,9 @@ def main(argv: list[str] | None = None) -> None:
 
     # Derived rather than a constant: the per-spike STDP integral goes as
     # A_jie * tau, so the amplitude scales inversely with the kernel width. See
-    # constants.a_jie_for for why that formula lives with its inputs.
-    a_jie = (args.a_jie_ns if args.a_jie_ns is not None
-             else a_jie_for(args.tau_stdp))
+    # constants.rho_for for why that formula lives with its inputs.
+    rho = (args.rho_ns if args.rho_ns is not None
+           else rho_for(args.tau_stdp))
 
     from ..causal_filters import CausalFilterEncoder
 
@@ -192,78 +190,38 @@ def main(argv: list[str] | None = None) -> None:
                        hvc_intro=tuple(args.hvc_intro))
     aud_correct, aud_reversed = st["aud_correct"], st["aud_reversed"]
     hvc_prelude = st["hvc_prelude"]
-    correct_pool = st["correct_pool"]
-    hvc_on, hvc_off, hvc_burn, aud_burn = (st["hvc_on"], st["hvc_off"], st["hvc_burn"],
-                                           st["aud_burn"])
+    hvc_on, hvc_off = st["hvc_on"], st["hvc_off"]
     corr, train_idx, n_motifs = st["fwd_rev_corr"], st["train_idx"], st["n_motifs"]
 
     # --- network ----------------------------------------------------------
     ven = VocalErrorNet(
         n_e=args.n_e, n_i=args.n_i, n_hvc=args.n_hvc, n_aud=n_kernels,
-        tau_e=args.tau_e, tau_s=args.tau_s, tau_inh=args.tau_inh, tau_exc=args.tau_exc,
+        dt_ms=args.dt_ms, tau_e=args.tau_e, tau_ampa=args.tau_ampa, tau_gaba=args.tau_gaba,
         e_l_mv=args.e_l_mv, v_th_mv=args.v_th_mv, v_reset_mv=args.v_reset_mv,
         c_e_pf=args.c_e_pf, c_i_pf=args.c_i_pf,
         e_ampa_mv=args.e_ampa_mv, e_gaba_mv=args.e_gaba_mv,
         target_rate_hz=args.target_rate_e_hz, i_drive_i_pa=args.i_drive_i_pa,
-        noise_e_pa=args.noise_e_pa, noise_i_pa=args.noise_i_pa,
-        c_B=args.c_b, b_aud_mean_ns=args.b_aud_mean_ns, b_aud_sd_ns=args.b_aud_sd_ns,
-        c_hvc=args.c_hvc, b_hvc_mean_ns=args.b_hvc_mean_ns, b_hvc_sd_ns=args.b_hvc_sd_ns,
-        j_ei_mean_ns=args.j_ei_mean_ns, j_ei_sd_ns=args.j_ei_sd_ns,
-        a_jie_ns=a_jie, r_i_th=args.r_i_th,
-        tau_stdp=args.tau_stdp, a_sfa_pa=args.a_sfa_pa, tau_sfa=args.tau_sfa,
+        noise_e=args.noise_e, noise_i=args.noise_i,
+        c_aud=args.c_aud, aud_mean_ns=args.aud_mean_ns, aud_sd_ns=args.aud_sd_ns,
+        c_hvc=args.c_hvc, hvc_mean_ns=args.hvc_mean_ns, hvc_sd_ns=args.hvc_sd_ns,
+        ei_mean_ns=args.ei_mean_ns, ei_sd_ns=args.ei_sd_ns,
+        rho_ns=rho, r_i_hz=args.r_i_hz,
+        tau_stdp=args.tau_stdp, beta_adapt_pa=args.beta_adapt_pa, tau_adapt=args.tau_adapt,
         g_nmda_mean_ns=args.g_nmda_mean_ns,
         aud_delay_ms=args.aud_delay_ms, hvc_delay_ms=args.hvc_delay_ms, seed=args.seed,
     )
 
     print(f"\n{'=' * 65}")
-    print(f"  VEN  a_jie={a_jie:.4f} nS  "
-          f"tau_s={args.tau_s} ms  tau_stdp={args.tau_stdp:g} ms")
-    print(f"  E drive={ven.i_drive_e_pa:.1f} pA  aud g={args.b_aud_mean_ns} nS  "
+    print(f"  VEN  dt={args.dt_ms:g} ms  rho={rho:.4f} nS  "
+          f"tau_ampa={args.tau_ampa} ms  tau_stdp={args.tau_stdp:g} ms")
+    print(f"  E drive={ven.i_drive_e_pa:.1f} pA  aud g={args.aud_mean_ns} nS  "
           f"threshold={ven.v_th_mv} mV")
-    print(f"  n_hvc={args.n_hvc}  r_i_th={args.r_i_th} Hz  "
+    print(f"  n_hvc={args.n_hvc}  r_i_hz={args.r_i_hz} Hz  "
           f"correct_pool={n_motifs} motifs  {args.n_rend} renditions")
     print(f"{'=' * 65}")
 
     # --- training loop ----------------------------------------------------
-    # Monitoring draws its membrane noise from its own generator, so logging does not
-    # advance the noise stream training sees: a run is the same with or without it.
-    monitor_rng = np.random.default_rng(args.seed + 20_000)
-
-    def snapshot() -> tuple[float, float]:
-        trained = float(ven.transform(hvc_on, aud_correct, rng=monitor_rng,
-                                      hvc_prelude=hvc_prelude).mean() * 1000)
-        reversed_ = float(ven.transform(hvc_on, aud_reversed, rng=monitor_rng,
-                                        hvc_prelude=hvc_prelude).mean() * 1000)
-        return trained, reversed_
-
-    trained_trace: list[float] = []
-    reversed_trace: list[float] = []
-    jie_trace: list[float] = []
-
-    def log(r: int) -> None:
-        ratio = (reversed_trace[-1] / trained_trace[-1] if trained_trace[-1] > 0
-                 else float("nan"))
-        print(f"  r{r:<5} trained={trained_trace[-1]:.2f}  reversed={reversed_trace[-1]:.2f}  "
-              f"ratio={ratio:.3f}  JIE={jie_trace[-1]:.5f}", flush=True)
-
-    def record() -> None:
-        trained, reversed_ = snapshot()
-        trained_trace.append(trained)
-        reversed_trace.append(reversed_)
-        jie_trace.append(float(ven.JIE.mean()))
-
-    # Rendition 1 carries the burn-in, which ends with the intro notes; every later
-    # rendition runs them as a prelude.
-    ven.fit(hvc_burn, aud_burn)
-    record()
-    if 1 in LOG_AT:
-        log(1)
-
-    for r in range(1, args.n_rend):
-        ven.fit(hvc_on, correct_pool[r % len(correct_pool)], hvc_prelude=hvc_prelude)
-        record()
-        if (r + 1) in LOG_AT or r == args.n_rend - 1:
-            log(r + 1)
+    traces = train(ven, st, args.n_rend, seed=args.seed)
 
     # --- save + evaluate --------------------------------------------------
     ven.stimulus = stimulus_record(st, encoder_path=enc_path, motifs_path=motifs_path)
@@ -281,14 +239,13 @@ def main(argv: list[str] | None = None) -> None:
 
     # Per-rendition traces, then the rendition-level rates of the final network.
     np.savez(traces_path,
-             trained_hz=np.array(trained_trace), reversed_hz=np.array(reversed_trace),
-             jie_mean=np.array(jie_trace),
+             **traces,
              fwd_rev_corr=corr, train_idx=train_idx,
              final_trained_hz=m["trained_hz"], final_reversed_hz=m["reversed_hz"],
              final_reversed_over_trained=m["reversed_over_trained"],
              final_daf_not_singing_hz=m["daf_not_singing_hz"],
-             b_aud_mean_ns=args.b_aud_mean_ns, i_drive_e_pa=ven.i_drive_e_pa,
-             tau_s=args.tau_s, n_rend=args.n_rend, a_jie_ns=a_jie)
+             aud_mean_ns=args.aud_mean_ns, i_drive_e_pa=ven.i_drive_e_pa,
+             tau_ampa=args.tau_ampa, n_rend=args.n_rend, rho_ns=rho, dt_ms=args.dt_ms)
     print(f"Saved {traces_path}")
 
 

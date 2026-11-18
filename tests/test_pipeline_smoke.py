@@ -69,7 +69,7 @@ def test_encoder_then_network_end_to_end(tmp_path, capsys):
         "--n-bases", "8", "--epochs", "2", "--k-frames", "8",
         "--n-coch-ch", "20", "--seed", "42",
         # Synthetic audio at the shipped lambda produces almost no activations in two
-        # epochs, so nothing drives E and JIE never leaves zero. Loosening the code
+        # epochs, so nothing drives E and J_IE never leaves zero. Loosening the code
         # sparsity here keeps the smoke run exercising the whole chain; it is not a
         # statement about the operating point, which lives in constants.py.
         "--lambda", "0.02",
@@ -81,12 +81,12 @@ def test_encoder_then_network_end_to_end(tmp_path, capsys):
         "--out", str(model_out), "--n-rend", "2",
         "--n-e", "30", "--n-i", "8", "--n-hvc", "6", "--seed", "42",
         # The HVC conductance is set for 600 HVC units; 6 need a much larger one to drive
-        # I at all, and without I spikes JIE never moves.
-        "--b-hvc-mean-ns", "100", "--b-hvc-sd-ns", "50",
-        # Two renditions of a tiny network are too few for the shipped R_I_TH (slightly above
+        # I at all, and without I spikes J_IE never moves.
+        "--hvc-mean-ns", "100", "--hvc-sd-ns", "50",
+        # Two renditions of a tiny network are too few for the shipped R_I_HZ (slightly above
         # the I rate, so mildly depressing) to leave any weight above zero; 0 makes the rule
         # purely potentiating, so the run still shows learning end to end.
-        "--r-i-th", "0",
+        "--r-i-hz", "0",
     ])
     assert model_out.exists(), "model artifact not written"
     assert (tmp_path / "ven_traces.npz").exists(), "traces not written alongside the model"
@@ -94,12 +94,12 @@ def test_encoder_then_network_end_to_end(tmp_path, capsys):
     tr = np.load(tmp_path / "ven_traces.npz")
     # Not asserting biology on synthetic audio -- only that the pipeline produced
     # finite, structurally sane numbers.
-    for key in ("trained_hz", "reversed_hz", "jie_mean"):
-        assert tr[key].shape == (2,), f"{key} should have one entry per rendition"
+    for key in ("trained_hz", "reversed_hz", "j_ie_mean"):
+        assert tr[key].shape == (2,), f"{key} should have one entry per logged rendition"
         assert np.isfinite(tr[key]).all(), f"{key} contains non-finite values"
     for key in ("final_trained_hz", "final_reversed_hz", "final_daf_not_singing_hz"):
         assert np.isfinite(tr[key]), key
-    assert float(tr["jie_mean"][-1]) > 0, "JIE should be positive after training"
+    assert float(tr["j_ie_mean"][-1]) > 0, "J_IE should be positive after training"
 
     # The model records how its stimuli were built, so evaluation can rebuild them.
     stim = VocalErrorNet.load(str(model_out)).stimulus

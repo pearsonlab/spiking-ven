@@ -201,37 +201,37 @@ def test_train_encoder_front_end_is_sane():
         ("e_l_mv", "E_L_MV"), ("v_th_mv", "V_TH_MV"), ("v_reset_mv", "V_RESET_MV"),
         ("c_e_pf", "C_E_PF"), ("c_i_pf", "C_I_PF"),
         ("target_rate_e_hz", "TARGET_RATE_E_HZ"), ("i_drive_i_pa", "I_DRIVE_I_PA"),
-        ("noise_e_pa", "NOISE_E_PA"), ("noise_i_pa", "NOISE_I_PA"),
+        ("noise_e", "NOISE_E"), ("noise_i", "NOISE_I"),
         ("e_ampa_mv", "E_AMPA_MV"), ("e_gaba_mv", "E_GABA_MV"),
-        ("c_b", "C_B"), ("b_aud_mean_ns", "B_AUD_MEAN_NS"), ("b_aud_sd_ns", "B_AUD_SD_NS"),
-        ("c_hvc", "C_HVC"), ("b_hvc_mean_ns", "B_HVC_MEAN_NS"),
-        ("b_hvc_sd_ns", "B_HVC_SD_NS"),
-        ("j_ei_mean_ns", "J_EI_MEAN_NS"), ("j_ei_sd_ns", "J_EI_SD_NS"),
-        ("tau_s", "TAU_S"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
-        ("r_i_th", "R_I_TH"),
+        ("c_aud", "C_AUD"), ("aud_mean_ns", "AUD_MEAN_NS"), ("aud_sd_ns", "AUD_SD_NS"),
+        ("c_hvc", "C_HVC"), ("hvc_mean_ns", "HVC_MEAN_NS"),
+        ("hvc_sd_ns", "HVC_SD_NS"),
+        ("ei_mean_ns", "EI_MEAN_NS"), ("ei_sd_ns", "EI_SD_NS"),
+        ("dt_ms", "DT_MS"), ("tau_ampa", "TAU_AMPA"), ("tau_e", "TAU_E"), ("tau_stdp", "TAU_STDP"),
+        ("r_i_hz", "R_I_HZ"),
         ("t_post", "T_POST"), ("t_burn", "T_BURN"), ("n_ista", "N_ISTA"),
-        ("a_sfa_pa", "A_SFA_PA"), ("tau_sfa", "TAU_SFA"), ("g_nmda_mean_ns", "G_NMDA_MEAN_NS"),
-        ("tau_inh", "TAU_INH"), ("tau_exc", "TAU_EXC"),
+        ("beta_adapt_pa", "BETA_ADAPT_PA"), ("tau_adapt", "TAU_ADAPT"), ("g_nmda_mean_ns", "G_NMDA_MEAN_NS"),
+        ("tau_gaba", "TAU_GABA"),
     ],
 )
 def test_train_ven_defaults_come_from_the_operating_point(dest, const):
     assert getattr(cli_train_ven.build_parser().parse_args([]), dest) == getattr(C, const)
 
 
-def test_train_ven_a_jie_is_derived_not_stored():
+def test_train_ven_rho_is_derived_not_stored():
     """None means "compute it from the STDP window". The amplitude scales inversely with
     the width so the per-spike integral stays fixed, which is the reason the operating
     point is a module and not a data file -- a stored value would desynchronise the
     learning rule the first time the window changed."""
-    assert cli_train_ven.build_parser().parse_args([]).a_jie_ns is None
-    assert C.a_jie_for(C.TAU_STDP) == pytest.approx(C.a_jie_for(2 * C.TAU_STDP) * 2)
+    assert cli_train_ven.build_parser().parse_args([]).rho_ns is None
+    assert C.rho_for(C.TAU_STDP) == pytest.approx(C.rho_for(2 * C.TAU_STDP) * 2)
 
 
 def test_adaptation_timescale_is_shorter_than_the_burst():
     """A constraint, not a copy of the value: at 100 ms the adaptation current integrates
     over the motif and acts as a tonic gain change instead of truncating the response."""
     burst_ms = (DAF_WINDOW_S[1] - DAF_WINDOW_S[0]) * 1000.0
-    assert C.TAU_SFA < burst_ms
+    assert C.TAU_ADAPT < burst_ms
 
 
 def test_train_ven_delays_track_the_constants():

@@ -1066,14 +1066,13 @@ wheels = [
 name = "spiking-ven"
 source = { editable = "." }
 dependencies = [
+    { name = "brian2" },
+    { name = "cython" },
     { name = "numpy" },
     { name = "scipy" },
 ]
 
 [package.optional-dependencies]
-brian2 = [
-    { name = "brian2" },
-]
 data = [
     { name = "soundfile" },
 ]
@@ -1088,7 +1087,8 @@ plots = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brian2", marker = "extra == 'brian2'", specifier = ">=2.8.0,<2.9" },
+    { name = "brian2", specifier = ">=2.8.0,<2.9" },
+    { name = "cython", specifier = ">=3.0" },
     { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
@@ -1097,7 +1097,7 @@ requires-dist = [
     { name = "soundfile", marker = "extra == 'data'", specifier = ">=0.13" },
     { name = "ty", marker = "extra == 'dev'" },
 ]
-provides-extras = ["brian2", "data", "dev", "plots"]
+provides-extras = ["data", "dev", "plots"]
 
 [[package]]
 name = "sympy"

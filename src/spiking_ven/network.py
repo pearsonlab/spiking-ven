@@ -126,7 +126,7 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     ``M_IE``, which I -> E pairs are connected (plastic synapses exist only there).
     Returns a dict of the Brian2 objects, with the network under ``"net"``.
     """
-    shared = {k: v for k, v in ns.items() if k not in ("E", "I")}
+    shared = {k: v for k, v in ns.items() if k not in ("E", "I", "IH")}
     n_e, n_i = weights["A"].shape[0], weights["B"].shape[0]
     reset_v = "v = V_reset"
 
@@ -173,6 +173,24 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     mon_i = SpikeMonitor(I, name="mon_i")
     objs: dict[str, Any] = dict(aud=aud, hvc=hvc, E=E, I=I, nmda=nmda, aud_e=aud_e, aud_nmda=aud_nmda,
                 nmda_e=nmda_e, hvc_i=hvc_i, e_i=e_i, i_e=i_e, mon_e=mon_e, mon_i=mon_i)
+
+    # Optional second inhibitory population, I_HVC ("IH"): driven only by HVC (no E input),
+    # a sparse temporal basis whose plastic synapses onto E learn the cancellation. Same
+    # membrane and STDP rule as I; its own baseline ``theta_h``.
+    if weights.get("B_H") is not None and weights["B_H"].shape[0] > 0:
+        IH = NeuronGroup(weights["B_H"].shape[0], I_EQS, threshold="v > V_th",
+                         reset=f"{reset_v}; x_stdp += 1", refractory="t_ref",
+                         method="exponential_euler", namespace={**shared, **ns["IH"]},
+                         dt=dt, name="IH")
+        IH.v = shared["E_L"]
+        hvc_ih = Synapses(hvc, IH, "w : siemens", on_pre="g_ampa_post += w",
+                          delay=hvc_delay, dt=dt, name="hvc_ih")
+        _connect(hvc_ih, weights["B_H"])
+        ih_e = Synapses(IH, E, "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
+                        on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
+                        namespace={**shared, "theta": shared["theta_h"]}, dt=dt, name="ih_e")
+        _connect(ih_e, weights["J_HE"], mask=weights["M_HE"])
+        objs.update(IH=IH, hvc_ih=hvc_ih, ih_e=ih_e, mon_ih=SpikeMonitor(IH, name="mon_ih"))
     objs["net"] = Network(*objs.values())
     return objs
 

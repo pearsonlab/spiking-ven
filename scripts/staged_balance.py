@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-import sweep  # noqa: E402
+import sweep  # type: ignore  # noqa: E402
 
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 
@@ -32,7 +32,7 @@ def _net(st, kw):
 
 
 def balance(st, kw, n=3):
-    T, z = st["T_song"], np.zeros_like(st["aud_correct"])
+    z = np.zeros_like(st["aud_correct"])
     v = _net(st, kw)
     rng = np.random.default_rng(1)
     e, i = zip(*[v.transform_all(st["hvc_off"], z, rng=rng) for _ in range(n)])

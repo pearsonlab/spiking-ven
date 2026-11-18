@@ -45,12 +45,13 @@ _FLOAT_KEYS = (
     "c_hvc", "hvc_mean_ns", "hvc_sd_ns",
     "c_ei", "ei_mean_ns", "ei_sd_ns",
     "c_ie", "ie_init_mean_ns", "ie_init_sd_ns",
+    "c_hvc_h", "hvc_h_mean_ns", "hvc_h_sd_ns", "rho_h_ns", "r_ih_hz", "i_drive_ih_pa",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
-_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud")
-_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE")
+_INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "n_ih")
+_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE")
 
 
 class VocalErrorNet:
@@ -89,6 +90,12 @@ class VocalErrorNet:
                    pairs, the shipped model)
     ie_init_mean_ns, ie_init_sd_ns : log-normal initial I -> E weights on those synapses
                    (0 = start from zero, the shipped model)
+    n_ih         : size of an optional second inhibitory population, I_HVC, driven only by
+                   HVC (0 = none, the shipped model). Its synapses onto E (``J_HE``, all
+                   pairs, from zero) are plastic by the same rule as I -> E.
+    c_hvc_h, hvc_h_mean_ns, hvc_h_sd_ns : HVC -> I_HVC probability and weights (``B_H``)
+    rho_h_ns, r_ih_hz : STDP step (``None`` = ``rho_ns``) and baseline rate for I_HVC -> E
+    i_drive_ih_pa : tonic current on I_HVC (pA)
     rho_ns       : STDP step (nS); ``None`` is ``constants.rho_for(tau_stdp)``
     rho_pre_ns   : presynaptic depression per I spike while the audio gate is open (nS)
     j_ie_row_max_ns : cap on each E cell's total I -> E weight (nS), enforced by scaling
@@ -158,6 +165,16 @@ class VocalErrorNet:
     J_EI: np.ndarray
     J_IE: np.ndarray
     M_IE: np.ndarray
+    n_ih: int
+    B_H: np.ndarray
+    J_HE: np.ndarray
+    M_HE: np.ndarray
+    c_hvc_h: float
+    hvc_h_mean_ns: float
+    hvc_h_sd_ns: float
+    rho_h_ns: float
+    r_ih_hz: float
+    i_drive_ih_pa: float
     c_ie: float
     ie_init_mean_ns: float
     ie_init_sd_ns: float
@@ -202,6 +219,13 @@ class VocalErrorNet:
         c_ie: float = C.C_IE,
         ie_init_mean_ns: float = C.IE_INIT_MEAN_NS,
         ie_init_sd_ns: float = C.IE_INIT_SD_NS,
+        n_ih: int = 0,
+        c_hvc_h: float = 0.02,
+        hvc_h_mean_ns: float = 20.0,
+        hvc_h_sd_ns: float = 10.0,
+        rho_h_ns: float | None = None,
+        r_ih_hz: float = 5.0,
+        i_drive_ih_pa: float = 0.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -260,6 +284,17 @@ class VocalErrorNet:
             else:
                 W = np.zeros((n_e, n_i))
             self.J_IE = (W * self.M_IE).astype(np.float32)
+        # Optional I_HVC: drawn last, and only when used, so nothing above changes.
+        self.n_ih = int(n_ih)
+        self.rho_h_ns = float(self.rho_ns if rho_h_ns is None else rho_h_ns)
+        if self.n_ih > 0:
+            self.B_H = _lognormal_sparse((self.n_ih, n_hvc), c_hvc_h, hvc_h_mean_ns,
+                                         hvc_h_sd_ns, rng)
+        else:
+            self.B_H = np.zeros((0, n_hvc), dtype=np.float32)
+        self.J_HE = np.zeros((n_e, self.n_ih), dtype=np.float32)
+        self.M_HE = np.ones((n_e, self.n_ih), dtype=bool)
+        self.last_ih = None
         self._built = None
 
     # ------------------------------------------------------------------
@@ -308,9 +343,12 @@ class VocalErrorNet:
             "tau_nmda_decay": self.tau_nmda_decay * ms,
             "alpha_nmda": self.alpha_nmda * per_ms, "Mg": self.mg_mm * mM,
             "theta": self.theta,
+            "theta_h": self.r_ih_hz * self.tau_stdp * 1e-3,
             "E": {"C": self.c_e_pf * pF, "g_L": self.g_l_e * nS,
                   "I_tonic": self.i_drive_e_pa * pA, "sigma": self.noise_e * pA * sqrt_ms,
                   "beta": self.beta_adapt_pa * pA},
+            "IH": {"C": self.c_i_pf * pF, "g_L": self.g_l_i * nS,
+                   "I_tonic": self.i_drive_ih_pa * pA, "sigma": self.noise_i * pA * sqrt_ms},
             "I": {"C": self.c_i_pf * pF, "g_L": self.g_l_i * nS,
                   "I_tonic": self.i_drive_i_pa * pA, "sigma": self.noise_i * pA * sqrt_ms},
         }
@@ -321,7 +359,10 @@ class VocalErrorNet:
                 "B": np.asarray(self.B, dtype=np.float64),
                 "J_EI": np.asarray(self.J_EI, dtype=np.float64),
                 "J_IE": np.asarray(self.J_IE, dtype=np.float64),
-                "M_IE": np.asarray(self.M_IE, dtype=bool)}
+                "M_IE": np.asarray(self.M_IE, dtype=bool),
+                "B_H": np.asarray(self.B_H, dtype=np.float64),
+                "J_HE": np.asarray(self.J_HE, dtype=np.float64),
+                "M_HE": np.asarray(self.M_HE, dtype=bool)}
 
     def build(self) -> dict:
         """The network's Brian2 objects (:func:`spiking_ven.network.build_network`).
@@ -394,24 +435,34 @@ class VocalErrorNet:
                              f"models only. Retrain with sven-train-ven.")
         # Added after brian2-v1 first shipped: defaults reproduce the shipped model.
         defaults = {"rho_pre_ns": 0.0, "j_ie_row_max_ns": 0.0, "c_ie": 1.0,
-                    "ie_init_mean_ns": 0.0, "ie_init_sd_ns": 0.0}
+                    "ie_init_mean_ns": 0.0, "ie_init_sd_ns": 0.0, "n_ih": 0, "c_hvc_h": 0.02,
+                    "hvc_h_mean_ns": 20.0, "hvc_h_sd_ns": 10.0,
+                    "rho_h_ns": float(d["rho_ns"]) if "rho_ns" in d else 0.0,
+                    "r_ih_hz": 5.0, "i_drive_ih_pa": 0.0}   # the constructor's defaults
+        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
-                   if k not in d and k not in defaults and k != "M_IE"]
+                   if k not in d and k not in defaults and k not in optional_arrays]
         if missing:
             raise ValueError(f"{path}: not a complete VocalErrorNet model; missing keys "
                              f"{', '.join(missing)}")
         obj = cls.__new__(cls)
         obj._sim_rng = default_rng(None if seed is None else seed + 10_000)
         obj._built = None
+        obj.last_ih = None
         for k in _INT_KEYS:
-            setattr(obj, k, int(d[k]))
+            setattr(obj, k, int(d[k]) if k in d else int(defaults[k]))
         for k in _FLOAT_KEYS:
             setattr(obj, k, float(d[k]) if k in d else defaults[k])
         for k in _ARRAY_KEYS:
-            if k == "M_IE" and k not in d:
-                obj.M_IE = np.ones(d["J_IE"].shape, dtype=bool)
-            else:
+            if k in d:
                 setattr(obj, k, d[k])
+            elif k == "M_IE":
+                obj.M_IE = np.ones(d["J_IE"].shape, dtype=bool)
+            elif k == "B_H":
+                obj.B_H = np.zeros((0, int(d["n_hvc"])), dtype=np.float32)
+            else:                                    # J_HE, M_HE: no I_HVC
+                obj.J_HE = np.zeros((int(d["n_e"]), 0), dtype=np.float32)
+                obj.M_HE = np.ones((int(d["n_e"]), 0), dtype=bool)
         obj.stimulus = json.loads(str(d["stimulus_json"])) if "stimulus_json" in d else {}
         return obj
 
@@ -423,7 +474,7 @@ class VocalErrorNet:
         """Everything a built network bakes in: parameters and the fixed weights."""
         h = hashlib.sha1()
         h.update(repr([(k, getattr(self, k)) for k in _INT_KEYS + _FLOAT_KEYS]).encode())
-        for k in ("A", "B", "J_EI", "M_IE"):
+        for k in ("A", "B", "J_EI", "M_IE", "B_H", "M_HE"):
             h.update(np.ascontiguousarray(getattr(self, k), dtype=np.float32).tobytes())
         return h.hexdigest()
 
@@ -461,6 +512,12 @@ class VocalErrorNet:
                                                            np.asarray(i_e.i)] * nS
         i_e.rho = (self.rho_ns if learn else 0.0) * nS
         i_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS
+        ih_e = o.get("ih_e")
+        if ih_e is not None:
+            ih_e.w[:] = np.asarray(self.J_HE, dtype=np.float64)[np.asarray(ih_e.j),
+                                                               np.asarray(ih_e.i)] * nS
+            ih_e.rho = (self.rho_h_ns if learn else 0.0) * nS
+            ih_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS
         brian_seed(int((self._sim_rng if rng is None else rng).integers(2**31)))
         o["net"].run(T * ms)
 
@@ -473,6 +530,13 @@ class VocalErrorNet:
                 tot = J.sum(axis=1, keepdims=True)
                 J *= np.minimum(1.0, self.j_ie_row_max_ns / np.maximum(tot, 1e-12))
             self.J_IE = J
+            if ih_e is not None:
+                H = np.zeros((self.n_e, self.n_ih), dtype=np.float32)
+                H[np.asarray(ih_e.j), np.asarray(ih_e.i)] = np.asarray(ih_e.w / nS)
+                self.J_HE = H
+        #: I_HVC spikes of the last run (after any prelude), or None without I_HVC.
+        self.last_ih = (bin_spikes(o["mon_ih"], self.n_ih, T)[:, n_pre:]
+                        if "mon_ih" in o else None)
         sE = bin_spikes(o["mon_e"], self.n_e, T)
         sI = bin_spikes(o["mon_i"], self.n_i, T)
         return sE[:, n_pre:], sI[:, n_pre:]

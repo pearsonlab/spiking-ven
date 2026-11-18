@@ -401,3 +401,31 @@ DAF response is now transient (late/peak 0.03-0.06) with magnitude and responder
 Fails: DAF duration 22-27 ms (bound 47; NMDA is off) and peak 30-34 ms (bound 35). I_bal
 falls with singing (0.59x) because cancelled E drives it less. Single seed (42).
 Rasters: `rasters_ih_c01_w20_untrained.png`, `rasters_ih_c01_w20_trained.png`.
+
+## V1. Rate-target iSTDP (Vogels et al. 2011) on I_HVC -> E, per-cell targets
+
+Per-neuron scatter of the H1 model (`singing_vs_not_singing_scatter.png`) showed its
+"singing ~ not singing" was an average of extremes: 440 E cells silenced while singing
+(~6.4 uS of learned I_HVC inhibition each, silent even with HVC alone) and 128 cells with no
+learned inhibition firing ~15 Hz (disinhibited as I_bal fell). The STDP rule's baseline is
+set on the presynaptic rate, so nothing stops potentiation until E is silent.
+
+New option `vogels_h`: I_HVC -> E learns by Vogels et al. 2011 (at each I spike
+dw = eta (x_E - alpha_i); at each E spike dw = eta x_I), with alpha_i = 2 r_i tau_stdp and
+r_i each E cell's untrained not-singing rate (`R_TARGET`, `set_rate_targets`). Otherwise as H1.
+
+| HVC -> I_HVC | eta (nS) | per-cell median sing/not | mean sing/not | xs | resp | lat | dur | late/pk | song no HVC | trained | HVC +100 ms | reversed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6 x 20 nS | 0.3 | | 0.82 | 1.29 | 0.43 | 39.7 | 26.1 | 0.12 | +2.75 | +0.88 | +2.02 | +1.99 |
+| 6 x 20 nS | 1 | | 0.77 | 1.31 | 0.44 | 34.2 | 25.8 | 0.11 | +2.74 | +0.82 | +2.20 | +2.14 |
+| 6 x 20 nS | 3 | | 0.70 | 1.37 | 0.43 | 31.4 | 24.6 | 0.11 | +2.77 | +0.89 | +2.34 | +2.32 |
+| 12 x 10 nS | 0.3 | | 0.87 | 1.33 | 0.45 | 38.9 | 26.8 | 0.15 | +2.71 | +0.97 | +1.91 | +1.94 |
+| 12 x 10 nS | 1 | 0.71 | 0.82 | 1.29 | 0.47 | 35.1 | 25.0 | 0.13 | +2.69 | +0.84 | +1.93 | +1.98 |
+| 12 x 10 nS | 3 | 0.60 | 0.77 | 1.27 | 0.49 | 33.4 | 24.7 | 0.13 | +2.75 | +0.76 | +2.02 | +2.01 |
+
+(H1 old rule: per-cell median 0.07.) Verdict: **E cells now lie along the diagonal of the
+per-neuron singing scatter, like Fig 7D** (`singing_vs_not_singing_scatter_vogels.png`), and
+cancellation is time-locked and song-specific with much better contrast: the trained song
+keeps +0.8 Hz of +2.7, HVC-shifted or reversed song +1.9-2.3. Open: DAF too large (1.3 extra
+spikes) and short (~25 ms; NMDA off), cells slightly below the diagonal (I_bal falls
+0.47-0.55x while singing), one seed.

@@ -10,6 +10,7 @@ the end of step ``t + d``, so it first moves the membrane in the step after.
 """
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -22,7 +23,7 @@ SHIPPED_MODEL = Path(__file__).resolve().parent.parent / "outputs" / "ven_model.
 
 
 def _small_net(**kw) -> VocalErrorNet:
-    args = dict(n_e=30, n_i=8, n_hvc=6, n_aud=10, seed=0, dt_ms=1.0)
+    args: dict[str, Any] = dict(n_e=30, n_i=8, n_hvc=6, n_aud=10, seed=0, dt_ms=1.0)
     args.update(kw)
     return VocalErrorNet(**args)
 

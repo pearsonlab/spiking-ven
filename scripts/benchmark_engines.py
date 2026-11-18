@@ -21,6 +21,7 @@ import argparse
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -47,7 +48,7 @@ def bench_runtime(engine: str, dt_ms: float, n_rep: int) -> dict:
     """numpy engine, or Brian2 runtime mode (Cython, or Brian2's numpy codegen)."""
     from spiking_ven.vocal_error_net import VocalErrorNet
     enc, st = _stimuli()
-    kw = {} if engine == "numpy" else {"dt_ms": dt_ms}
+    kw: dict[str, Any] = {} if engine == "numpy" else {"dt_ms": dt_ms}
     if engine == "brian2-numpy-codegen":
         from brian2 import prefs
         prefs.codegen.target = "numpy"

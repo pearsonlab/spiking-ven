@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 
@@ -81,7 +82,7 @@ def fig_metrics(models, path: Path) -> None:
         ax.set_ylabel(unit, color=INK2)
         ax.grid(axis="y", color=GRID, lw=0.6)
         ax.set_axisbelow(True)
-    handles = [plt.Line2D([], [], marker="o", ls="", ms=8, color=SERIES[i], mec="white",
+    handles: list[Any] = [plt.Line2D([], [], marker="o", ls="", ms=8, color=SERIES[i], mec="white",
                           mew=2, label=m["label"]) for i, m in enumerate(models)]
     handles.append(plt.Rectangle((0, 0), 1, 1, color=BAND, label="biological target"))
     fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=8.5)

@@ -20,7 +20,7 @@ encoder stages never pull it in. To host the network inside a larger Brian2 circ
 use :meth:`VocalErrorNet.build`.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .causal_filters import CausalFilterEncoder
 from .cochleagram import cochleagram, load_wav

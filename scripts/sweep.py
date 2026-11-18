@@ -82,7 +82,8 @@ def run_one(args) -> dict:
     t_train = time.time() - t0
     m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
                         aud_trained=st["aud_correct"], aud_daf=st["aud_daf"],
-                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"])
+                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"],
+                        t_song=st["T_song"])
     r = daf_response(ven, None, st, seed=seed, inputs=st["daf_inputs"])
     c = song_contrast(ven, st)
     res = {"id": key, "overrides": overrides, "n_rend": n_rend, "seed": seed,
@@ -136,6 +137,7 @@ def main() -> None:
                   f"dur {r['duration_ms']:.1f} pk {r['peak_latency_ms']} "
                   f"late {r['late_over_peak']:.2f} xs {r['extra_spikes_responders']:.2f} "
                   f"rev/tr {res['rates']['reversed_over_trained']:.3f} "
+                  f"sing/not {res['rates']['singing_over_not_singing']:.2f} "
                   f"song-excess rev/tr {res['contrast']['excess_ratio']:.2f} "
                   f"(diff {res['contrast']['excess_diff_hz']:+.2f} Hz) "
                   f"({res['t_total_s']/60:.1f} min)", flush=True)

@@ -252,7 +252,7 @@ def _rate_hz(ven, hvc, aud, hvc_prelude=None) -> float:
 
 
 def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed,
-                    hvc_prelude=None) -> dict:
+                    hvc_prelude=None, t_song: int | None = None) -> dict:
     """Mean E rate over one rendition, per condition, for a trained network.
 
     Parameters
@@ -270,11 +270,16 @@ def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed,
     ``daf_not_singing_hz`` and ``silent_not_singing_hz`` (no sound, no HVC; all Hz),
     ``reversed_over_trained``, the ratio of the first two -- above 1 when cancellation is
     specific to the trained song -- and ``singing_over_not_singing``, the trained-song rate
-    over the silent not-singing rate (AIV: ~1, Fig 7D).
+    over the silent not-singing rate (AIV: ~1, Fig 7D), both over the motif window
+    (the first ``t_song`` ms; HVC is silent after it, so the bird is not singing there).
     """
     trained_hz = _rate_hz(ven, hvc_on, aud_trained, hvc_prelude)
     daf_not_singing_hz = _rate_hz(ven, hvc_off, aud_daf)
-    silent_hz = _rate_hz(ven, hvc_off, np.zeros_like(aud_trained))
+    T = aud_trained.shape[1] if t_song is None else int(t_song)
+    singing_hz = float(ven.transform(hvc_on, aud_trained,
+                                     hvc_prelude=hvc_prelude)[:, :T].mean() * 1000)
+    silent_hz = float(ven.transform(hvc_off, np.zeros_like(aud_trained))[:, :T].mean()
+                      * 1000)
     reversed_hz = _rate_hz(ven, hvc_on, aud_reversed, hvc_prelude)
     nan = float("nan")
     return {
@@ -282,8 +287,9 @@ def rendition_rates(ven, *, hvc_on, hvc_off, aud_trained, aud_daf, aud_reversed,
         "reversed_hz": reversed_hz,
         "reversed_over_trained": (reversed_hz / trained_hz) if trained_hz > 0 else nan,
         "daf_not_singing_hz": daf_not_singing_hz,
+        "singing_motif_hz": singing_hz,
         "silent_not_singing_hz": silent_hz,
-        "singing_over_not_singing": (trained_hz / silent_hz) if silent_hz > 0 else nan,
+        "singing_over_not_singing": (singing_hz / silent_hz) if silent_hz > 0 else nan,
     }
 
 
@@ -338,6 +344,7 @@ def format_rendition_rates(m: dict) -> str:
         f"  reversed / trained        {m['reversed_over_trained']:6.2f}x     target > "
         f"{t['reversed_min_ratio']:.0f}x",
         f"  DAF stimulus, not singing {m['daf_not_singing_hz']:6.2f} Hz",
+        f"  trained song, motif only  {m['singing_motif_hz']:6.2f} Hz",
         f"  silence, not singing      {m['silent_not_singing_hz']:6.2f} Hz",
         f"  singing / not singing     {m['singing_over_not_singing']:6.2f}x     paper "
         f"{t['singing_over_not_singing'][0]:.1f}-{t['singing_over_not_singing'][1]:.1f}x "

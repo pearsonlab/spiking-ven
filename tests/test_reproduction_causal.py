@@ -145,7 +145,8 @@ def test_singing_barely_changes_the_rate(setup):
     _, st, ven = setup
     m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
                         aud_trained=st["aud_correct"], aud_daf=st["aud_daf"],
-                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"])
+                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"],
+                        t_song=st["T_song"])
     lo, hi = BIOLOGICAL_TARGETS["singing_over_not_singing"]
     assert lo <= m["singing_over_not_singing"] <= hi
 

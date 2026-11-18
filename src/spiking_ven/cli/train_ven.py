@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> None:
 
     m = rendition_rates(ven, hvc_on=hvc_on, hvc_off=hvc_off, aud_trained=aud_correct,
                         aud_daf=st["aud_daf"], aud_reversed=aud_reversed,
-                        hvc_prelude=hvc_prelude)
+                        hvc_prelude=hvc_prelude, t_song=st["T_song"])
     print()
     print(format_rendition_rates(m))
     r = daf_response(ven, encoder, st, seed=args.seed)

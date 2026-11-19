@@ -107,6 +107,11 @@ STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)
 #: presynaptic basis, the learned inhibition follows the E cell's excess drive in time.
 VOGELS_ON_PRE = "g_gaba_post += w; w = clip(w + eta * (x_e_post - alpha_e_post), 0*nS, inf*nS)"
 VOGELS_ON_POST = "w = clip(w + eta * x_stdp_pre, 0*nS, inf*nS)"
+#: The same, with both terms multiplied by the E cell's audio gate (learning only while
+#: auditory input drives the cell), for comparison.
+VOGELS_ON_PRE_GATED = ("g_gaba_post += w; "
+                       "w = clip(w + eta * gate_post * (x_e_post - alpha_e_post), 0*nS, inf*nS)")
+VOGELS_ON_POST_GATED = "w = clip(w + eta * gate_post * x_stdp_pre, 0*nS, inf*nS)"
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +204,10 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
                           delay=hvc_delay, dt=dt, name="hvc_ih")
         _connect(hvc_ih, weights["B_H"])
         if shared.get("vogels_h", False):
+            gated = shared.get("vogels_gate", False)
             ih_e = Synapses(IH, E, "w : siemens\neta : siemens (shared)",
-                            on_pre=VOGELS_ON_PRE, on_post=VOGELS_ON_POST,
+                            on_pre=VOGELS_ON_PRE_GATED if gated else VOGELS_ON_PRE,
+                            on_post=VOGELS_ON_POST_GATED if gated else VOGELS_ON_POST,
                             namespace=shared, dt=dt, name="ih_e")
         else:
             ih_e = Synapses(IH, E,

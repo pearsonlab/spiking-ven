@@ -544,3 +544,19 @@ in 10 ms bins after onset: +11, +16, +18, +10, +9, +7, +10, +9, +6, +8, +5, +5, 
 peak at 20-30 ms and a shoulder to ~100 ms. Likely source: the encoder's 32 ms context window
 keeps the noise in its input for ~30 ms after the burst ends, so the auditory input differs
 from the song until ~+80 ms; NMDA extends it.
+
+## D6. Moderate AMPA, modest NMDA (decay 50 ms), strong fast adaptation
+
+| aud / NMDA nS | beta pA | xs | resp | lat | dur | pk | late/pk | sing/not | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 150 / 300 | 20000 | 1.07 | 0.39 | 39.1 | 36.3 | 34 | 0.19 | 0.87 | 1.024 | +0.31 |
+| **150 / 300** | **30000** | **0.98** | **0.40** | **36.7** | **34.6** | **34** | **0.17** | 0.86 | 1.041 | +0.27 |
+| 150 / 450 | 20000 / 30000 / 40000 | 1.19 / 1.09 / 1.03 | 0.41-0.42 | 33-38 | 39-41 | 30-34 | 0.19-0.22 | 0.86-0.88 | 1.02-1.03 | +0.23-0.36 |
+| 200 / 300 | 20000 / 30000 | 1.13 / 1.03 | 0.41-0.42 | 37-38 | 33 | 30-32 | 0.18-0.19 | 0.85-0.86 | 1.04 | +0.34-0.40 |
+| 200 / 450 | 20000 / 30000 / 40000 | 1.25 / 1.13 / 1.06 | 0.42-0.43 | 34-39 | 36-37 | 30-34 | 0.19 | 0.84-0.86 | 1.02-1.05 | +0.33-0.46 |
+
+Best (bold; `outputs/vogels/d6_best.npz`): extra spikes, responders, latency in range; peak
+34 ms (bound 35), late/peak 0.17 (bound 0.15) just outside; **duration 35 ms (bound 47) is the
+remaining miss**; contrast modest (diff +0.27 Hz vs +0.57 for the shipped model, +1.2 for V1).
+Figures: `cancellation_d6_best.png`, `singing_scatter_d6_best.png` (pooled: median 0.83).
+Note beta 30000 pA (3x shipped) is a strong adaptation current -- biology flag.

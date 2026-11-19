@@ -58,7 +58,7 @@ def main() -> None:
     p.add_argument("--out", required=True)
     a = p.parse_args()
     st = sweep._stimuli()
-    fig, axes = plt.subplots(1, len(a.models), figsize=(4.4 * len(a.models), 4.9), squeeze=False)
+    fig, axes = plt.subplots(1, len(a.models), figsize=(max(6.5, 4.4 * len(a.models)), 4.9), squeeze=False)
     for ax, path, label in zip(axes[0], a.models, a.labels):
         quiet, sing = rates(VocalErrorNet.load(path, seed=3), st, a.trials, a.pool)
         if a.lim:

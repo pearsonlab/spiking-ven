@@ -27,7 +27,7 @@ import numpy as np
 
 from .cochleagram import cochleagram
 
-__all__ = ["SWEncoder", "train_autoencoder", "dog_kernel", "PRIMARY_RATE_HZ"]
+__all__ = ["SWEncoder", "learn_relu", "train_autoencoder", "dog_kernel", "PRIMARY_RATE_HZ"]
 
 #: Primary AC (Field L) mean rate, Schneider & Woolley 2013: 32.4 +/- 20.1 Hz.
 PRIMARY_RATE_HZ = 32.0
@@ -86,6 +86,60 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
                 f"({1 - loss / var:.1%} of variance explained)  "
                 f"active {(R > 0).mean():.1%}  units alive {(R > 0).any(axis=1).sum()}/{K}")
     return W, b, D, d0, mu, scale
+
+
+def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.05,
+               reg_lr: float = 10.0, seed: int = 42, mp_strength: float = 0.25,
+               l1_V: float = 7e-5, smooth_V: float = 1e-3, log=print):
+    """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
+    ReLU: a tied rectified autoencoder.
+
+    Code ``r = relu(V x + b)`` on each strictly-past window ``x`` (centred by the corpus's
+    mean window ``mu``), reconstruction ``V^T r``. The gradient of the squared error (step
+    ``lr``) flows through both roles of ``V`` and into ``b``. Each update then runs, as in
+    ``learn``: roughness penalty (L2 on first differences along channel and lag) -> pull
+    toward minimum phase -> L1 soft-threshold. Unlike ``learn`` there is no renormalisation:
+    with no L1 on the code there is no code/kernel scale trade-off, the kernel norm sets the
+    code amplitude, and the two penalties bound it. They are applied with step ``reg_lr``
+    (default: the causal encoder's learning rate), so they act per update as they did there.
+    Returns ``(V, b, mu)`` with ``V`` (K, C, L)."""
+    from .causal_filters import _past_windows, _roughness_grad, min_phase
+
+    C = cochs[0].shape[0]
+    rng = np.random.default_rng(seed)
+    mu = np.concatenate([_past_windows(X, L) for X in cochs], axis=0).mean(axis=0)
+    V = rng.standard_normal((K, C, L))
+    V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
+    b = np.zeros(K)
+    for ep in range(n_epochs):
+        err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
+        for X in [cochs[i] for i in rng.permutation(len(cochs))]:
+            T = X.shape[1]
+            P = _past_windows(X, L) - mu                       # (T, C*L)
+            W = V.reshape(K, C * L)
+            Z = P @ W.T + b
+            S = np.maximum(Z, 0.0)                             # (T, K)
+            R = P - S @ W                                      # residual
+            gZ = (R @ W.T) * (Z > 0)                           # -dLoss/dZ
+            G = S.T @ R + gZ.T @ P                             # -dLoss/dW (both roles)
+            n = max(T, 1)
+            V = V + lr * G.reshape(K, C, L) / n
+            b = b + lr * gZ.sum(axis=0) / n
+            if smooth_V > 0:
+                V = V - reg_lr * smooth_V * _roughness_grad(V)
+            if mp_strength > 0:
+                V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+            if l1_V > 0:
+                V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
+            err += float(np.mean(R ** 2)) / float(np.mean(P ** 2))
+            act += float(np.mean(S > 0))
+            alive |= (S > 0).any(axis=0)
+        if ep % 5 == 0 or ep == n_epochs - 1:
+            log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance "
+                f"{err / len(cochs):.3f}  active {act / len(cochs):.1%}  "
+                f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
+                f"mean |V_k| {float(np.linalg.norm(V.reshape(K, -1), axis=1).mean()):.3f}")
+    return V, b, mu
 
 
 def dog_kernel(sigma_e: float = 6.4, mu_e: float = 13.0, sigma_i: float = 42.0,

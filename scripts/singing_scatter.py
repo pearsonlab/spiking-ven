@@ -46,16 +46,28 @@ def main() -> None:
     p.add_argument("--models", nargs="+", required=True)
     p.add_argument("--labels", nargs="+", required=True)
     p.add_argument("--trials", type=int, default=10)
+    p.add_argument("--lim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
+                   help="axis range (Hz), e.g. 1 100 as Fig 7D; cells below LO are drawn "
+                        "hollow on the axis edge")
     p.add_argument("--out", required=True)
     a = p.parse_args()
     st = sweep._stimuli()
-    fig, axes = plt.subplots(1, len(a.models), figsize=(4.2 * len(a.models), 4.4), squeeze=False)
+    fig, axes = plt.subplots(1, len(a.models), figsize=(4.4 * len(a.models), 4.9), squeeze=False)
     for ax, path, label in zip(axes[0], a.models, a.labels):
         quiet, sing = rates(VocalErrorNet.load(path, seed=3), st, a.trials)
-        x, y = np.maximum(quiet, FLOOR), np.maximum(sing, FLOOR)
-        lo, hi = FLOOR * 0.8, max(x.max(), y.max(), 50.0) * 1.3
+        if a.lim:
+            lo, hi = a.lim
+            x, y = np.clip(quiet, lo, hi), np.clip(sing, lo, hi)
+            edge = (quiet < lo) | (sing < lo)
+        else:
+            x, y = np.maximum(quiet, FLOOR), np.maximum(sing, FLOOR)
+            lo, hi = FLOOR * 0.8, max(x.max(), y.max(), 50.0) * 1.3
+            edge = np.zeros_like(x, dtype=bool)
         ax.plot([lo, hi], [lo, hi], color=INK2, lw=1, zorder=1)
-        ax.scatter(x, y, s=9, color=COLOR, alpha=0.45, linewidths=0, zorder=2)
+        ax.scatter(x[~edge], y[~edge], s=9, color=COLOR, alpha=0.45, linewidths=0, zorder=2)
+        if edge.any():
+            ax.scatter(x[edge], y[edge], s=9, facecolors="none", edgecolors=COLOR,
+                       alpha=0.35, linewidths=0.6, zorder=2)
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlim(lo, hi)
@@ -66,9 +78,11 @@ def main() -> None:
         ax.set_xlabel("firing rate, not singing (Hz)", color=INK)
         ax.set_ylabel("firing rate, singing (Hz)", color=INK)
         ratio = sing.mean() / max(quiet.mean(), 1e-9)
+        both = (quiet >= (a.lim[0] if a.lim else FLOOR)) & (sing >= (a.lim[0] if a.lim else FLOOR))
         above = float(np.mean(sing > quiet))
+        extra = (f"\n{int((~both).sum())} cells < {a.lim[0]:g} Hz in a condition (hollow)" if a.lim else "")
         ax.set_title(f"{label}\nmean {quiet.mean():.1f} -> {sing.mean():.1f} Hz "
-                     f"({ratio:.2f}x); {above:.0%} of cells higher singing",
+                     f"({ratio:.2f}x)\n{above:.0%} of cells higher singing{extra}",
                      loc="left", fontsize=9, color=INK)
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)

@@ -429,3 +429,27 @@ cancellation is time-locked and song-specific with much better contrast: the tra
 keeps +0.8 Hz of +2.7, HVC-shifted or reversed song +1.9-2.3. Open: DAF too large (1.3 extra
 spikes) and short (~25 ms; NMDA off), cells slightly below the diagonal (I_bal falls
 0.47-0.55x while singing), one seed.
+
+## V2. Higher, less heterogeneous background (Vogels rule)
+
+Annealing the V1 model (600-1200 more renditions at eta 0.3 or 0.1, `scripts/anneal.py`)
+did not tighten the per-neuron singing scatter (SD of log10 ratio 0.38-0.40 throughout): the
+spread is the rule's equilibrium, not slow convergence. Measurement noise is far smaller
+(x1.15-1.27 between two not-singing estimates). On Fig 7D's 1-100 Hz axes the V1 scatter
+already follows the diagonal within ~2x, but 241/600 cells sit below 1 Hz in a condition.
+
+Raising E drive or weakening inhibition did not reduce the low tail (21-28% of cells < 1 Hz:
+I rebalances). It comes from heterogeneous inhibition; spreading I -> E over more I cells
+does: connectivity 0.2 / 0.5 / 1.0 (same total) gives 24% / 10% / 0% below 1 Hz untrained
+(10-90%: 0.4-17 / 0.9-13 / 2.9-9 Hz). Trained (drive 2500 pA, I_HVC 12 x 10 nS):
+
+| I -> E | eta | E silent | per-cell median sing/not | cells < 1 Hz | xs | resp | lat | dur | song no HVC | trained | HVC +100 ms | reversed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 50%, 6 nS | 1 | 6.2 | 0.75 | 136 | 1.57 | 0.45 | 30.6 | 27.7 | +2.44 | +0.90 | +1.82 | +1.93 |
+| 50%, 6 nS | 3 | 6.2 | | | 1.48 | 0.48 | 31.3 | 25.9 | +2.42 | +0.78 | +1.81 | +1.84 |
+| 100%, 3 nS | 1 | 6.0 | 0.76 | 49 | 1.57 | 0.47 | 33.1 | 27.6 | +2.52 | +0.99 | +2.26 | +2.27 |
+| 100%, 3 nS | 3 | 6.0 | | | 1.56 | 0.48 | 35.6 | 26.8 | +2.60 | +1.01 | +2.30 | +2.33 |
+
+Verdict: 50% looks most like Fig 7D (1-25 Hz along the diagonal); 100% removes the low
+tail but compresses the not-singing range. Cancellation unchanged. DAF magnitude rose to
+~1.5 extra spikes; duration still ~27 ms. (`singing_vs_not_singing_scatter_bg.png`)

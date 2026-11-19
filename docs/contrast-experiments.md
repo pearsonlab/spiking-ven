@@ -560,3 +560,21 @@ Best (bold; `outputs/vogels/d6_best.npz`): extra spikes, responders, latency in 
 remaining miss**; contrast modest (diff +0.27 Hz vs +0.57 for the shipped model, +1.2 for V1).
 Figures: `cancellation_d6_best.png`, `singing_scatter_d6_best.png` (pooled: median 0.83).
 Note beta 30000 pA (3x shipped) is a strong adaptation current -- biology flag.
+
+## D7. Seeds, and gated vs ungated Vogels (D6 best: aud 150 / NMDA 300, beta 30000)
+
+| rule | seed | xs | resp | lat | dur | pk | late/pk | sing/not | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ungated | 42 | 0.98 | 0.40 | 36.7 | 34.6 | 34 | 0.17 | 0.86 | 1.041 | +0.27 |
+| ungated | 1 | 0.90 | 0.41 | 35.6 | 25.7 | 30 | 0.16 | 0.86 | 1.027 | +0.18 |
+| ungated | 2 | 1.03 | 0.39 | 37.6 | 30.0 | 32 | 0.16 | 0.87 | 1.032 | +0.28 |
+| ungated | 3 | 0.90 | 0.44 | 34.0 | 25.7 | 12 | 0.13 | 0.86 | 1.029 | +0.32 |
+| gated | 42 | 0.63 | 0.47 | 28.7 | 28.3 | 30 | 0.06 | 0.80 | 1.023 | +0.28 |
+| gated | 1 | 0.62 | 0.44 | 27.2 | 27.5 | 28 | 0.06 | 0.79 | 1.031 | +0.24 |
+| gated | 2 | 0.72 | 0.49 | 23.6 | 26.0 | 30 | 0.08 | 0.77 | 1.029 | +0.33 |
+
+Verdicts: (1) the D6 setting is robust over seeds except duration (26-35 ms, all below 47)
+and one early peak; (2) **the audio gate is not needed for cancellation** (contrast and
+singing/not similar with or without it), but gating makes the DAF response smaller (0.6-0.7
+extra spikes), earlier (24-29 ms, nearer the bird's 23) and more transient (late/peak
+0.06-0.08, inside the target). Next (D8): gated, with more drive to restore magnitude.

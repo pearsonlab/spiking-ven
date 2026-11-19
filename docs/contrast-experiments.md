@@ -525,3 +525,22 @@ magnitude into range but cuts duration (24-35 ms); strong fast adaptation gives 
 too much magnitude and a plateau. Weak AMPA also costs contrast (rev/tr ~1.0). The plateau
 comes from NMDA's 100 ms decay holding E up 100-150 ms after onset (the late/peak window).
 Next (D5): shorter NMDA decay (50-70 ms), and weaker E -> I_bal.
+
+## D5. Shorter NMDA decay; weaker E -> I_bal (aud 100 nS)
+
+| NMDA nS / decay ms | beta pA | E->I nS | xs | resp | lat | dur | pk | late/pk | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| 600 / 50 | 10180 | 11 | 1.57 | 0.35 | 38.0 | 52.9 | 34 | 0.28 | +0.48 |
+| 600 / 50 | 20000 | 11 | 1.29 | 0.38 | 36.4 | 52.5 | 34 | 0.26 | +0.35 |
+| 1000 / 50 | 10180 / 20000 | 11 | 1.85 / 1.52 | 0.37-0.40 | 34-38 | 57-61 | 34 | 0.27-0.28 | +0.58-0.79 |
+| 600 / 70 | 10180 / 20000 | 11 | 1.64 / 1.38 | 0.36-0.38 | 37-39 | 56-58 | 28-30 | 0.30-0.32 | +0.41-0.57 |
+| 1000 / 70 | 10180 / 20000 | 11 | 2.01 / 1.67 | 0.36-0.39 | 37-38 | 66-67 | 34 | 0.33-0.34 | +0.64-0.92 |
+| 800 / 50 | 10180 / 20000 | 6 | 2.20 / 1.73 | 0.41-0.43 | 35-38 | 59-66 | 30-34 | 0.27-0.30 | +0.24-0.52 |
+
+Shorter NMDA keeps duration in range (52-67 ms) but late/peak stays 0.26-0.34; weaker E -> I
+raises E's background to 10 Hz and enlarges the response. **The late activity is caused by the
+noise, not residual song**: DAF minus clean-song PSTH of responders (NMDA 600 / 50, beta 20000)
+in 10 ms bins after onset: +11, +16, +18, +10, +9, +7, +10, +9, +6, +8, +5, +5, +1.5 Hz -- a
+peak at 20-30 ms and a shoulder to ~100 ms. Likely source: the encoder's 32 ms context window
+keeps the noise in its input for ~30 ms after the burst ends, so the auditory input differs
+from the song until ~+80 ms; NMDA extends it.

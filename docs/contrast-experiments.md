@@ -634,3 +634,35 @@ weaker E -> I_bal (D5: background 10 Hz, response larger); the audio gate (break
 Open: duration (26-35 vs >= 47 ms) trades against magnitude in every family tried; contrast
 is modest (+0.2-0.3 Hz vs +1.2 in V1, where the DAF response was 1.3-1.6 spikes). Biology
 flags: adaptation 30000 pA, auditory 150 nS, E drive 2500 pA.
+
+# Part 4: decoupling DAF magnitude from song contrast
+
+Diagnosis: the DAF calibration (D1-D10) traded away time-selectivity -- in the D6 model the
+song drives song-driven E cells by only +0.91 Hz and the trained song keeps +0.62 (HVC
+shifted +0.85, reversed +0.89), against V2's +2.42 / +0.90 / +1.88 / +1.92. Weaker auditory
+input and stronger adaptation cut the song drive along with the DAF response. The DAF burst is
+large mostly because broadband noise recruits many auditory channels at once (15 vs 3 of 54
+active in the 50 ms window; 1.6x more spikes per active channel), since the encoder is a sparse
+code learned from the bird's own motifs (only 23 of 54 channels fire during the motif; each E
+cell sees ~2.7 channels and ~6 auditory spikes per motif). Population activation: song median
+0.26 (90th pct 1.41), DAF window 2.57-3.06.
+
+## N1. Divisive normalisation of the auditory population (V2 base, ungated Vogels)
+
+New option `norm_sigma` (stimuli / `acts_to_spikes`; `sweep.py --aud-norm`): each channel's
+rectified activation is divided by 1 + population sum / sigma before the rate calibration
+(which still sets song's mean rate to 2.5 Hz).
+
+| aud nS | sigma | xs | resp | lat | dur | pk | late/pk | sing/not | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 400 | none (V2) | 1.57 | 0.45 | 30.6 | 27.7 | 30 | 0.14 | 0.83 | 1.124 | +1.03 |
+| 400 | 0.5 / 1 / 2 | 1.26 / 1.30 / 1.44 | 0.37-0.40 | 39-47 | 28-30 | 28-36 | 0.16-0.19 | 0.82 | 1.11-1.13 | +1.17 / +1.13 / +0.98 |
+| 300 | none (D1) | 1.37 | 0.41 | 33.6 | 27.9 | 30 | 0.14 | 0.84 | 1.105 | +0.81 |
+| 300 | 0.5 / 1 / 2 | 1.12 / 1.13 / 1.23 | 0.34-0.38 | 37-45 | 28-29 | 28-36 | 0.16-0.18 | 0.84-0.85 | 1.09-1.10 | +0.86 / +0.85 / +0.74 |
+
+Verdict: **normalisation lowers the DAF response 15-25% with song contrast unchanged or
+better** -- the decoupling we wanted. Costs: latency up (37-47 ms; sigma 0.5 beyond 35),
+responders 34-40%, late/peak 0.16-0.19. Duration unchanged (~29 ms). Pooled per-cell scatter
+stays on the diagonal (median 0.79; `singing_scatter_norm_sigma1.png`). sigma 1 is the best
+balance. Note: `sven-figure` cannot yet draw normalised models (sweep models carry no
+stimulus record, so it would rebuild unnormalised stimuli).

@@ -20,7 +20,7 @@ import numpy as np
 
 from spiking_ven.cochleagram import cochleagram
 from spiking_ven.constants import (
-    CAUSAL_EPOCHS, CAUSAL_FRAME_RATE, CAUSAL_HI_HZ, CAUSAL_L1, CAUSAL_LO_HZ, CAUSAL_LR,
+    CAUSAL_EPOCHS, CAUSAL_FRAME_RATE, CAUSAL_HI_HZ, CAUSAL_L1, CAUSAL_LO_HZ,
     CAUSAL_MP_STRENGTH, CAUSAL_N_COCH_CH, CAUSAL_RMS_REF, CAUSAL_SMOOTH,
 )
 from spiking_ven.corpus import load_corpus
@@ -34,10 +34,10 @@ def main() -> None:
     p.add_argument("--k", type=int, default=128, help="primary AC units")
     p.add_argument("--l-frames", type=int, default=32, help="STRF length (2 ms frames)")
     p.add_argument("--epochs", type=int, default=CAUSAL_EPOCHS)
-    p.add_argument("--lr", type=float, default=0.05,
-                   help="gradient step (needs a scan; 0.3+ diverged with unit-norm kernels)")
-    p.add_argument("--reg-lr", type=float, default=CAUSAL_LR,
-                   help="step for the L1 and roughness penalties (the causal encoder's lr)")
+    p.add_argument("--lr", type=float, default=0.1,
+                   help="gradient step (0.2 starts killing units)")
+    p.add_argument("--reg-lr", type=float, default=None,
+                   help="step for the L1 and roughness penalties (default: --lr)")
     p.add_argument("--l1", type=float, default=CAUSAL_L1, help="L1 on kernel entries")
     p.add_argument("--smooth", type=float, default=CAUSAL_SMOOTH,
                    help="roughness penalty (first differences over channel and lag)")

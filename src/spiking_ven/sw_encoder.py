@@ -88,8 +88,8 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
     return W, b, D, d0, mu, scale
 
 
-def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.05,
-               reg_lr: float = 10.0, seed: int = 42, mp_strength: float = 0.25,
+def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.1,
+               reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
                l1_V: float = 7e-5, smooth_V: float = 1e-3, log=print):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a tied rectified autoencoder.
@@ -101,10 +101,13 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     toward minimum phase -> L1 soft-threshold. Unlike ``learn`` there is no renormalisation:
     with no L1 on the code there is no code/kernel scale trade-off, the kernel norm sets the
     code amplitude, and the two penalties bound it. They are applied with step ``reg_lr``
-    (default: the causal encoder's learning rate), so they act per update as they did there.
+    (default ``lr``: proximal gradient on MSE/2 + l1_V |V|_1 + smooth_V/2 |DV|^2). With no
+    renormalisation, the causal encoder's step (10) wipes out every kernel.
     Returns ``(V, b, mu)`` with ``V`` (K, C, L)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
+    if reg_lr is None:
+        reg_lr = lr
     C = cochs[0].shape[0]
     rng = np.random.default_rng(seed)
     mu = np.concatenate([_past_windows(X, L) for X in cochs], axis=0).mean(axis=0)

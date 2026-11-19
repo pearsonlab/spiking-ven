@@ -717,3 +717,16 @@ rebound, so the boxcar edge is not the only cause (likely also the filters' 32 m
 Forward/reversed code correlation stays low (0.08). Figures: `meansub_window_daf.png`,
 `meansub_exp_daf.png`, `cancellation_window{16,8,4}.png`, `cancellation_exp{8,4,2}.png`.
 Next: retrain the encoder with exp tau 2, then the network.
+
+### S2. Smooth/L1/min-phase tied ReLU encoder (brian2-swac)
+
+`sw_encoder.learn_relu`: causal encoder's rule with ISTA -> ReLU, tied V, no renormalisation;
+penalties at the gradient step (reg_lr = lr = 0.1; the old step 10 zeroes every kernel
+without renormalisation; lr 0.2 kills units). 80 epochs.
+- L1 7e-5, smooth 1e-3: 42% variance explained; 23/128 units survive (77% zero entries);
+  STRFs smooth spectral bands / onset (suppress->excite) shapes. Primary 27 Hz, BS 1.9 Hz on
+  song, 2.3 reversed, 3.3 DAF. `outputs/encoders/sw_encoder_smooth.npz`.
+- No L1: 42% explained; 113 kept, but ~all are unlearned noise plus a broadband lag-0 column;
+  only ~6 real STRFs. Not usable.
+- vs untied Adam autoencoder (S1): 95% explained, 128 units, noisy STRFs.
+Network not yet trained on S2 (awaiting review).

@@ -467,3 +467,44 @@ on the template (weights still slowly grow), consistent with a rendition-average
 What remains is a uniform offset (median singing/not 0.78): Vogels' alpha = 2 r tau assumes
 uncorrelated pre/post firing, which strong learned inhibition breaks. Candidate fix: scale
 targets by ~1/0.78, or correct alpha for the correlation.
+
+# Part 3: DAF calibration of the Vogels / two-I-population model
+
+Base (from V2, I -> E 50%): `C_IE` 0.5 at 6 nS, E drive 2500 pA, E -> I 5% at 11 nS (SD 5.5),
+150 I_HVC (12 HVC inputs x 10 nS), I_HVC -> E by the Vogels rule (eta 1 nS, per-cell
+targets), I_bal -> E fixed. Targets: extra spikes 0.8-1.0, responders ~41%, latency 23 +/- 12,
+duration 47-133 ms, peak 35-75 ms, late/peak <= 0.15. Note: the Vogels rule has no audio gate
+(the gate term exists only in the older STDP rule), so all Part 2-3 Vogels results are
+ungated. Each row: seed 42, 600 renditions.
+
+## D1. Auditory AMPA x NMDA (adaptation 10180 pA / 10 ms)
+
+| aud nS | NMDA nS | xs | resp | lat | dur | pk | late/pk | sing/not | rev/tr |
+|---|---|---|---|---|---|---|---|---|---|
+| 250 | 0 | 1.19 | 0.41 | 36.2 | 28.5 | 30 | 0.14 | 0.86 | 1.069 |
+| 250 | 150 / 300 | 1.36 / 1.52 | 0.41-0.42 | 36-37 | 30-34 | 30 | 0.16-0.18 | 0.85 | 1.09 |
+| 300 | 0 / 150 / 300 / 500 | 1.37-1.79 | 0.41-0.43 | 32-34 | 28-37 | 30 | 0.14-0.19 | 0.84-0.85 | 1.09-1.12 |
+| 350 | 0 / 150 / 300 | 1.45-1.71 | 0.43-0.44 | 32-34 | 27-30 | 30 | 0.14-0.16 | 0.84 | 1.13 |
+
+Weaker auditory drive shrinks the response; NMDA enlarges it much more than it lengthens it.
+Duration stuck at 27-37 ms, peak always 30 ms. (Interim figures: `cancellation_d1_aud250.png`,
+`singing_scatter_d1_aud250.png`.)
+
+## D2. Weaker adaptation (NMDA 150)
+
+aud 150-250 nS x beta 10180 / 5000 / 2500 pA (+ beta 5000 at tau_adapt 30): duration 26-33
+ms in every case, magnitude up as beta falls (1.18 -> 1.77). **Adaptation is not what cuts
+the response short.** Likeliest: the fast balanced feedback (the DAF burst recruits I_bal,
+which shuts E down; E dips below baseline after the burst in the figure).
+
+## D3. NMDA-dominated auditory input (adaptation 10180 / 10)
+
+| aud / NMDA nS | dur | xs | late/pk | resp | diff |
+|---|---|---|---|---|---|
+| 150 / 500 | 46.5 | 1.64 | 0.28 | 0.38 | +0.66 |
+| 100 / 500 | 60.9 | 1.67 | 0.34 | 0.34 | +0.53 |
+| 75 / 500 | 73.0 | 1.67 | 0.37 | 0.33 | +0.47 |
+| 75-150 / 1000-2500 | 69-91 | 2.2-3.3 | 0.33-0.40 | 0.33-0.40 | +1.0-2.3 |
+
+NMDA fixes duration (46-91 ms) but the response is too large and plateaus (late/peak
+0.28-0.40); contrast grows with NMDA.

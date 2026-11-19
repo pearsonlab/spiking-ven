@@ -598,3 +598,39 @@ response is transient and timely but small, and still short.
 Best so far (gated, NMDA 1000 / 100 ms): every DAF target in range except duration (33-34
 ms, bound 47) and seed 1's peak (28 ms); late/peak 0.12-0.13. With the gate keeping the
 response transient, NMDA can add magnitude without the plateau it caused ungated (D3-D5).
+
+## D10. Gated Vogels, NMDA 1500-2500 (decay 100 ms)
+
+NMDA 1500: xs 1.02-1.12, dur 37-38 ms; NMDA 2500: xs 1.16-1.41, dur 40-46 ms, late/peak
+0.14-0.16, contrast diff up to +0.61. Duration and magnitude still trade off.
+
+## **The gated Vogels rule fails the per-neuron check** (D7-D10)
+
+Pooled per-neuron scatter of the D9 gated model (`singing_scatter_GATED_rule_fails.png`):
+bimodal again -- 283 cells below 1 Hz in a condition (mostly silenced while singing) and a
+cluster at 13-23 Hz regardless of not-singing rate -- the same failure as the old STDP rule.
+The gate restricts learning to moments of auditory drive, so the rule cannot depress weights
+at other moments and loses the per-cell rate homeostasis that makes the ungated rule work.
+The sweep score uses the population-mean singing ratio (0.81-0.83 here), which hides this:
+**the score should use the per-cell (pooled) ratio**. So: the ungated rule is required for
+the Fig 7D property; the audio gate is not needed for cancellation and breaks the scatter.
+
+## Summary of the DAF calibration (as of D10)
+
+Best valid model: **ungated Vogels, D6** (`outputs/vogels/d6_best.npz`): aud 150 nS, NMDA
+300 nS (decay 50 ms), adaptation 30000 pA / 10 ms; I -> E 50% at 6 nS, E drive 2500 pA, E -> I
+5% at 11 nS; 150 I_HVC (12 HVC inputs x 10 nS). Over seeds 42 / 1 / 2 / 3: extra spikes
+0.90-1.03, responders 39-44%, latency 34-38 ms, late/peak 0.13-0.17, peak 30-34 ms (seed 3:
+12), **duration 26-35 ms (below 47)**, pooled per-cell singing/not median 0.83, contrast diff
++0.18-0.32 Hz. PSTH: peak 20 Hz at +34 ms (paper ~20 Hz at 35-75 ms). Figures:
+`cancellation_d6_best.png`, `singing_scatter_d6_best.png`, `daf_psth_d6_best.png`.
+
+What does not work: weaker adaptation (D2: magnitude up, duration unchanged); slower
+adaptation (D4: magnitude in range, duration and contrast lost); NMDA (D3, D5, D10:
+lengthens the response but enlarges it, and ungated it plateaus); shorter NMDA decay (D5: late
+activity persists -- it is noise-caused, from the encoder's 32 ms window, not NMDA's tail);
+weaker E -> I_bal (D5: background 10 Hz, response larger); the audio gate (breaks the scatter).
+
+Open: duration (26-35 vs >= 47 ms) trades against magnitude in every family tried; contrast
+is modest (+0.2-0.3 Hz vs +1.2 in V1, where the DAF response was 1.3-1.6 spikes). Biology
+flags: adaptation 30000 pA, auditory 150 nS, E drive 2500 pA.

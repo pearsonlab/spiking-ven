@@ -25,8 +25,11 @@ import numpy as np
 
 #: The encoder the stimuli are built with; ``--encoder`` sets it (workers inherit it).
 ENCODER = os.environ.get("SWEEP_ENCODER", "outputs/causal_encoder.npz")
-CACHE = Path("outputs/sweeps/" + ("stimuli_cache.pkl" if ENCODER == "outputs/causal_encoder.npz"
-                                  else f"stimuli_cache_{Path(ENCODER).stem}.pkl"))
+#: Divisive normalisation of the auditory population (``--aud-norm``); none by default.
+NORM = float(os.environ["SWEEP_AUD_NORM"]) if os.environ.get("SWEEP_AUD_NORM") else None
+CACHE = Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER == "outputs/causal_encoder.npz"
+                                  else f"stimuli_cache_{Path(ENCODER).stem}")
+             + ("" if NORM is None else f"_norm{NORM:g}") + ".pkl")
 
 
 def _stimuli():
@@ -37,7 +40,7 @@ def _stimuli():
     from spiking_ven.stimuli import build_stimuli
     enc = CausalFilterEncoder.load(ENCODER)
     st = build_stimuli(enc, "outputs/motifs.npz", sr=16000, seed=42, n_hvc=600,
-                       n_ista=50, verbose=False)
+                       n_ista=50, norm_sigma=NORM, verbose=False)
     st["daf_inputs"] = daf_inputs(enc, st, seed=42)
     st["n_channels"] = enc.n_channels
     CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -106,15 +109,24 @@ def main() -> None:
     p.add_argument("--configs", default=None, help="JSON list of override dicts")
     p.add_argument("--n-rend", type=int, default=600)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--aud-norm", type=float, default=None,
+                   help="divisive normalisation sigma for the auditory population")
     p.add_argument("--encoder", default=None,
                    help="encoder .npz (default outputs/causal_encoder.npz); its own cache")
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     a = p.parse_args()
+    global ENCODER, CACHE, NORM
     if a.encoder:
         os.environ["SWEEP_ENCODER"] = a.encoder
-        global ENCODER, CACHE
         ENCODER = a.encoder
-        CACHE = Path(f"outputs/sweeps/stimuli_cache_{Path(a.encoder).stem}.pkl")
+    if a.aud_norm is not None:
+        os.environ["SWEEP_AUD_NORM"] = str(a.aud_norm)
+        NORM = a.aud_norm
+    if a.encoder or a.aud_norm is not None:
+        CACHE = Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER ==
+                                          "outputs/causal_encoder.npz"
+                                          else f"stimuli_cache_{Path(ENCODER).stem}")
+                     + ("" if NORM is None else f"_norm{NORM:g}") + ".pkl")
     if a.grid:
         g = json.loads(a.grid)
         configs = [dict(zip(g, vals)) for vals in itertools.product(*g.values())]

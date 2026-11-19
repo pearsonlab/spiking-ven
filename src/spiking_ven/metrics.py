@@ -48,7 +48,7 @@ def daf_inputs(encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 4
                          window_s=st["daf_window_s"]), encoder,
             sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
             rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
-            n_ista=st["n_ista"], seed=seed + 2000 + t,
+            n_ista=st["n_ista"], seed=seed + 2000 + t, norm_sigma=st.get("norm_sigma"),
         ) for t in range(n_trials)])
 
 

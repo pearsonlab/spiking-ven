@@ -187,6 +187,7 @@ def acts_to_spikes(
     seed: int | None = None,
     calibrate_on: np.ndarray | None = None,
     t_refr_ms: float = 2.0,
+    norm_sigma: float | None = None,
 ) -> np.ndarray:
     """Convert encoder activations to Poisson spike trains.
 
@@ -205,6 +206,12 @@ def acts_to_spikes(
                    divide by a mean diluted by the silence and inflate the rate
                    during song; pass the song-window activations here so the
                    target rate means what it says.
+    norm_sigma   : divisive normalisation across the population: each channel's rectified
+                   activation is divided by ``1 + sum_k a_k(t) / norm_sigma`` at each moment,
+                   before the rate calibration (applied to ``calibrate_on`` too). Sparse song
+                   activity (small population sum) passes almost unchanged; broadband
+                   activity that recruits many channels at once is scaled down. ``None``
+                   disables it.
     Returns
     -------
     spikes : (n_channels, T) float32, at most one spike per bin when ``t_refr_ms > 0``.
@@ -212,6 +219,9 @@ def acts_to_spikes(
     rng = np.random.default_rng(seed)
     act = np.maximum(activations.astype(np.float64), 0.0)
     ref = act if calibrate_on is None else np.maximum(calibrate_on.astype(np.float64), 0.0)
+    if norm_sigma is not None:
+        act = act / (1.0 + act.sum(axis=0, keepdims=True) / norm_sigma)
+        ref = ref / (1.0 + ref.sum(axis=0, keepdims=True) / norm_sigma)
 
     rate_scale = mean_rate_hz / max(float(ref.mean()), 1e-12)
     lam = act * rate_scale * (1.0 / frame_rate)

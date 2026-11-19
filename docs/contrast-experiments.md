@@ -453,3 +453,17 @@ does: connectivity 0.2 / 0.5 / 1.0 (same total) gives 24% / 10% / 0% below 1 Hz 
 Verdict: 50% looks most like Fig 7D (1-25 Hz along the diagonal); 100% removes the low
 tail but compresses the not-singing range. Cancellation unchanged. DAF magnitude rose to
 ~1.5 extra spikes; duration still ~27 ms. (`singing_vs_not_singing_scatter_bg.png`)
+
+## Why the Vogels rule does not equate singing and not-singing rates
+
+The per-neuron scatter was measured on the template rendition only. Training cycles through
+38 renditions whose timing varies, so each cell's cancellation fits the average rendition:
+on any one rendition some cells are over- and some under-inhibited. Averaged over the
+training renditions (`singing_scatter.py --pool`), the per-cell spread falls from x2.2 to
+x1.5, with no cells silenced (I -> E 50%: 99 cells < 1 Hz in a condition; 100%: 8) -- the
+fair comparison, since Fig 7D also averages over natural renditions
+(`singing_vs_not_singing_scatter_pool.png`). Continuing training does not shrink the spread
+on the template (weights still slowly grow), consistent with a rendition-average fixed point.
+What remains is a uniform offset (median singing/not 0.78): Vogels' alpha = 2 r tau assumes
+uncorrelated pre/post firing, which strong learned inhibition breaks. Candidate fix: scale
+targets by ~1/0.78, or correct alpha for the correlation.

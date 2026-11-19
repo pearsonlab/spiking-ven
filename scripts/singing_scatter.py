@@ -29,12 +29,16 @@ COLOR = "#2a78d6"
 FLOOR = 0.1     # Hz: axis floor; neurons silent in a condition are drawn here
 
 
-def rates(v, st, trials):
+def rates(v, st, trials, pool=False):
+    """Not-singing and singing rates per cell (Hz). ``pool``: singing is averaged over the
+    training renditions of the song (natural variability, as the bird's recordings), one
+    trial each, instead of ``trials`` repeats of the template rendition."""
     T = st["T_song"]
     rng = np.random.default_rng(11)
     z = np.zeros_like(st["aud_correct"])
-    sing = np.mean([v.transform(st["hvc_on"], st["aud_correct"], rng=rng,
-                                hvc_prelude=st["hvc_prelude"])[:, :T] for _ in range(trials)],
+    songs = st["correct_pool"] if pool else [st["aud_correct"]] * trials
+    sing = np.mean([v.transform(st["hvc_on"], a, rng=rng,
+                                hvc_prelude=st["hvc_prelude"])[:, :T] for a in songs],
                    axis=(0, 2)) * 1000
     quiet = np.mean([v.transform(st["hvc_off"], z, rng=rng)[:, :T] for _ in range(trials)],
                     axis=(0, 2)) * 1000
@@ -49,12 +53,14 @@ def main() -> None:
     p.add_argument("--lim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
                    help="axis range (Hz), e.g. 1 100 as Fig 7D; cells below LO are drawn "
                         "hollow on the axis edge")
+    p.add_argument("--pool", action="store_true",
+                   help="average singing over the training renditions, not the template")
     p.add_argument("--out", required=True)
     a = p.parse_args()
     st = sweep._stimuli()
     fig, axes = plt.subplots(1, len(a.models), figsize=(4.4 * len(a.models), 4.9), squeeze=False)
     for ax, path, label in zip(axes[0], a.models, a.labels):
-        quiet, sing = rates(VocalErrorNet.load(path, seed=3), st, a.trials)
+        quiet, sing = rates(VocalErrorNet.load(path, seed=3), st, a.trials, a.pool)
         if a.lim:
             lo, hi = a.lim
             x, y = np.clip(quiet, lo, hi), np.clip(sing, lo, hi)

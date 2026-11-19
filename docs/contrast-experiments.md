@@ -737,3 +737,17 @@ Network not yet trained on S2 (awaiting review).
   front-loading). Code is dense (98% of unit-frames active, ReLU rarely clips). Primary
   30 Hz; BS 2.2 Hz song, 2.0 reversed, 3.0 DAF (strong DAF burst ~18 Hz).
   `outputs/encoders/sw_encoder_untied.npz`. Network not yet trained.
+
+### S3. STRF penalty sweep (untied encoder), `outputs/sw_penalty_sweep.png`
+
+| L1 \ smooth | 1e-3 | 1e-2 | 1e-1 |
+|---|---|---|---|
+| 7e-5 | 87% / 17% / 128 | 86% / 19% / 128 | 83% / 15% / 128 |
+| 2e-4 | 87% / 53% / 128 | 85% / 53% / 127 | **82% / 46% / 126** |
+| 6e-4 | 84% / 85% / 115 | 83% / 84% / 109 | 80% / 80% / 105 |
+
+(template recon / zero entries / units kept). L1 sets sparsity, smoothing sets shape; smooth
+1e-1 gives S&W-like STRFs (bands, onset off->on pairs). 6e-4 leaves some all-zero kernels.
+Selectivity rasters (`sven-figure --view units`, `outputs/sw_unit_strfs_*.png`): some BS
+units lock to syllables across motifs, others look Poisson-random at ~2 Hz; many fire at
+motif onset (DoG onset transient). Encoders in `outputs/encoders/pen/`.

@@ -508,3 +508,20 @@ which shuts E down; E dips below baseline after the burst in the figure).
 
 NMDA fixes duration (46-91 ms) but the response is too large and plateaus (late/peak
 0.28-0.40); contrast grows with NMDA.
+
+## D4. Weak AMPA + moderate NMDA + stronger / slower adaptation
+
+| aud / NMDA nS | beta pA / tau_adapt ms | xs | resp | lat | dur | pk | late/pk | rev/tr | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| 50 / 300 | 10180 / 30 | 0.70 | 0.38 | 41.8 | 26.0 | 30 | 0.23 | 1.006 | +0.07 |
+| 50 / 400 | 15000 / 20 | 0.93 | 0.39 | 40.5 | 35.3 | 30 | 0.31 | 1.004 | +0.11 |
+| 50 / 500 | 10180 / 30 | 0.90 | 0.40 | 42.3 | 31.5 | 28 | 0.25 | 1.019 | +0.14 |
+| 75 / 500 | 10180 / 30 | 0.93 | 0.41 | 38.7 | 30.2 | 30 | 0.25 | 1.006 | +0.15 |
+| 75 / 500 | 20000 / 30 | 0.69 | 0.43 | 41.4 | 24.2 | 30 | 0.23 | 1.007 | +0.08 |
+| 50-75 / 300-500 | 20000 / 10 | 1.15-1.41 | 0.34-0.36 | 38-43 | 47-69 | 34-80 | 0.29-0.42 | 1.01-1.03 | +0.18-0.34 |
+
+Same duration-vs-shape trade-off as the numpy history: slow adaptation (30 ms) brings
+magnitude into range but cuts duration (24-35 ms); strong fast adaptation gives duration but
+too much magnitude and a plateau. Weak AMPA also costs contrast (rev/tr ~1.0). The plateau
+comes from NMDA's 100 ms decay holding E up 100-150 ms after onset (the late/peak window).
+Next (D5): shorter NMDA decay (50-70 ms), and weaker E -> I_bal.

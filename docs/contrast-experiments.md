@@ -578,3 +578,10 @@ and one early peak; (2) **the audio gate is not needed for cancellation** (contr
 singing/not similar with or without it), but gating makes the DAF response smaller (0.6-0.7
 extra spikes), earlier (24-29 ms, nearer the bird's 23) and more transient (late/peak
 0.06-0.08, inside the target). Next (D8): gated, with more drive to restore magnitude.
+
+## D8. Gated Vogels with more drive (seeds 42, 1)
+
+aud 150-200 nS x beta 20000-30000 (NMDA 300-450, decay 50): extra spikes 0.65-0.72 in every
+case (more drive does not raise it), responders 44-50%, latency 27-30 ms, late/peak
+0.06-0.07, duration 29-32 ms, sing/not 0.79-0.83, diff +0.23-0.36 Hz. With the gate, the
+response is transient and timely but small, and still short.

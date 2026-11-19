@@ -43,6 +43,8 @@ def main() -> None:
                    help="roughness penalty (first differences over channel and lag)")
     p.add_argument("--mp-strength", type=float, default=CAUSAL_MP_STRENGTH,
                    help="pull toward minimum phase per update")
+    p.add_argument("--tied", action="store_true",
+                   help="tied decoder (default: linear decoder with unit-norm rows)")
     p.add_argument("--threshold-pct", type=float, default=90.0,
                    help="higher-AC threshold: this percentile of the DoG output on song")
     p.add_argument("--seed", type=int, default=42)
@@ -61,14 +63,13 @@ def main() -> None:
                                  hi_hz=cp["hi_hz"]).astype(np.float64))
     print(f"{len(cochs)} motifs, {sum(c.shape[1] for c in cochs)} frames; "
           f"training {a.k} STRFs x {cp['n_channels']} ch x {a.l_frames} frames")
-    V, b, mu = learn_relu(cochs, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
-                          reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength, l1_V=a.l1,
-                          smooth_V=a.smooth)
-    # Tied weights: the STRFs are also the dictionary.
+    V, b, mu, Dk = learn_relu(cochs, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
+                              reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
+                              l1_V=a.l1, smooth_V=a.smooth, tied=a.tied)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)
-    D, d0, scale = W.T.copy(), np.zeros_like(mu), 1.0
+    D, d0, scale = Dk.T.copy(), np.zeros_like(mu), 1.0
 
     # Units that never activate on the corpus are dropped (silent channels).
     R = np.concatenate([np.maximum(W @ ((unfold(X, a.l_frames) - mu) / scale) + b, 0.0)

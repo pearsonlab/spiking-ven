@@ -730,3 +730,10 @@ without renormalisation; lr 0.2 kills units). 80 epochs.
   only ~6 real STRFs. Not usable.
 - vs untied Adam autoencoder (S1): 95% explained, 128 units, noisy STRFs.
 Network not yet trained on S2 (awaiting review).
+- **Untied (S2b, default now)**: linear decoder with unit-norm rows, penalties on encoder
+  STRFs, lr 0.1, 80 epochs: 87% variance explained (87.4% on template), 128/128 alive,
+  17% zero entries. STRFs: banded spectral/onset structure, smoother than S1 but still
+  patchy, and nearly all carry a bright broadband column at the newest lag (min-phase
+  front-loading). Code is dense (98% of unit-frames active, ReLU rarely clips). Primary
+  30 Hz; BS 2.2 Hz song, 2.0 reversed, 3.0 DAF (strong DAF burst ~18 Hz).
+  `outputs/encoders/sw_encoder_untied.npz`. Network not yet trained.

@@ -90,9 +90,15 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
 
 def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.1,
                reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
-               l1_V: float = 7e-5, smooth_V: float = 1e-3, log=print):
+               l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
-    ReLU: a tied rectified autoencoder.
+    ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
+
+    Untied (default): reconstruction ``D^T r`` with a linear decoder ``D`` (K, C*L) whose
+    rows are renormalised to unit norm after every update. That pins the scale (ReLU is
+    positively homogeneous, so otherwise ``V`` could shrink under the penalties while ``D``
+    grew), and the penalties shape ``V`` rather than shrink it. Tied (``tied=True``): the
+    description below with ``D = V``.
 
     Code ``r = relu(V x + b)`` on each strictly-past window ``x`` (centred by the corpus's
     mean window ``mu``), reconstruction ``V^T r``. The gradient of the squared error (step
@@ -103,7 +109,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     code amplitude, and the two penalties bound it. They are applied with step ``reg_lr``
     (default ``lr``: proximal gradient on MSE/2 + l1_V |V|_1 + smooth_V/2 |DV|^2). With no
     renormalisation, the causal encoder's step (10) wipes out every kernel.
-    Returns ``(V, b, mu)`` with ``V`` (K, C, L)."""
+    Returns ``(V, b, mu, D)`` with ``V`` (K, C, L) and ``D`` (K, C*L) (``D`` is ``V``
+    flattened when tied)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -114,6 +121,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     b = np.zeros(K)
+    D = None if tied else V.reshape(K, C * L).copy()
     for ep in range(n_epochs):
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
@@ -122,10 +130,16 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
             S = np.maximum(Z, 0.0)                             # (T, K)
-            R = P - S @ W                                      # residual
-            gZ = (R @ W.T) * (Z > 0)                           # -dLoss/dZ
-            G = S.T @ R + gZ.T @ P                             # -dLoss/dW (both roles)
+            Dk = W if D is None else D
+            R = P - S @ Dk                                     # residual
+            gZ = (R @ Dk.T) * (Z > 0)                          # -dLoss/dZ
+            G = gZ.T @ P                                       # -dLoss/dW (encoder)
             n = max(T, 1)
+            if D is None:
+                G = G + S.T @ R                                # tied: decoder role too
+            else:
+                D = D + lr * (S.T @ R) / n
+                D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
             V = V + lr * G.reshape(K, C, L) / n
             b = b + lr * gZ.sum(axis=0) / n
             if smooth_V > 0:
@@ -142,7 +156,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 f"{err / len(cochs):.3f}  active {act / len(cochs):.1%}  "
                 f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
                 f"mean |V_k| {float(np.linalg.norm(V.reshape(K, -1), axis=1).mean()):.3f}")
-    return V, b, mu
+    return V, b, mu, (V.reshape(K, C * L).copy() if D is None else D)
 
 
 def dog_kernel(sigma_e: float = 6.4, mu_e: float = 13.0, sigma_i: float = 42.0,

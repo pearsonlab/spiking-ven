@@ -200,6 +200,13 @@ class SWEncoder:
     def n_channels(self) -> int:
         return int(self.keep.size)
 
+    @property
+    def V(self) -> np.ndarray:
+        """(n_kept, C, L) STRFs of the kept primary units, oldest lag first: output channel
+        ``k`` (a higher-AC unit) is the DoG of primary unit ``keep[k]``."""
+        C = int(self.coch_params["n_channels"])
+        return self.W[self.keep].reshape(self.keep.size, C, self.L)
+
     # ---- stages -------------------------------------------------------------------------
     def cochleagram(self, signal, *, sr, rms_from=None):
         cp = self.coch_params

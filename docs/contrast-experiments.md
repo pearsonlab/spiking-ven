@@ -585,3 +585,16 @@ aud 150-200 nS x beta 20000-30000 (NMDA 300-450, decay 50): extra spikes 0.65-0.
 case (more drive does not raise it), responders 44-50%, latency 27-30 ms, late/peak
 0.06-0.07, duration 29-32 ms, sing/not 0.79-0.83, diff +0.23-0.36 Hz. With the gate, the
 response is transient and timely but small, and still short.
+
+## D9. Gated Vogels + stronger NMDA (aud 150, beta 20000)
+
+| NMDA nS / decay ms | seed | xs | resp | lat | dur | pk | late/pk | sing/not | diff |
+|---|---|---|---|---|---|---|---|---|---|
+| 600 / 50 | 42 / 1 | 0.73 / 0.70 | 0.46-0.48 | 26-29 | 30 | 28-30 | 0.06-0.07 | 0.81-0.83 | +0.25-0.30 |
+| 600 / 100 | 42 / 1 | 0.78 / 0.74 | 0.45-0.46 | 26-32 | 30-32 | 28-30 | 0.10 | 0.81-0.83 | +0.23-0.32 |
+| 1000 / 50 | 42 / 1 | 0.81 / 0.78 | 0.47-0.49 | 29-30 | 31-32 | 28-30 | 0.07-0.08 | 0.82-0.83 | +0.26-0.34 |
+| **1000 / 100** | 42 / 1 | **0.93 / 0.85** | 0.46 | 27-31 | **33-34** | 38 / 28 | 0.12-0.13 | 0.81-0.83 | +0.25-0.34 |
+
+Best so far (gated, NMDA 1000 / 100 ms): every DAF target in range except duration (33-34
+ms, bound 47) and seed 1's peak (28 ms); late/peak 0.12-0.13. With the gate keeping the
+response transient, NMDA can add magnitude without the plateau it caused ungated (D3-D5).

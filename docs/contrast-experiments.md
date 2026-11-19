@@ -666,3 +666,28 @@ responders 34-40%, late/peak 0.16-0.19. Duration unchanged (~29 ms). Pooled per-
 stays on the diagonal (median 0.79; `singing_scatter_norm_sigma1.png`). sigma 1 is the best
 balance. Note: `sven-figure` cannot yet draw normalised models (sweep models carry no
 stimulus record, so it would rebuild unnormalised stimuli).
+
+## R1. Randomised DAF onsets (re-scoring trained models; no retraining)
+
+Mandelblat-Cerf played noise at different points in the song (Fig 7J sorts trials by the
+syllable it fell in), so song-locked structure averages out of their PSTH; we always put it
+at 400-450 ms, at the start of a ~80 ms silent gap. New option (`metrics.daf_onsets`,
+`daf_inputs(random_onsets=)`, `daf_response(random_onsets=)`, `scripts/rescore_daf.py`):
+per-trial onsets drawn inside syllables (envelope > 20% of max; 193-719 ms, 91 distinct
+positions in 100 trials), each trial aligned to its own onset.
+
+| model | onsets | xs | resp | lat | dur | pk ms | pk Hz | late/pk |
+|---|---|---|---|---|---|---|---|---|
+| V2 (aud 400, no norm) | fixed / random | 1.57 / 1.15 | 0.45 / 0.43 | 32.8 / 17.8 | 27.7 / 30.5 | 30 / 28 | 38 / 29 | 0.13 / 0.04 |
+| D6 (no norm) | fixed / random | 0.98 / 0.78 | 0.40 / 0.39 | 37.5 / 22.7 | 35.3 / 40.1 | 34 / 30 | 20 / 16 | 0.17 / 0.10 |
+| norm sigma 1, aud 300 | fixed / random | 1.13 / 0.89 | 0.38 / 0.32 | 38.1 / 27.0 | 27.7 / 31.9 | 36 / 42 | 22 / 19 | 0.18 / 0.05 |
+| **norm sigma 1, aud 400** | fixed / random | 1.31 / **0.96** | 0.39 / **0.36** | 40.8 / **25.9** | 28.0 / **32.1** | 36 / **40** | 25 / **20** | 0.20 / **0.04** |
+
+Verdict: the fixed window inflated magnitude (~25%) and latency and made the response look
+sustained. With random onsets, **norm sigma 1 / aud 400 meets every DAF target except
+duration** (32 vs >= 47 ms), with the strongest song contrast so far (diff +1.13 Hz).
+The responder PSTH (`daf_psth_fixed_vs_random.png`) still dips below baseline 60-80 ms after
+onset and rebounds at ~90 ms, independent of song position -- an encoder effect: its 32 ms
+running-mean subtraction still holds the loud noise after the burst ends, suppressing all
+auditory input for ~32 ms (while the learned I_HVC inhibition keeps arriving). This truncates
+the measured duration. Fig 8E shows no such dip.

@@ -33,19 +33,52 @@ __all__ = [
 ]
 
 
-def daf_inputs(encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42):
+def daf_onsets(st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42,
+               pre_ms: int = 150, post_ms: int = 300, threshold: float = 0.2) -> np.ndarray:
+    """Per-trial DAF onsets (ms) drawn inside syllables, as in the experiment.
+
+    Mandelblat-Cerf et al. played the noise during different syllables (their Fig 7J sorts
+    trials by the syllable it fell in), so song-locked structure averages out of their
+    PSTH. A fixed window instead puts every trial at the same point in the song. Onsets
+    are drawn uniformly from the moments where the song's envelope (1 ms RMS, 10 ms
+    smoothing) exceeds ``threshold`` x its maximum, leaving ``pre_ms`` before the onset and
+    ``post_ms`` after it within the rendition, with the burst inside the motif.
+    Reproducible from ``seed``.
+    """
+    sr = int(st["sr"])
+    sig = np.asarray(st["sig_train"], dtype=np.float64)
+    n_ms = len(sig) * 1000 // sr
+    per = sr // 1000
+    env = np.sqrt((sig[:n_ms * per].reshape(n_ms, per) ** 2).mean(axis=1))
+    env = np.convolve(env, np.ones(10) / 10, mode="same")
+    _, burst = daf_window_ms(st["daf_window_s"])
+    last = min(int(st["T_song"]) - int(round(burst)), int(st["T_rend"]) - post_ms, n_ms - 1)
+    t = np.arange(pre_ms, last + 1)
+    t = t[env[t] > threshold * env.max()]
+    return np.random.default_rng(seed + 5000).choice(t, size=n_trials)
+
+
+def daf_inputs(encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, seed: int = 42,
+               random_onsets: bool = False):
     """Auditory spikes for ``n_trials`` DAF renditions: ``(n_trials, n_aud, T_rend)``.
 
     Trials are renditions with independent noise draws; the song is fixed, as in the
     experiment. ``st`` is :func:`~spiking_ven.stimuli.build_stimuli`'s output, so the
     trials are encoded exactly like every other stimulus, with the noise in
-    ``st["daf_window_s"]``. They depend only on the encoder, the stimuli and ``seed``, so
-    one set can score many networks.
+    ``st["daf_window_s"]`` -- or, with ``random_onsets``, a window of the same length at
+    each trial's :func:`daf_onsets`. They depend only on the encoder, the stimuli and
+    ``seed``, so one set can score many networks.
     """
+    _, burst = daf_window_ms(st["daf_window_s"])
+    if random_onsets:
+        on = daf_onsets(st, n_trials=n_trials, seed=seed)
+        windows = [(o / 1000.0, (o + burst) / 1000.0) for o in on]
+    else:
+        windows = [st["daf_window_s"]] * n_trials
     return np.stack([
         encode_stimulus(
             daf_waveform(st["sig_train"], st["sr"], seed=seed + 1000 + t,
-                         window_s=st["daf_window_s"]), encoder,
+                         window_s=windows[t]), encoder,
             sr=st["sr"], T_out_ms=st["T_rend"], acts_train=st["acts_train"],
             rms_from=st["sig_train"], mean_rate_hz=st["mean_rate_hz"],
             n_ista=st["n_ista"], seed=seed + 2000 + t, norm_sigma=st.get("norm_sigma"),
@@ -92,7 +125,8 @@ def daf_responders(trials, *, onset_ms: int, window_ms: int = 150, alpha: float 
 
 def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window_ms: int = 150,
                  alpha: float = 0.02, seed: int = 42,
-                 duration_window_ms: int = 300, inputs: np.ndarray | None = None) -> dict:
+                 duration_window_ms: int = 300, inputs: np.ndarray | None = None,
+                 random_onsets: bool = False) -> dict:
     """The DAF response, measured the way the experiment measures it.
 
     Per neuron, in windows either side of noise onset (from ``st["daf_window_s"]``),
@@ -105,12 +139,22 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window
 
     Follows Mandelblat-Cerf et al. 2014; see :func:`daf_trials` and
     :func:`daf_responders`. ``inputs`` are precomputed :func:`daf_inputs`.
+
+    ``random_onsets``: the noise falls at a different point in the song each trial
+    (:func:`daf_onsets`), and every trial is aligned to its own onset before analysis.
     """
     from scipy import stats
 
     onset, burst_ms = daf_window_ms(st["daf_window_s"])
     W = int(window_ms)
     trials = daf_trials(ven, encoder, st, n_trials=n_trials, seed=seed, inputs=inputs)
+    aligned = False
+    if random_onsets:
+        # Align each trial to its own onset: W ms before, duration_window_ms after.
+        post_ms = max(W, int(duration_window_ms))
+        ons = daf_onsets(st, n_trials=n_trials, seed=seed, pre_ms=W, post_ms=post_ms)
+        trials = np.stack([trials[t, :, o - W:o + post_ms] for t, o in enumerate(ons)])
+        onset, aligned = W, True
     n_e = int(ven.n_e)
     resp, pre, post = daf_responders(trials, onset_ms=onset, window_ms=W, alpha=alpha)
     psth = trials[:, :, onset - W:onset + W] * 1000
@@ -150,7 +194,8 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window
     # first run of ten non-significant bins. A response with no such run before the end
     # of the duration window is counted at the length it reached ("censored").
     BIN = 2
-    dur_W = min(int(duration_window_ms), st.get("T_song", trials.shape[2]) - onset,
+    dur_W = min(int(duration_window_ms),
+                trials.shape[2] - onset if aligned else st.get("T_song", trials.shape[2]) - onset,
                 trials.shape[2] - onset)
     dur_W -= dur_W % BIN
     pre_b = (trials[:, :, onset - W:onset].mean(axis=0) * 1000
@@ -192,6 +237,10 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window
                              if resp.any() else nan),
         "extra_spikes_max": (float((post - pre)[:, resp].mean(axis=0).max())
                              if resp.any() else nan),
+        #: Responders' mean PSTH (Hz, 1 ms), W ms either side of onset.
+        "psth_responders": (psth[:, resp, :].mean(axis=(0, 1)).tolist()
+                            if resp.any() else []),
+        "random_onsets": bool(random_onsets),
         "peak_change_hz": peak_resp,          # responders only, as in Fig 8E
         "peak_latency_ms": lat_resp,
         "late_over_peak": late_over_peak,

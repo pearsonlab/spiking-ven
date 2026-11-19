@@ -27,15 +27,26 @@ import numpy as np
 __all__ = ["causal_meansub", "infer", "learn", "min_phase", "prune_silent"]
 
 
-def causal_meansub(X, w):
+def causal_meansub(X, w, tau=None):
     """Subtract a causal running level from every frame.
 
     For each frame, the mean over the trailing ``w`` frames (including that frame) is taken
     per channel and then averaged across channels; that one number is subtracted from
     every channel. Without it the code is dominated by overall level and cannot tell
     forward from reversed song.
+
+    With ``tau`` (frames), the running mean is exponential instead -- ``m[t] = m[t-1] +
+    (x[t] - m[t-1]) / tau``, started at the first frame -- so a sound's contribution fades
+    smoothly rather than dropping out ``w`` frames later, which a boxcar does (the abrupt
+    exit rings: suppression after a loud sound, then an overshoot when it leaves).
     """
     C, T = X.shape
+    if tau is not None:
+        from scipy.signal import lfilter
+        a = 1.0 / float(tau)
+        means = lfilter([a], [1.0, -(1.0 - a)], X, axis=1,
+                        zi=(1.0 - a) * X[:, :1])[0]
+        return X - means.mean(axis=0, keepdims=True)
     cs = np.cumsum(np.concatenate([np.zeros((C, 1)), X], axis=1), axis=1)
     idx = np.arange(T)
     lo = np.maximum(idx - w + 1, 0)
@@ -246,7 +257,11 @@ class CausalFilterEncoder:
 
         X = cochleagram(sig, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
                         lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
-        Xc = causal_meansub(X, self.L)
+        # The running level is taken over ``meansub_frames`` (default: the filter length
+        # L). A shorter window is a higher high-pass cutoff: the code forgets a loud sound
+        # sooner after it ends.
+        Xc = causal_meansub(X, getattr(self, "meansub_frames", None) or self.L,
+                            tau=getattr(self, "meansub_tau", None))
         acts = infer(Xc, self.V, self.lam, n_iter=n_ista)
 
         if upsample_to_ms:

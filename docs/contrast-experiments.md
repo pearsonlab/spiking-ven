@@ -691,3 +691,29 @@ onset and rebounds at ~90 ms, independent of song position -- an encoder effect:
 running-mean subtraction still holds the loud noise after the burst ends, suppressing all
 auditory input for ~32 ms (while the learned I_HVC inhibition keeps arriving). This truncates
 the measured duration. Fig 8E shows no such dip.
+
+## M1. Encoder running-mean subtraction: window length and shape (quick check, no retraining)
+
+The encoder subtracts a running level -- a boxcar over the trailing 16 cochleagram frames (32
+ms), per channel, averaged over channels. After a loud burst the window still holds the noise,
+suppressing all auditory input for ~32 ms, and the noise leaving the window abruptly gives a
+rebound (the responder PSTH dips at 60-80 ms and rebounds at ~90 ms). New options:
+`encoder.meansub_frames` (boxcar length) and `encoder.meansub_tau` (exponential running mean,
+`causal_meansub(..., tau=)`). Existing filters and the normalised sigma 1 / aud 400 network
+(both trained with the 16-frame boxcar), re-scored with random onsets:
+
+| running mean | fwd/rev corr | dur | xs | resp | lat | pk | late/pk |
+|---|---|---|---|---|---|---|---|
+| boxcar 16 (current) | 0.043 | 30.8 | 0.96 | 0.36 | 25.8 | 42 | 0.05 |
+| boxcar 8 | 0.050 | 34.7 | 0.91 | 0.39 | 27.5 | 24 | 0.02 |
+| boxcar 4 | 0.071 | 43.3 | 0.94 | 0.38 | 24.8 | 28 | 0.02 |
+| exp tau 8 | 0.046 | 33.4 | 0.93 | 0.35 | 24.2 | 28 | 0.03 |
+| exp tau 4 | 0.055 | 29.8 | 0.88 | 0.37 | 24.8 | 24 | 0.01 |
+| **exp tau 2** | 0.076 | **49.1** | **0.99** | **0.33** | **21.2** | **52** | **0.02** |
+
+Exp tau 2 frames (4 ms) meets **every** DAF target (all in range) even untrained for it; its
+PSTH holds ~15-20 Hz to ~60 ms and returns without the rebound. The smoother tau 8 / 4 still
+rebound, so the boxcar edge is not the only cause (likely also the filters' 32 ms context).
+Forward/reversed code correlation stays low (0.08). Figures: `meansub_window_daf.png`,
+`meansub_exp_daf.png`, `cancellation_window{16,8,4}.png`, `cancellation_exp{8,4,2}.png`.
+Next: retrain the encoder with exp tau 2, then the network.

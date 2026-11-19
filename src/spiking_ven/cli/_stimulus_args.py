@@ -33,6 +33,9 @@ def add_stimulus_flags(p: argparse.ArgumentParser) -> None:
                    metavar=("NOTES", "NOTE_MS", "GAP_MS"),
                    help="HVC introductory notes before each motif; a model that records "
                         "its stimuli but no intro notes was trained without them")
+    g.add_argument("--norm-sigma", type=float, default=None,
+                   help="divisive normalisation of the auditory population (sigma); "
+                        "default: the model's recorded value, else none")
 
 
 def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
@@ -51,7 +54,7 @@ def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
         {"sr": args.sr, "seed": args.stimulus_seed, "t_post": args.t_post,
          "t_burn": args.t_burn, "mean_rate_hz": args.mean_rate_hz,
          "n_ista": args.n_ista, "daf_window_s": args.daf_window_s,
-         "hvc_intro": args.hvc_intro},
+         "hvc_intro": args.hvc_intro, "norm_sigma": args.norm_sigma},
         encoder_path=encoder_path, motifs_path=motifs_path,
     )
     seed = settings.pop("seed")

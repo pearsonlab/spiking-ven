@@ -53,6 +53,7 @@ STIMULUS_DEFAULTS = {
     "n_ista": N_ISTA,
     "daf_window_s": tuple(DAF_WINDOW_S),
     "hvc_intro": tuple(HVC_INTRO),
+    "norm_sigma": None,
 }
 
 #: What a model that records its stimuli but not a setting was trained with: the setting

@@ -10,6 +10,7 @@ The encoder's filters and the network were trained with the 16-frame window.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib
@@ -41,11 +42,15 @@ def main() -> None:
     p.add_argument("--model", required=True)
     p.add_argument("--norm-sigma", type=float, default=None)
     p.add_argument("--out-dir", required=True)
+    p.add_argument("--variants", default=None,
+                   help='JSON list of [label, boxcar frames, tau frames or null]')
+    p.add_argument("--tag", default="meansub_exp_daf", help="comparison figure name")
     a = p.parse_args()
+    variants = VARIANTS if a.variants is None else [tuple(v) for v in json.loads(a.variants)]
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     res = {}
-    for k, (lab, w, tau) in enumerate(VARIANTS):
+    for k, (lab, w, tau) in enumerate(variants):
         enc = CausalFilterEncoder.load("outputs/causal_encoder.npz")
         enc.meansub_frames = w
         enc.meansub_tau = tau
@@ -57,7 +62,7 @@ def main() -> None:
         v = VocalErrorNet.load(a.model, seed=42)
         r = daf_response(v, enc, st, seed=42, inputs=rin, random_onsets=True)
         res[k] = (aud * 1000 / rin.shape[1], np.array(r["psth_responders"]), r)
-        tag = f"_box{w}" if tau is None else f"_exp{tau:g}"
+        tag = f"_box{w:g}" if tau is None else f"_exp{tau:g}"
         make_figure(VocalErrorNet.load(a.model, seed=42), st, tag, out_dir=out)
         print(f"{lab}: fwd/rev corr {st['fwd_rev_corr']:.3f} dur {r['duration_ms']:.1f} "
               f"xs {r['extra_spikes_responders']:.2f} resp {r['responder_fraction']:.2f} "
@@ -68,7 +73,7 @@ def main() -> None:
     t = np.arange(-150, 150)
     b = 5
     tb = binned(t.astype(float), b)
-    for k, (lab, w, tau) in enumerate(VARIANTS):
+    for k, (lab, w, tau) in enumerate(variants):
         aud, psth, r = res[k]
         axes[0].plot(tb, binned(aud, b), color=COLORS[k], lw=1.6, label=lab)
         pb = binned(psth, b)
@@ -93,7 +98,7 @@ def main() -> None:
                  "filters and network trained with the 16-frame boxcar", x=0.01, ha="left",
                  fontsize=10, fontweight="bold")
     fig.tight_layout()
-    path = out / "meansub_exp_daf.png"
+    path = out / f"{a.tag}.png"
     fig.savefig(path, dpi=170)
     print("wrote", path)
 

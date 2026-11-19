@@ -279,6 +279,11 @@ class CausalFilterEncoder:
     @classmethod
     def load(cls, path):
         d = np.load(path, allow_pickle=False)
+        if "kind" in d and str(d["kind"]) == "sw":
+            # A Schneider & Woolley two-stage front end (spiking_ven.sw_encoder), which has
+            # the same interface; returned so every caller can load either kind.
+            from .sw_encoder import SWEncoder
+            return SWEncoder.load(path)
         cp = {k[3:]: (v.item() if v.ndim == 0 else v) for k, v in d.items()
               if k.startswith("cp_")}
         # Encoders saved before the per-filter bias was removed carry an all-zero

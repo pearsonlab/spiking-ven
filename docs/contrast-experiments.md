@@ -1002,3 +1002,45 @@ scatter on target (1.03x; 59% of cells slightly higher singing, as Mandelblat-Ce
 while keeping flatness above the causal-encoder V2 (51% vs 44%) and DAF on target. Model:
 `outputs/sweeps/rI_post/489a1654a4.npz` (stimuli: `--aud-norm 0.3 --aud-norm-power 2
 --rms-per-rendition`).
+
+**Round J (post 0.5 with the local target; convergence).** rms/rendition, n_ih 1200:
+
+| config | flatness | vs not singing | pooled sing/not | rev/tr | song-excess rev/tr | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| post 0.5, constant, 1500 rend | 53% | 97% | 1.03 (54% higher) | 1.34 | 2.45 | 0.88 / 0.48 |
+| post 0.5 + lam 1, tau_slow 1000 | 49% | 85% | 1.14 | 1.27 | 2.19 | 0.89 / 0.54 |
+| post 0.75 + lam 1, tau_slow 1000 | 56% | 105% | 0.96 | 1.37 | 2.59 | 0.84 / 0.55 |
+
+Post 0.5 is converged (600 -> 1500 renditions: flatness 51 -> 53%). The local target adds
+little once the post term is fixed.
+
+### Overnight summary (best model)
+
+`outputs/sweeps/rJ_long/489a1654a4.npz`, V2 with:
+- S&W front end, `outputs/encoders/pen/l1_2e-4_sm_1e-1_pu90.npz` (L1 2e-4, smooth 1e-1,
+  rates into the DoG, per-unit thresholds); BS population divisively normalised, sigma 0.3
+  squared; each training rendition at its own rms;
+- aud 400 nS, c_aud 0.05;
+- I_HVC: 1200 cells, c_hvc_h 0.004 (one ~7 ms window per cell, ~8 cells per ms), Vogels rule
+  with the post term at 0.5 (`vogels_post`), constant per-cell target, eta 3, 1500
+  renditions.
+
+| metric | value | target |
+|---|---|---|
+| song response cancelled vs not singing | 97% | -- |
+| temporal flatness | 53% (causal-encoder V2: 44%) | -- |
+| pooled singing / not singing | 1.03x, 54% of cells higher | ~1, slight increase |
+| reversed / trained | 1.34 (song-excess 2.45) | > 1 |
+| DAF extra spikes (random onsets) | 0.88 | 0.8-1.0 |
+| DAF responders | 0.48 | 0.41 |
+| latency / duration | 43 / 42 ms | 23+-12 / 90+-43 |
+| peak latency | 82 ms | 35-75 (late) |
+
+Figures: `outputs/cancellation_final_overnight.png`,
+`outputs/singing_scatter_final_overnight.png`, `outputs/cancellation_check_final_overnight.png`.
+
+Parameters to review for biological plausibility: 1200 I_HVC cells each driven by ~2 HVC
+neurons; the halved Vogels post term (a deviation from the published rule); per-rendition
+loudness normalisation; aud synapses of 400 nS mean (strong; weaker/more synapses were
+worse, round F). Open: peak latency 82 ms; `set_rate_targets` onset-transient bias (+6%);
+a few large syllable peaks (~530, ~805 ms) still about half cancelled.

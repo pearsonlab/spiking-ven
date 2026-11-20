@@ -93,7 +93,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
                l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
                val_cochs=None, patience: int = 0, min_delta: float = 0.002,
-               log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2)):
+               log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
+               recon_tau_ms: float | None = None):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -121,7 +122,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     stops once the held-out error has not improved by ``min_delta`` for ``patience``
     epochs, and the best epoch's weights are returned. ``smooth_axes`` picks the
     directions the roughness penalty acts along: (1, 2) channel and lag, (1,) channel only
-    (smoothing along lag favours long horizontal bands)."""
+    (smoothing along lag favours long horizontal bands). ``recon_tau_ms`` weights each
+    lag's reconstruction error by ``exp(-lag / recon_tau_ms)`` (1 at the newest frame):
+    the code is then asked to describe the recent past, so STRF energy at long lags
+    survives only where it helps; reported errors are weighted the same way."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -134,6 +138,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     b = np.zeros(K)
     D = None if tied else V.reshape(K, C * L).copy()
     lag_ms = (L - 1 - np.arange(L)) * frame_ms + frame_ms / 2     # oldest column first
+    # Reconstruction weight per window column (channel-major, lag inner): exp(-lag/tau),
+    # 1 at the newest frame. Uniform without recon_tau_ms.
+    wcol = (np.tile(np.exp(-(lag_ms - frame_ms / 2) / recon_tau_ms), C)
+            if recon_tau_ms else np.ones(C * L))
 
     def val_error(V, b, D):
         W = V.reshape(K, C * L)
@@ -142,8 +150,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         for X in val_cochs or []:
             P = _past_windows(X, L) - mu
             R = P - np.maximum(P @ W.T + b, 0.0) @ Dk
-            num += float((R ** 2).sum())
-            den += float((P ** 2).sum())
+            num += float((wcol * R ** 2).sum())
+            den += float((wcol * P ** 2).sum())
         return num / max(den, 1e-12)
 
     def compactness(V):
@@ -164,13 +172,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             S = np.maximum(Z, 0.0)                             # (T, K)
             Dk = W if D is None else D
             R = P - S @ Dk                                     # residual
-            gZ = (R @ Dk.T) * (Z > 0)                          # -dLoss/dZ
+            Rw = R * wcol                                      # lag-weighted residual
+            gZ = (Rw @ Dk.T) * (Z > 0)                         # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             n = max(T, 1)
             if D is None:
-                G = G + S.T @ R                                # tied: decoder role too
+                G = G + S.T @ Rw                               # tied: decoder role too
             else:
-                D = D + lr * (S.T @ R) / n
+                D = D + lr * (S.T @ Rw) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
             V = V + lr * G.reshape(K, C, L) / n
             b = b + lr * gZ.sum(axis=0) / n
@@ -180,7 +189,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
-            err += float(np.mean(R ** 2)) / float(np.mean(P ** 2))
+            err += float(np.mean(wcol * R ** 2)) / float(np.mean(wcol * P ** 2))
             act += float(np.mean(S > 0))
             alive |= (S > 0).any(axis=0)
         ve = val_error(V, b, D) if val_cochs is not None else np.nan

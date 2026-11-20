@@ -63,6 +63,9 @@ def main() -> None:
     p.add_argument("--min-delta", type=float, default=0.002)
     p.add_argument("--smooth-freq-only", action="store_true",
                    help="roughness penalty across frequency only, not along lag")
+    p.add_argument("--recon-tau-ms", type=float, default=None,
+                   help="weight each lag's reconstruction error by exp(-lag/tau) "
+                        "(default: uniform over the window)")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -100,7 +103,8 @@ def main() -> None:
                               l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
                               patience=a.patience, min_delta=a.min_delta,
                               log_every=a.log_every,
-                              smooth_axes=(1,) if a.smooth_freq_only else (1, 2))
+                              smooth_axes=(1,) if a.smooth_freq_only else (1, 2),
+                              recon_tau_ms=a.recon_tau_ms)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

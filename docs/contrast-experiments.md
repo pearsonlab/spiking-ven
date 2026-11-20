@@ -832,3 +832,34 @@ ms, I_HVC 1.2 Hz singing), sigma 0.3 squared, aud 400:
 Better, not solved: eta 3 > eta 1 suggests learning has not converged (each synapse now
 sees ~1 event per motif). Big syllable peaks (~345, 530, 805 ms) are still about half
 cancelled. `outputs/cancellation_check_1win.png`, `outputs/ihvc_windows_1win.png`.
+
+### Overnight tuning (2026-11-19/20): convergence and a local rate target
+
+All: S4 encoder, sigma 0.3 squared, aud 400, n_ih 600, c_hvc_h 0.004 unless stated. Driver
+runs sweep -> `cancellation_check.py` -> random-onset `rescore_daf.py`. Results in
+`outputs/sweeps/<round>/`.
+
+**Round A (convergence).** eta 10 / 30 at 600 renditions; eta 3 / 10 at 1500:
+
+| eta, rend | cancelled | timed | rev/tr | song-excess rev/tr | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| 3, 600 (S7) | 58% | 50% | 1.24 | 1.81 | 1.05 | 0.91 / 0.47 |
+| 10, 600 | 58% | 53% | 1.26 | 1.87 | 0.98 | 0.91 / 0.49 |
+| 30, 600 | 57% | 52% | 1.27 | 1.77 | 0.89 | 0.91 / 0.51 |
+| 3, 1500 | 60% | 53% | 1.24 | 1.92 | 1.02 | 0.92 / 0.46 |
+| 10, 1500 | 57% | 51% | 1.25 | 1.82 | 0.97 | 0.91 / 0.47 |
+
+Converged: ~58-60% is the ceiling of the constant-target rule on this basis, not a
+learning-time limit.
+
+**Round B (local target).** New option (`lam_loc`, `tau_loc_ms`): the Vogels target becomes
+`(1 - lam) R_TARGET + lam r_loc`, `r_loc` the E cell's own rate over the last tau_loc
+(exponential running mean). eta 3, 600 renditions, tau_loc 100 ms:
+
+| lam | cancelled | timed | rev/tr | song-excess rev/tr | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| 0.5 | 58% | 52% | 1.28 | 1.91 | 1.02 | 0.89 / 0.51 |
+| 1 | 62% | 59% | 1.37 | 2.17 | 0.85 | 0.90 / 0.54 |
+
+lam 1 is the best contrast so far; its cost is the expected one -- with no anchor, the
+singing rate drifts below not-singing (0.85).

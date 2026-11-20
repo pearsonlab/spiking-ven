@@ -47,6 +47,7 @@ _FLOAT_KEYS = (
     "c_ie", "ie_init_mean_ns", "ie_init_sd_ns",
     "c_hvc_h", "hvc_h_mean_ns", "hvc_h_sd_ns", "rho_h_ns", "r_ih_hz", "i_drive_ih_pa",
     "vogels_h", "eta_h_ns", "vogels_gate", "lam_loc", "tau_loc_ms", "tau_slow_ms",
+    "vogels_post",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
@@ -104,6 +105,7 @@ class VocalErrorNet:
     lam_loc, tau_loc_ms : that rule's target is ``(1 - lam_loc) R_TARGET + lam_loc r_loc``,
                    with ``r_loc`` the cell's own rate averaged over ``tau_loc_ms`` -- a local
                    target that flattens the rate on shorter timescales (0 = constant)
+    vogels_post  : scale of that rule's postsynaptic term (1 = Vogels et al.; 0 = off)
     tau_slow_ms  : > 0 measures that local term against the cell's rate over this longer
                    time instead of ``R_TARGET``: target ``R_TARGET + lam_loc (r_loc -
                    r_slow)``, flattening fast fluctuations with the mean anchored
@@ -192,6 +194,7 @@ class VocalErrorNet:
     lam_loc: float
     tau_loc_ms: float
     tau_slow_ms: float
+    vogels_post: float
     R_TARGET: np.ndarray
     c_ie: float
     ie_init_mean_ns: float
@@ -250,6 +253,7 @@ class VocalErrorNet:
         lam_loc: float = 0.0,
         tau_loc_ms: float = 100.0,
         tau_slow_ms: float = 0.0,
+        vogels_post: float = 1.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -373,6 +377,7 @@ class VocalErrorNet:
             "vogels_gate": bool(self.vogels_gate),
             "lam_loc": float(self.lam_loc), "tau_loc": self.tau_loc_ms * ms,
             "use_slow": float(self.tau_slow_ms > 0),
+            "post_gain": float(self.vogels_post),
             "tau_slow": (self.tau_slow_ms if self.tau_slow_ms > 0 else 1000.0) * ms,
             "E": {"C": self.c_e_pf * pF, "g_L": self.g_l_e * nS,
                   "I_tonic": self.i_drive_e_pa * pA, "sigma": self.noise_e * pA * sqrt_ms,
@@ -485,7 +490,8 @@ class VocalErrorNet:
                     "rho_h_ns": float(d["rho_ns"]) if "rho_ns" in d else 0.0,
                     "r_ih_hz": 5.0, "i_drive_ih_pa": 0.0, "vogels_h": 0.0,
                     "eta_h_ns": 1.0, "vogels_gate": 0.0, "lam_loc": 0.0,
-                    "tau_loc_ms": 100.0, "tau_slow_ms": 0.0}   # the constructor's defaults
+                    "tau_loc_ms": 100.0, "tau_slow_ms": 0.0,
+                    "vogels_post": 1.0}   # the constructor's defaults
         optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "R_TARGET")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults and k not in optional_arrays]

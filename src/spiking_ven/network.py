@@ -119,12 +119,16 @@ STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)
 _REF = "(use_slow * 2 * tau_stdp * r_slow_post + (1 - use_slow) * alpha_e_post)"
 _TARGET = f"(alpha_e_post + lam_loc * (2 * tau_stdp * r_loc_post - {_REF}))"
 VOGELS_ON_PRE = f"g_gaba_post += w; w = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS)"
-VOGELS_ON_POST = "w = clip(w + eta * x_stdp_pre, 0*nS, inf*nS)"
+#: ``post_gain`` scales the postsynaptic term (1 = Vogels et al.; 0 = the presynaptic term
+#: alone, whose fixed point is exactly the target rate while each I cell fires -- the post
+#: term adds potentiation in proportion to I/E correlation, which song-locked I_HVC
+#: firing makes positive, pulling the rate below target).
+VOGELS_ON_POST = "w = clip(w + post_gain * eta * x_stdp_pre, 0*nS, inf*nS)"
 #: The same, with both terms multiplied by the E cell's audio gate (learning only while
 #: auditory input drives the cell), for comparison.
 VOGELS_ON_PRE_GATED = ("g_gaba_post += w; "
                        f"w = clip(w + eta * gate_post * (x_e_post - {_TARGET}), 0*nS, inf*nS)")
-VOGELS_ON_POST_GATED = "w = clip(w + eta * gate_post * x_stdp_pre, 0*nS, inf*nS)"
+VOGELS_ON_POST_GATED = "w = clip(w + post_gain * eta * gate_post * x_stdp_pre, 0*nS, inf*nS)"
 
 
 # ---------------------------------------------------------------------------

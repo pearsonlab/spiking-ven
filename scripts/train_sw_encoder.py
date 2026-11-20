@@ -53,6 +53,15 @@ def main() -> None:
     p.add_argument("--primary-spikes", action="store_true",
                    help="feed the DoG Poisson primary spikes (default: primary rates, as in "
                         "Schneider & Woolley's model)")
+    p.add_argument("--train-corpus", default=None,
+                   help="learn the STRFs on this unwarped multi-bird corpus "
+                        "(scripts/build_song_corpus.py) instead of the motifs; the gain and "
+                        "thresholds are still set on the motifs, which the network hears")
+    p.add_argument("--patience", type=int, default=0,
+                   help="stop when held-out error has not improved for this many epochs "
+                        "(needs --train-corpus; 0 = run all epochs)")
+    p.add_argument("--min-delta", type=float, default=0.002)
+    p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
 
@@ -67,11 +76,28 @@ def main() -> None:
         cochs.append(cochleagram(sig, sr, n_channels=cp["n_channels"],
                                  frame_rate=cp["frame_rate"], lo_hz=cp["lo_hz"],
                                  hi_hz=cp["hi_hz"]).astype(np.float64))
-    print(f"{len(cochs)} motifs, {sum(c.shape[1] for c in cochs)} frames; "
+    train, val = cochs, None
+    if a.train_corpus:
+        d = np.load(a.train_corpus, allow_pickle=False)
+        if int(d["sr"]) != sr:
+            raise ValueError(f"{a.train_corpus}: sr {int(d['sr'])} != motifs' {sr}")
+        train, val = [], []
+        for s0, n0, held in zip(d["starts"], d["lengths"], d["val"]):
+            x = d["audio"][s0:s0 + n0].astype(np.float64)
+            x = x / max(float(np.sqrt(np.mean(x ** 2))), 1e-12) * CAUSAL_RMS_REF
+            c = cochleagram(x, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
+                            lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
+            if c.shape[1] > a.l_frames:
+                (val if held else train).append(c)
+        print(f"training corpus {a.train_corpus}: {len(d['birds'])} birds, {len(train)} "
+              f"bouts ({sum(c.shape[1] for c in train)} frames), {len(val)} held out")
+    print(f"{len(cochs)} motifs, {sum(c.shape[1] for c in cochs)} frames (calibration); "
           f"training {a.k} STRFs x {cp['n_channels']} ch x {a.l_frames} frames")
-    V, b, mu, Dk = learn_relu(cochs, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
+    V, b, mu, Dk = learn_relu(train, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
                               reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
-                              l1_V=a.l1, smooth_V=a.smooth, tied=a.tied)
+                              l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
+                              patience=a.patience, min_delta=a.min_delta,
+                              log_every=a.log_every)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

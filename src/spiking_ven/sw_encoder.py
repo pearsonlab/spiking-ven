@@ -91,7 +91,9 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
 
 def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.1,
                reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
-               l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print):
+               l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
+               val_cochs=None, patience: int = 0, min_delta: float = 0.002,
+               log_every: int = 5, frame_ms: float = 2.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -111,7 +113,13 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     (default ``lr``: proximal gradient on MSE/2 + l1_V |V|_1 + smooth_V/2 |DV|^2). With no
     renormalisation, the causal encoder's step (10) wipes out every kernel.
     Returns ``(V, b, mu, D)`` with ``V`` (K, C, L) and ``D`` (K, C*L) (``D`` is ``V``
-    flattened when tied)."""
+    flattened when tied).
+
+    Monitoring: with ``val_cochs`` (held-out cochleagrams), every ``log_every`` epochs the
+    log reports the held-out unexplained variance and STRF compactness (share of kernel
+    energy at lags <= 20 ms, energy-weighted mean lag). With ``patience`` > 0, training
+    stops once the held-out error has not improved by ``min_delta`` for ``patience``
+    epochs, and the best epoch's weights are returned."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -123,6 +131,27 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     b = np.zeros(K)
     D = None if tied else V.reshape(K, C * L).copy()
+    lag_ms = (L - 1 - np.arange(L)) * frame_ms + frame_ms / 2     # oldest column first
+
+    def val_error(V, b, D):
+        W = V.reshape(K, C * L)
+        Dk = W if D is None else D
+        num = den = 0.0
+        for X in val_cochs or []:
+            P = _past_windows(X, L) - mu
+            R = P - np.maximum(P @ W.T + b, 0.0) @ Dk
+            num += float((R ** 2).sum())
+            den += float((P ** 2).sum())
+        return num / max(den, 1e-12)
+
+    def compactness(V):
+        e = (V ** 2).sum(axis=1)
+        e = e / np.maximum(e.sum(axis=1, keepdims=True), 1e-12)
+        return float(np.median(e[:, lag_ms <= 20].sum(axis=1))), \
+            float(np.median((e * lag_ms).sum(axis=1)))
+
+    best = (np.inf, V.copy(), b.copy(), None if D is None else D.copy(), -1)
+    stale = 0
     for ep in range(n_epochs):
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
@@ -152,11 +181,25 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             err += float(np.mean(R ** 2)) / float(np.mean(P ** 2))
             act += float(np.mean(S > 0))
             alive |= (S > 0).any(axis=0)
-        if ep % 5 == 0 or ep == n_epochs - 1:
-            log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance "
-                f"{err / len(cochs):.3f}  active {act / len(cochs):.1%}  "
+        ve = val_error(V, b, D) if val_cochs is not None else np.nan
+        if val_cochs is not None:
+            if ve < best[0] - min_delta:
+                best, stale = (ve, V.copy(), b.copy(), None if D is None else D.copy(), ep), 0
+            else:
+                stale += 1
+        stop = patience > 0 and stale >= patience
+        if ep % log_every == 0 or ep == n_epochs - 1 or stop:
+            near, mlag = compactness(V)
+            log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance train "
+                f"{err / len(cochs):.3f} held-out {ve:.3f}  active {act / len(cochs):.1%}  "
                 f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
-                f"mean |V_k| {float(np.linalg.norm(V.reshape(K, -1), axis=1).mean()):.3f}")
+                f"STRF energy <=20 ms {near:.0%}, mean lag {mlag:.0f} ms")
+        if stop:
+            log(f"  stopping: held-out error has not improved by {min_delta} for "
+                f"{patience} epochs; best epoch {best[4] + 1} ({best[0]:.3f})")
+            break
+    if val_cochs is not None and best[4] >= 0:
+        _, V, b, D, _ = best
     return V, b, mu, (V.reshape(K, C * L).copy() if D is None else D)
 
 

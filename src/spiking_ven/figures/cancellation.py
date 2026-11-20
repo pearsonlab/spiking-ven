@@ -76,9 +76,11 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs",
     if ven_before is not None:
         sE, sI = ven_before.transform_all(st["hvc_on"], st["aud_correct"],
                                           hvc_prelude=st.get("hvc_prelude"))
-        cols.append(_Column(title="Training song, before training", sig=st["sig_train"],
+        cols.append(_Column(title="Before training", sig=st["sig_train"],
                             aud=st["aud_correct"], sE=sE, sI=sI))
     for title, sig_key, aud_key in COLUMNS:
+        if ven_before is not None and aud_key == "aud_correct":
+            title = "After training"
         sE, sI = ven.transform_all(st["hvc_on"], st[aud_key],
                                    hvc_prelude=st.get("hvc_prelude"))
         cols.append(_Column(title=title, sig=st[sig_key], aud=st[aud_key], sE=sE, sI=sI))
@@ -211,8 +213,9 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs",
             ax_r.plot(np.arange(T_song),
                       gaussian_filter1d(np.asarray(r_x, dtype=float)[:T_song], 6.0),
                       color="0.15", lw=1.0, ls="--", label=lab)
-            ax_r.legend(fontsize=6, frameon=False, loc="upper left", ncols=2,
-                        handlelength=1.6, borderaxespad=0.1)
+            if ci == min(extra_rates):          # one legend, on the first such column
+                ax_r.legend(fontsize=6, frameon=False, loc="upper left", ncols=2,
+                            handlelength=1.6, borderaxespad=0.1)
         ax_r.set_xlim(0, T_song)
         ax_r.set_ylim(0, rate_ymax)
         ax_r.set_xlabel("Time (ms)", fontsize=9)

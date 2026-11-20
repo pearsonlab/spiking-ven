@@ -191,9 +191,9 @@ receive only excitatory input from the E pool, through sparse heterogeneous syna
 s.d. \qty{5.5}{\nano\siemens}), and inhibit E through fixed synapses ($J^{IE}$, connection
 probability 0.5, lognormal, mean \qty{6}{\nano\siemens}, s.d. \qty{3}{\nano\siemens}),
 holding the network in an E/I-balanced state. HVC-driven interneurons ($I^{HVC}$,
-$N_{IH}=1200$) receive HVC input and no input from E (Section D), and inhibit E through
+$N_{IH}=300$) receive HVC input and no input from E (Section D), and inhibit E through
 plastic synapses $W^{HE}$ (Section C). Each $I^{HVC}$ neuron contacts a random subset of
-$\approx 40$ E neurons (connection probability $2/30$). E receives a tonic current of
+$\approx 160$ E neurons (connection probability $4/15$), so each E neuron receives $\approx 80$ $I^{HVC}$ inputs. E receives a tonic current of
 \qty{2500}{\pA}. HVC does not project to $I^{bal}$ or to E.
 ```
 
@@ -291,9 +291,11 @@ Why, and what the experiments showed (round K):
   times within about 30 renditions.
 - Without homeostasis, most cells stayed silent and never learned.
 - A 2 Hz target left too few spikes per window. 8 Hz cancels best.
-- About 40 targets per I_HVC cell (not 10) are needed so that each E cell's inhibition covers
-  the whole motif.
-- Cancellation matches a hand-built single-window basis: flatness 52% vs 53%.
+- What matters is the number of $I^{HVC}$ inputs per E cell (about 80), so that each E cell's
+  inhibition covers the whole motif. With 1200 cells x 10 targets (20 inputs per E) it did
+  not. 1200 x 40 and 300 x 160 cancel equally well (flatness 52% vs 53% over renditions),
+  so the per-E timing lives mostly in the $W^{HE}$ weights.
+- Cancellation matches a hand-built single-window basis: flatness 53% vs 53%.
 
 ---
 
@@ -441,7 +443,7 @@ Add to *Model evaluation*:
 
 | Parameter | Value |
 |---|---|
-| $N_E$, $N_I$ ($I^{bal}$), $N_{IH}$ ($I^{HVC}$) | 600, 150, 1200 |
+| $N_E$, $N_I$ ($I^{bal}$), $N_{IH}$ ($I^{HVC}$) | 600, 150, 300 |
 | Tonic current to E | \qty{2500}{\pA} |
 | $J^{EI}$: probability, mean (s.d.) | 0.05, \qty{11}{\nano\siemens} (5.5) |
 | $J^{IE}$ ($I^{bal}\to$E, fixed): probability, mean (s.d.) | 0.5, \qty{6}{\nano\siemens} (3) |
@@ -451,7 +453,7 @@ Add to *Model evaluation*:
 | $E_{GABA}$, $\tau_{GABA}$, $\tau_{AMPA}$ | \qty{-70}{\mV}, \qty{15}{\ms}, \qty{3}{\ms} |
 | Auditory delay | \qty{2}{\ms} |
 | Vogels rule: $\eta$, $\tau_{STDP}$, target | \qty{3}{\nano\siemens}, \qty{20}{\ms}, own silent rate |
-| $I^{HVC}\to$E connection probability | 0.0667 ($\approx 40$ targets) |
+| $I^{HVC}\to$E connection probability | 0.267 ($\approx 160$ targets; $\approx 80$ inputs per E) |
 | HVC$\to I^{HVC}$: probability, $w_0$ | 0.9, \qty{0.9}{\nano\siemens} |
 | $\tau_h$, $\tau_e$, $\kappa$ | \qty{5}{\ms}, \qty{10}{\ms}, 0.02 |
 | $I^{HVC}$ target rate $r^*$, scaling gain $\gamma$ | \qty{8}{\Hz}, 0.02 |
@@ -470,7 +472,7 @@ Add to *Model evaluation*:
   This is within target, but could be tuned by scaling the Vogels targets.
 - **DAF peak latency.** 76-86 ms in recent models, against the 35-75 ms target.
 - **Biological plausibility to check:**
-  - 1200 $I^{HVC}$ cells firing about 8 Hz during song;
+  - 300 $I^{HVC}$ cells (E:I = 600:450) firing about 8-10 Hz during song;
   - \qty{400}{\nano\siemens} auditory synapses;
   - per-rendition loudness normalization;
   - the homeostatic scaling of HVC input.

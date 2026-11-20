@@ -1115,3 +1115,31 @@ modulation. The rendition-averaged PSTH looks flatter only because rendition-spe
 residuals average out (`outputs/cancellation_hvcplastic_aud{400,250}_rend5.png`, dashed
 line). Weaker auditory drive does not help. Remaining limit: per-rendition variability of
 the auditory input, which learned (average) inhibition cannot cancel.
+
+### DAF shape: the post-noise peak is a squared-normalization artefact
+
+- `scripts/daf_shape.py` (cached trials beside the model via `spiking_ven.sim_cache`):
+  baseline responders show a transient during the noise (about 20 ms) and a larger peak about
+  30 ms *after* noise offset (about 80 ms), then a small dip.
+- The E response follows the auditory drive exactly (`outputs/daf_drive_vs_response.png`):
+  the second peak is in the input, not network dynamics.
+- Encoder-only test (`outputs/daf_encoder_norm.png`): the raw higher-AC response to noise is
+  one hump peaking at about 45 ms. Squared normalization a/(1 + (S/sigma)^2) is non-monotone
+  above S = sigma, so it crushes the middle of the hump and leaves two shoulders (about 22
+  and 78 ms).
+- Linear normalization (monotone): one saturated plateau, about 15-90 ms, then a sharp drop
+  (`daf_shape_linnorm01.png`, `daf_shape_linnorm005.png`). Random onsets: xs 1.19 / 1.05,
+  responders 0.64 / 0.57 (sigma 0.1 / 0.05), too strong. The plateau outlasts the noise
+  because the 64 ms STRFs keep the noise in their window until about 114 ms. Schneider &
+  Woolley's STRFs (supplement Fig S6D) span 0-60 ms but put their energy in the first
+  ~15 ms; ours spread it (51% within 20 ms, mean lag 25 ms). Next: a stronger min-phase pull.
+- The DAF peak metric now takes the first prominent peak (`metrics.first_peak`, >= 25% of
+  the maximum), not the largest.
+
+### Fewer I_HVC cells (N_IH 300), now the baseline
+
+N_IH 300 with c_he 0.267 (about 160 targets each, about 80 I_HVC inputs per E, as before):
+flatness 53% over renditions (1200: 52%), cancelled vs not singing 107%, pooled singing /
+not singing 0.94 (median per cell 0.97). Same cancellation with a third of the interneurons
+(E:I 600:450) and about twice as fast. `configs/baseline.json` is updated; model
+`outputs/sweeps/rK_monitor/nih300.npz`.

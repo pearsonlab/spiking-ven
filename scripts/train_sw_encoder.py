@@ -66,6 +66,9 @@ def main() -> None:
     p.add_argument("--recon-tau-ms", type=float, default=None,
                    help="weight each lag's reconstruction error by exp(-lag/tau) "
                         "(default: uniform over the window)")
+    p.add_argument("--predict-next", action="store_true",
+                   help="objective: predict the next cochleagram frame from the code of the "
+                        "past window (instead of reconstructing the window)")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -104,11 +107,14 @@ def main() -> None:
                               patience=a.patience, min_delta=a.min_delta,
                               log_every=a.log_every,
                               smooth_axes=(1,) if a.smooth_freq_only else (1, 2),
-                              recon_tau_ms=a.recon_tau_ms)
+                              recon_tau_ms=a.recon_tau_ms, predict_next=a.predict_next)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)
     D, d0, scale = Dk.T.copy(), np.zeros_like(mu), 1.0
+    if a.predict_next:
+        # The decoder predicts the next frame, not the window: nothing to reconstruct with.
+        D, d0 = None, None
 
     # Units that never activate on the corpus are dropped (silent channels).
     R = np.concatenate([np.maximum(W @ ((unfold(X, a.l_frames) - mu) / scale) + b, 0.0)

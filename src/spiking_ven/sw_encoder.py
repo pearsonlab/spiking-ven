@@ -94,7 +94,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
                val_cochs=None, patience: int = 0, min_delta: float = 0.002,
                log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
-               recon_tau_ms: float | None = None):
+               recon_tau_ms: float | None = None, predict_next: bool = False):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -125,7 +125,11 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     (smoothing along lag favours long horizontal bands). ``recon_tau_ms`` weights each
     lag's reconstruction error by ``exp(-lag / recon_tau_ms)`` (1 at the newest frame):
     the code is then asked to describe the recent past, so STRF energy at long lags
-    survives only where it helps; reported errors are weighted the same way."""
+    survives only where it helps; reported errors are weighted the same way.
+    ``predict_next``: instead of reconstructing the window, the (untied) decoder predicts
+    the NEXT frame ``X[:, t]`` (centred by the corpus mean frame) from the code of the
+    strictly-past window; ``D`` is then (K, C). STRFs keep the history that predicts what
+    comes next."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -136,7 +140,19 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     b = np.zeros(K)
-    D = None if tied else V.reshape(K, C * L).copy()
+    if predict_next and tied:
+        raise ValueError("predict_next needs the untied decoder")
+    if predict_next:
+        mu_y = np.concatenate([X for X in cochs], axis=1).mean(axis=1)       # (C,)
+        D = rng.standard_normal((K, C))
+        D /= np.linalg.norm(D, axis=1, keepdims=True)
+    else:
+        mu_y = None
+        D = None if tied else V.reshape(K, C * L).copy()
+
+    def target(X, P):
+        """What the code must reproduce: the window, or the next frame."""
+        return (X.T - mu_y) if predict_next else P
     lag_ms = (L - 1 - np.arange(L)) * frame_ms + frame_ms / 2     # oldest column first
     # Reconstruction weight per window column (channel-major, lag inner): exp(-lag/tau),
     # 1 at the newest frame. Uniform without recon_tau_ms.
@@ -149,9 +165,11 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         num = den = 0.0
         for X in val_cochs or []:
             P = _past_windows(X, L) - mu
-            R = P - np.maximum(P @ W.T + b, 0.0) @ Dk
-            num += float((wcol * R ** 2).sum())
-            den += float((wcol * P ** 2).sum())
+            Y = target(X, P)
+            R = Y - np.maximum(P @ W.T + b, 0.0) @ Dk
+            w = 1.0 if predict_next else wcol
+            num += float((w * R ** 2).sum())
+            den += float((w * Y ** 2).sum())
         return num / max(den, 1e-12)
 
     def compactness(V):
@@ -171,8 +189,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             Z = P @ W.T + b
             S = np.maximum(Z, 0.0)                             # (T, K)
             Dk = W if D is None else D
-            R = P - S @ Dk                                     # residual
-            Rw = R * wcol                                      # lag-weighted residual
+            Y = target(X, P)
+            R = Y - S @ Dk                                     # residual
+            Rw = R if predict_next else R * wcol               # lag-weighted residual
             gZ = (Rw @ Dk.T) * (Z > 0)                         # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             n = max(T, 1)
@@ -189,7 +208,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
-            err += float(np.mean(wcol * R ** 2)) / float(np.mean(wcol * P ** 2))
+            w = 1.0 if predict_next else wcol
+            err += float(np.mean(w * R ** 2)) / float(np.mean(w * Y ** 2))
             act += float(np.mean(S > 0))
             alive |= (S > 0).any(axis=0)
         ve = val_error(V, b, D) if val_cochs is not None else np.nan

@@ -56,9 +56,12 @@ def main() -> None:
         recent = float(np.median(e_lag[:, lag_ms <= 20].sum(axis=1)))
         mean_lag = float(np.median((e_lag * lag_ms).sum(axis=1)))
         X = enc.cochleagram(sig, sr=sr)
-        R = enc.reconstruct(X)
-        Xp = np.concatenate([np.zeros((C, 1)), X[:, :-1]], axis=1)
-        ve = 1 - ((R - Xp)[:, L:] ** 2).sum() / ((Xp - Xp.mean())[:, L:] ** 2).sum()
+        if enc.D is None:            # e.g. a next-frame prediction model: no reconstruction
+            ve = float("nan")
+        else:
+            R = enc.reconstruct(X)
+            Xp = np.concatenate([np.zeros((C, 1)), X[:, :-1]], axis=1)
+            ve = 1 - ((R - Xp)[:, L:] ** 2).sum() / ((Xp - Xp.mean())[:, L:] ** 2).sum()
         acts = enc.encode_signal(daf, sr=sr, rms_from=sig, T_out_ms=ON + 300, seed=42)
         pop = gaussian_filter1d(acts.sum(axis=0).astype(float), 2)
         seg = pop[ON - 100:ON + 250]

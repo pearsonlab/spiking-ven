@@ -986,3 +986,19 @@ trace) adds potentiation in proportion to I/E correlation, and song-locked I_HVC
 makes that correlation positive -- the louder the song, the larger the undershoot. Without
 the post term, the fixed point is exactly the target rate while each I_HVC cell fires.
 New option `vogels_post` (scale of the post term; 1 = Vogels). Round I tests 0 and 0.5.
+
+**Round I (post-term scale; confirmed).** n_ih 1200, constant target unless stated:
+
+| config | flatness | vs not singing | pooled sing/not | cells higher singing | rev/tr | song-excess rev/tr | DAF xs / resp |
+|---|---|---|---|---|---|---|---|
+| post 1, rms/rendition (H) | 57% | 114% | 0.86 | 32% | 1.41 | 2.65 | 0.86 / 0.50 |
+| **post 0.5, rms/rendition** | 51% | 97% | **1.03** | 59% | 1.31 | 2.31 | 0.86 / 0.48 |
+| post 0, rms/rendition | 45% | 82% | 1.17 | 80% | 1.22 | 1.92 | 0.82 / 0.46 |
+| post 0 + lam 1, tau_slow 1000 | 28% | 48% | 1.50 | 93% | 1.10 | 1.37 | 0.97 / 0.47 |
+| post 0, template rms | 34% | 65% | 1.12 | 70% | 1.15 | 1.56 | 0.92 / 0.42 |
+
+The post term sets the singing/not-singing offset, as predicted. Post 0.5 puts the pooled
+scatter on target (1.03x; 59% of cells slightly higher singing, as Mandelblat-Cerf report)
+while keeping flatness above the causal-encoder V2 (51% vs 44%) and DAF on target. Model:
+`outputs/sweeps/rI_post/489a1654a4.npz` (stimuli: `--aud-norm 0.3 --aud-norm-power 2
+--rms-per-rendition`).

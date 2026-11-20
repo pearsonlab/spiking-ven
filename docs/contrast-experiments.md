@@ -971,3 +971,18 @@ much less BS activity. Training cycles all 38, so one HVC-locked inhibition patt
 between them: the template lands at the silent rate, the average rendition ~1 Hz below.
 Candidate fixes: normalise each rendition by its own rms (auditory gain control), or a
 median-loudness template; either needs a retrain.
+
+**Round H (each training rendition at its own rms; `--rms-per-rendition`).** n_ih 1200:
+
+| target | flatness | vs not singing | aligned / silent Hz | pooled sing/not | rev/tr | song-excess rev/tr | DAF xs / resp |
+|---|---|---|---|---|---|---|---|
+| lam 1, tau_slow 1000 | 61% | 123% | 4.56 / 5.86 | 0.78 | 1.48 | 3.09 | 0.81 / 0.57 |
+| constant | 57% | 114% | 5.10 / 5.86 | 0.86 | 1.41 | 2.65 | 0.86 / 0.50 |
+
+Louder training renditions -> more inhibition learned: best flatness and contrast yet, but
+the singing mean falls further below silent, pooled too. So the rule itself undershoots
+its target. Likely cause: the Vogels post term (potentiation at each E spike by the I
+trace) adds potentiation in proportion to I/E correlation, and song-locked I_HVC firing
+makes that correlation positive -- the louder the song, the larger the undershoot. Without
+the post term, the fixed point is exactly the target rate while each I_HVC cell fires.
+New option `vogels_post` (scale of the post term; 1 = Vogels). Round I tests 0 and 0.5.

@@ -130,6 +130,35 @@ VOGELS_ON_PRE_GATED = ("g_gaba_post += w; "
                        f"w = clip(w + eta * gate_post * (x_e_post - {_TARGET}), 0*nS, inf*nS)")
 VOGELS_ON_POST_GATED = "w = clip(w + post_gain * eta * gate_post * x_stdp_pre, 0*nS, inf*nS)"
 
+#: The same rule, also adding each weight change into the presynaptic I_HVC cell's
+#: ``credit`` -- the signal that trains that cell's HVC inputs (``HVC_ELIG_*``).
+VOGELS_ON_PRE_CREDIT = (
+    "g_gaba_post += w; "
+    f"w_new = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS); "
+    "credit_pre += w_new - w; w = w_new")
+VOGELS_ON_POST_CREDIT = (
+    "w_new = clip(w + post_gain * eta * x_stdp_pre, 0*nS, inf*nS); "
+    "credit_pre += w_new - w; w = w_new")
+
+#: Plastic HVC -> I_HVC synapses with an eligibility trace (pre-before-post): ``x_h`` is
+#: the synapse's HVC spike trace (``tau_hpre``); at each I_HVC spike the eligibility ``elig``
+#: grows by it, then decays with ``tau_elig``. Every ``dt_credit`` the weight moves by
+#: ``kappa`` times the eligibility times the cell's ``credit`` (the summed I_HVC -> E
+#: Vogels change since the last update): inputs that drove the cell's spikes at the times
+#: its outgoing inhibition was strengthened grow; when it was weakened, they shrink.
+#: Between renditions every cell's weights relax toward the uniform start and are rescaled
+#: to a fixed total (``VocalErrorNet``), so growth on some inputs is paid by the others.
+HVC_ELIG_MODEL = """
+w : siemens
+dx_h/dt = -x_h / tau_hpre : 1 (event-driven)
+delig/dt = -elig / tau_elig : 1 (event-driven)
+kappa : 1 (shared)
+"""
+HVC_ELIG_ON_PRE = "g_ampa_post += w; x_h += 1"
+HVC_ELIG_ON_POST = "elig += x_h"
+HVC_ELIG_UPDATE = ("w = clip(w + kappa * elig * exp(-(t - lastupdate) / tau_elig) * credit_post, "
+                   "0*nS, inf*nS)")
+
 
 # ---------------------------------------------------------------------------
 # Builders
@@ -214,19 +243,37 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     # a sparse temporal basis whose plastic synapses onto E learn the cancellation. Same
     # membrane and STDP rule as I; its own baseline ``theta_h``.
     if weights.get("B_H") is not None and weights["B_H"].shape[0] > 0:
-        IH = NeuronGroup(weights["B_H"].shape[0], I_EQS, threshold="v > V_th",
+        hvc_plastic = bool(shared.get("hvc_plastic", False))
+        ih_eqs = I_EQS + ("credit : siemens\n" if hvc_plastic else "")
+        IH = NeuronGroup(weights["B_H"].shape[0], ih_eqs, threshold="v > V_th",
                          reset=f"{reset_v}; x_stdp += 1", refractory="t_ref",
                          method="exponential_euler", namespace={**shared, **ns["IH"]},
                          dt=dt, name="IH")
         IH.v = shared["E_L"]
-        hvc_ih = Synapses(hvc, IH, "w : siemens", on_pre="g_ampa_post += w",
-                          delay=hvc_delay, dt=dt, name="hvc_ih")
-        _connect(hvc_ih, weights["B_H"])
+        if hvc_plastic:
+            hvc_ih = Synapses(hvc, IH, HVC_ELIG_MODEL, on_pre=HVC_ELIG_ON_PRE,
+                              on_post=HVC_ELIG_ON_POST, namespace=shared, delay=hvc_delay,
+                              dt=dt, name="hvc_ih")
+            _connect(hvc_ih, weights["B_H"], mask=weights["M_HH"])
+            # Weight update, then the credit is cleared (same slot, in that order).
+            hvc_ih.run_regularly(HVC_ELIG_UPDATE, dt=shared["dt_credit"], when="end",
+                                 order=0, name="hvc_ih_update")
+            IH.run_regularly("credit = 0*nS", dt=shared["dt_credit"], when="end", order=1,
+                             name="ih_credit_reset")
+        else:
+            hvc_ih = Synapses(hvc, IH, "w : siemens", on_pre="g_ampa_post += w",
+                              delay=hvc_delay, dt=dt, name="hvc_ih")
+            _connect(hvc_ih, weights["B_H"])
         if shared.get("vogels_h", False):
             gated = shared.get("vogels_gate", False)
+            if hvc_plastic:
+                on_pre, on_post = VOGELS_ON_PRE_CREDIT, VOGELS_ON_POST_CREDIT
+            elif gated:
+                on_pre, on_post = VOGELS_ON_PRE_GATED, VOGELS_ON_POST_GATED
+            else:
+                on_pre, on_post = VOGELS_ON_PRE, VOGELS_ON_POST
             ih_e = Synapses(IH, E, "w : siemens\neta : siemens (shared)",
-                            on_pre=VOGELS_ON_PRE_GATED if gated else VOGELS_ON_PRE,
-                            on_post=VOGELS_ON_POST_GATED if gated else VOGELS_ON_POST,
+                            on_pre=on_pre, on_post=on_post,
                             namespace=shared, dt=dt, name="ih_e")
         else:
             ih_e = Synapses(IH, E,

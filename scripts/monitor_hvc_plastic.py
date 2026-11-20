@@ -74,7 +74,8 @@ def main() -> None:
                                           axis=1), axis=1)
     ex = np.random.default_rng(0).choice(ven.n_ih, a.n_example, replace=False)
     trace: dict[str, list] = {"rend": [], "eff_inputs": [], "top_frac": [], "ih_rate": [],
-                              "example_rows": [], "e_sing": [], "e_rev": [], "e_quiet": []}
+                              "example_rows": [], "e_sing": [], "e_rev": [], "e_quiet": [],
+                              "i_h": []}
     trace_path = a.out.replace(".npz", "_trace.npz")
     print(f"config: {cfg}", flush=True)
     print(" rend   eff.inputs(med/min)  maxw   IHVC Hz  silent  win/cell  J_HE   "
@@ -92,6 +93,8 @@ def main() -> None:
                                 hvc_prelude=pre)[:, :T].mean() * 1000
             quiet = ven.transform(st["hvc_off"], np.zeros_like(st["aud_correct"]),
                                   rng=rng)[:, 20:T].mean() * 1000
+            ih_quiet = float(np.asarray(ven.last_ih)[:, 20:T].mean() * 1000)
+            i_h = np.asarray(ven.I_H, dtype=float)
             w = windows(ih)
             trace["rend"].append(r)
             trace["eff_inputs"].append(pr)
@@ -101,13 +104,16 @@ def main() -> None:
             trace["e_sing"].append(sing)
             trace["e_rev"].append(rev)
             trace["e_quiet"].append(quiet)
+            trace["i_h"].append(i_h)
             np.savez(trace_path, burst_t=burst_t, example=ex, M_HH=M,
                      **{k: np.asarray(v) for k, v in trace.items()})
             jhe = float(ven.J_HE[ven.M_HE].mean())
             dt = (time.time() - t0) / max(r, 1)
             print(f"{r:5d}   {np.median(pr):7.1f} / {pr.min():6.1f}   {B.max():5.1f}  "
                   f"{rate.mean():6.2f}  {np.mean(rate == 0):5.0%}  {np.median(w):6.0f}"
-                  f"    {jhe:5.2f}  {sing:6.2f}  {rev:5.2f}  {quiet:6.2f}     {dt:5.1f}",
+                  f"    {jhe:5.2f}  {sing:6.2f}  {rev:5.2f}  {quiet:6.2f}     {dt:5.1f}"
+                  f"   IHVC silent {ih_quiet:.2f} Hz, I_h {i_h.mean():+.1f} pA "
+                  f"[{i_h.min():+.0f}, {i_h.max():+.0f}]",
                   flush=True)
             if not np.isfinite(B).all() or rate.mean() > 100:
                 print("diverging; stopping", flush=True)

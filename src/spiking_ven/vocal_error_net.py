@@ -48,13 +48,14 @@ _FLOAT_KEYS = (
     "c_hvc_h", "hvc_h_mean_ns", "hvc_h_sd_ns", "rho_h_ns", "r_ih_hz", "i_drive_ih_pa",
     "vogels_h", "eta_h_ns", "vogels_gate", "lam_loc", "tau_loc_ms", "tau_slow_ms",
     "vogels_post", "c_he", "hvc_plastic", "kappa_h", "tau_elig_ms", "tau_hpre_ms",
-    "h_relax",
+    "h_relax", "beta_maint", "ih_rate_hz", "ih_homeo_pa", "ih_homeo_max_pa",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
 _INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "n_ih")
-_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE", "M_HH", "R_TARGET")
+_ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE", "M_HH", "I_H",
+               "R_TARGET")
 
 
 class VocalErrorNet:
@@ -117,6 +118,12 @@ class VocalErrorNet:
                    rescaled to the starting total, so some inputs grow at others' expense.
                    Starts from ``hvc_h_mean_ns`` on the ``c_hvc_h`` pairs (set
                    ``hvc_h_sd_ns`` 0 for uniform).
+    beta_maint   : with plastic HVC input, each E spike also credits the I_HVC cell
+                   ``beta_maint`` times the synapse's weight (maintenance of used timing)
+    ih_rate_hz, ih_homeo_pa, ih_homeo_max_pa : I_HVC homeostatic excitability (plastic
+                   HVC input only): after each training rendition each cell's tonic
+                   current ``I_H`` moves ``ih_homeo_pa`` pA per Hz of (``ih_rate_hz`` minus
+                   its rate over the rendition), clipped to +-``ih_homeo_max_pa``
     tau_slow_ms  : > 0 measures that local term against the cell's rate over this longer
                    time instead of ``R_TARGET``: target ``R_TARGET + lam_loc (r_loc -
                    r_slow)``, flattening fast fluctuations with the mean anchored
@@ -212,7 +219,12 @@ class VocalErrorNet:
     tau_elig_ms: float
     tau_hpre_ms: float
     h_relax: float
+    beta_maint: float
+    ih_rate_hz: float
+    ih_homeo_pa: float
+    ih_homeo_max_pa: float
     M_HH: np.ndarray
+    I_H: np.ndarray
     R_TARGET: np.ndarray
     c_ie: float
     ie_init_mean_ns: float
@@ -278,6 +290,10 @@ class VocalErrorNet:
         tau_elig_ms: float = 10.0,
         tau_hpre_ms: float = 5.0,
         h_relax: float = 0.0,
+        beta_maint: float = 0.0,
+        ih_rate_hz: float = 2.0,
+        ih_homeo_pa: float = 0.0,
+        ih_homeo_max_pa: float = 50.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -350,6 +366,8 @@ class VocalErrorNet:
             self.M_HE = rng.random((n_e, self.n_ih)) < c_he
         #: HVC -> I_HVC connectivity (fixed even when the weights are plastic).
         self.M_HH = np.asarray(self.B_H) > 0
+        #: Per-cell homeostatic tonic current on I_HVC (pA).
+        self.I_H = np.zeros(self.n_ih, dtype=np.float32)
         self.R_TARGET = np.zeros(n_e, dtype=np.float32)
         self.last_ih = None
         self._built = None
@@ -408,7 +426,7 @@ class VocalErrorNet:
             "post_gain": float(self.vogels_post),
             "hvc_plastic": bool(self.hvc_plastic),
             "tau_elig": self.tau_elig_ms * ms, "tau_hpre": self.tau_hpre_ms * ms,
-            "dt_credit": 1.0 * ms,
+            "dt_credit": 1.0 * ms, "beta_maint": float(self.beta_maint),
             "tau_slow": (self.tau_slow_ms if self.tau_slow_ms > 0 else 1000.0) * ms,
             "E": {"C": self.c_e_pf * pF, "g_L": self.g_l_e * nS,
                   "I_tonic": self.i_drive_e_pa * pA, "sigma": self.noise_e * pA * sqrt_ms,
@@ -525,8 +543,9 @@ class VocalErrorNet:
                     "tau_loc_ms": 100.0, "tau_slow_ms": 0.0,
                     "vogels_post": 1.0, "c_he": 1.0, "hvc_plastic": 0.0,
                     "kappa_h": 0.0, "tau_elig_ms": 10.0, "tau_hpre_ms": 5.0,
-                    "h_relax": 0.0}   # the constructor's defaults
-        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "M_HH", "R_TARGET")
+                    "h_relax": 0.0, "beta_maint": 0.0, "ih_rate_hz": 2.0,
+                    "ih_homeo_pa": 0.0, "ih_homeo_max_pa": 50.0}   # the constructor's defaults
+        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "M_HH", "I_H", "R_TARGET")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults and k not in optional_arrays]
         if missing:
@@ -551,6 +570,8 @@ class VocalErrorNet:
                 obj.B_H = np.zeros((0, int(d["n_hvc"])), dtype=np.float32)
             elif k == "M_HH":                        # B_H is loaded before it
                 obj.M_HH = np.asarray(obj.B_H) > 0
+            elif k == "I_H":
+                obj.I_H = np.zeros(np.asarray(obj.B_H).shape[0], dtype=np.float32)
             else:                                    # J_HE, M_HE: no I_HVC
                 obj.J_HE = np.zeros((int(d["n_e"]), 0), dtype=np.float32)
                 obj.M_HE = np.ones((int(d["n_e"]), 0), dtype=bool)
@@ -599,7 +620,7 @@ class VocalErrorNet:
 
     def _sim(self, hvc_spikes, aud_spikes, learn: bool = False,
              rng: np.random.Generator | None = None, hvc_prelude=None):
-        from brian2 import Hz, ms, nS, seed as brian_seed
+        from brian2 import Hz, ms, nS, pA, seed as brian_seed
         from .network import bin_spikes, spike_events
 
         n_pre = 0 if hvc_prelude is None else int(np.asarray(hvc_prelude).shape[1])
@@ -639,6 +660,7 @@ class VocalErrorNet:
             hvc_ih.w[:] = np.asarray(self.B_H, dtype=np.float64)[np.asarray(hvc_ih.j),
                                                                  np.asarray(hvc_ih.i)] * nS
             hvc_ih.kappa = self.kappa_h if learn else 0.0
+            o["IH"].I_h = np.asarray(self.I_H, dtype=np.float64) * pA
         brian_seed(int((self._sim_rng if rng is None else rng).integers(2**31)))
         o["net"].run(T * ms)
 
@@ -657,6 +679,12 @@ class VocalErrorNet:
                 self.J_HE = H
             if hvc_ih is not None:
                 self.B_H = self._renormalise_hvc_h(hvc_ih)
+                if self.ih_homeo_pa > 0:
+                    ih = bin_spikes(o["mon_ih"], self.n_ih, T)[:, n_pre:]
+                    rate = ih.sum(axis=1) / (ih.shape[1] / 1000.0)
+                    self.I_H = np.clip(
+                        self.I_H + self.ih_homeo_pa * (self.ih_rate_hz - rate),
+                        -self.ih_homeo_max_pa, self.ih_homeo_max_pa).astype(np.float32)
         #: I_HVC spikes of the last run (after any prelude), or None without I_HVC.
         self.last_ih = (bin_spikes(o["mon_ih"], self.n_ih, T)[:, n_pre:]
                         if "mon_ih" in o else None)

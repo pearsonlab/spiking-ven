@@ -136,9 +136,13 @@ VOGELS_ON_PRE_CREDIT = (
     "g_gaba_post += w; "
     f"w_new = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS); "
     "credit_pre += w_new - w; w = w_new")
+#: At each E spike the I_HVC cell is also credited ``beta_maint`` times the synapse's
+#: weight: inhibition that is in use (strong, onto a cell that is firing) keeps crediting
+#: the HVC inputs that timed it, so learned timing survives once the Vogels change has
+#: settled to zero.
 VOGELS_ON_POST_CREDIT = (
     "w_new = clip(w + post_gain * eta * x_stdp_pre, 0*nS, inf*nS); "
-    "credit_pre += w_new - w; w = w_new")
+    "credit_pre += w_new - w + beta_maint * w; w = w_new")
 
 #: Plastic HVC -> I_HVC synapses with an eligibility trace (pre-before-post): ``x_h`` is
 #: the synapse's HVC spike trace (``tau_hpre``); at each I_HVC spike the eligibility ``elig``
@@ -244,7 +248,10 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     # membrane and STDP rule as I; its own baseline ``theta_h``.
     if weights.get("B_H") is not None and weights["B_H"].shape[0] > 0:
         hvc_plastic = bool(shared.get("hvc_plastic", False))
-        ih_eqs = I_EQS + ("credit : siemens\n" if hvc_plastic else "")
+        # With plastic HVC input, each I_HVC cell also has its own homeostatic tonic
+        # current ``I_h`` (set between renditions by ``VocalErrorNet``).
+        ih_eqs = (I_EQS.replace("+ I_tonic +", "+ I_tonic + I_h +")
+                  + "credit : siemens\nI_h : amp\n") if hvc_plastic else I_EQS
         IH = NeuronGroup(weights["B_H"].shape[0], ih_eqs, threshold="v > V_th",
                          reset=f"{reset_v}; x_stdp += 1", refractory="t_ref",
                          method="exponential_euler", namespace={**shared, **ns["IH"]},

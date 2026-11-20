@@ -23,6 +23,7 @@ from .targets import BIOLOGICAL_TARGETS, PEAK_BIN_MS
 
 __all__ = [
     "daf_inputs",
+    "first_peak",
     "daf_trials",
     "daf_responders",
     "daf_response",
@@ -124,6 +125,29 @@ def daf_responders(trials, *, onset_ms: int, window_ms: int = 150, alpha: float 
     return (pval < alpha) & (tval > 0), pre, post
 
 
+def first_peak(x: np.ndarray, *, frac: float = 0.25, smooth: float = 1.0) -> int:
+    """Index of the first prominent peak of ``x``: the first local maximum (after light
+    Gaussian smoothing, ``smooth`` samples) reaching ``frac`` of the global maximum.
+
+    The paper's DAF response is a fast rise and decay, so its peak is the first one; a
+    later, larger hump (e.g. an offset response of the front end) must not be taken
+    for it. With a single hump this is simply its maximum. ``x`` is a baseline-subtracted
+    trace; returns ``argmax`` when no sample is positive.
+    """
+    from scipy.ndimage import gaussian_filter1d
+
+    y = gaussian_filter1d(np.asarray(x, dtype=np.float64), smooth) if smooth > 0 else x
+    top = float(np.max(y))
+    if top <= 0:
+        return int(np.argmax(y))
+    for i in range(len(y)):
+        left = y[i - 1] if i > 0 else -np.inf
+        right = y[i + 1] if i + 1 < len(y) else -np.inf
+        if y[i] >= frac * top and y[i] >= left and y[i] >= right:
+            return i
+    return int(np.argmax(y))
+
+
 def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window_ms: int = 150,
                  alpha: float = 0.02, seed: int = 42,
                  duration_window_ms: int = 300, inputs: np.ndarray | None = None,
@@ -172,7 +196,11 @@ def daf_response(ven, encoder, st: dict, *, n_trials: int = DAF_N_TRIALS, window
         nb = (2 * W) // PEAK_BIN_MS
         mb = mp[:nb * PEAK_BIN_MS].reshape(nb, PEAK_BIN_MS).mean(axis=1)
         base = float(mb[:nb // 2].mean())
-        return float(mb.max() - base), int(np.argmax(mb) * PEAK_BIN_MS - W)
+        # Magnitude: the largest excursion, so a response with a second, larger hump is not
+        # passed off as a clean transient. Latency: the FIRST prominent peak (see
+        # first_peak), the paper's fast response, not a later hump.
+        k = nb // 2 + first_peak(mb[nb // 2:] - base)
+        return float(mb.max() - base), int(k * PEAK_BIN_MS - W)
 
     peak_resp, lat_resp = _peak(resp)
 

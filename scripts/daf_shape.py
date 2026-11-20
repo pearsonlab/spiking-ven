@@ -29,7 +29,8 @@ import numpy as np  # noqa: E402
 from scipy.ndimage import gaussian_filter1d  # noqa: E402
 
 from spiking_ven.causal_filters import CausalFilterEncoder  # noqa: E402
-from spiking_ven.metrics import daf_inputs, daf_onsets, daf_responders, daf_trials  # noqa: E402
+from spiking_ven.metrics import (daf_inputs, daf_onsets, daf_responders, daf_trials,  # noqa: E402
+                                 first_peak)
 from spiking_ven.sim_cache import cached_arrays  # noqa: E402
 from spiking_ven.stimuli import daf_window_ms  # noqa: E402
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
@@ -62,10 +63,17 @@ def panel(ax, ax_h, t, r, nr, allc, per_trial, resp, burst_ms, title):
         se = sm(r.std(0) / np.sqrt(len(r)))
         ax.fill_between(t, m - se, m + se, color=C_R, alpha=0.2, lw=0)
         ax.plot(t, m, color=C_R, lw=1.6, label=f"responders (n={len(r)})")
-        k = int(np.argmax(m[PRE:])) + PRE
-        ax.annotate(f"peak +{m[k]:.0f} Hz at {t[k]} ms", (t[k], m[k]),
+        # Latency from the first prominent peak; magnitude from the largest. When they
+        # differ the response has more than one hump, and both are marked.
+        k = first_peak(m[PRE:], smooth=0) + PRE
+        g = int(np.argmax(m[PRE:])) + PRE
+        ax.annotate(f"first peak +{m[k]:.0f} Hz at {t[k]} ms", (t[k], m[k]),
                     xytext=(t[k] + 25, m[k]), fontsize=7, color=C_R,
                     arrowprops=dict(arrowstyle="-", color=C_R, lw=0.6))
+        if abs(t[g] - t[k]) > 5:
+            ax.annotate(f"max +{m[g]:.0f} Hz at {t[g]} ms", (t[g], m[g]),
+                        xytext=(t[g] + 25, m[g] + 1.5), fontsize=7, color=C_R,
+                        arrowprops=dict(arrowstyle="-", color=C_R, lw=0.6))
         post_m = m[PRE + burst_ms:]
         j = int(np.argmin(post_m)) + PRE + burst_ms
         ax.annotate(f"dip {m[j]:+.1f} Hz at {t[j]} ms", (t[j], m[j]),

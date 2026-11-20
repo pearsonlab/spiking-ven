@@ -177,7 +177,8 @@ class SWEncoder:
     kind = "sw"
 
     def __init__(self, W, b, scale, coch_params, *, primary_gain, dog=None,
-                 threshold=0.0, keep=None, D=None, d0=None, mu=None):
+                 threshold=0.0, keep=None, D=None, d0=None, mu=None,
+                 primary_noise=True):
         self.W = np.asarray(W, dtype=np.float64)
         #: Mean window subtracted before the STRFs (the autoencoder's centring).
         self.mu = (np.zeros((self.W.shape[1], 1)) if mu is None
@@ -192,6 +193,9 @@ class SWEncoder:
         self.keep = (np.arange(self.W.shape[0]) if keep is None
                      else np.asarray(keep, dtype=int))
         self.lam = 0.0                                    # dense code (interface parity)
+        #: False feeds the DoG the primary units' expected spike trains (noise-free), a
+        #: diagnostic for how much higher-AC variability is primary Poisson noise.
+        self.primary_noise = bool(primary_noise)
         #: The autoencoder's decoder (for diagnostics: reconstructions), if saved.
         self.D = None if D is None else np.asarray(D, dtype=np.float64)
         self.d0 = None if d0 is None else np.asarray(d0, dtype=np.float64).reshape(-1, 1)
@@ -235,6 +239,8 @@ class SWEncoder:
         """Poisson primary spike trains at 1 ms (at most one per bin)."""
         ms = 1000 // int(self.coch_params["frame_rate"])
         lam = np.repeat(rate_frames, ms, axis=1) / 1000.0
+        if not self.primary_noise:
+            return 1.0 - np.exp(-lam)                       # P(spike in bin)
         return (np.random.default_rng(seed).poisson(lam) > 0).astype(np.float64)
 
     def higher_drive(self, spikes) -> np.ndarray:
@@ -269,7 +275,7 @@ class SWEncoder:
     def save(self, path):
         np.savez(path, kind=np.array("sw"), W=self.W, b=self.b, scale=self.scale,
                  primary_gain=self.primary_gain, threshold=self.threshold, keep=self.keep,
-                 mu=self.mu, **({} if self.D is None else {"D": self.D, "d0": self.d0}),
+                 mu=self.mu, primary_noise=self.primary_noise, **({} if self.D is None else {"D": self.D, "d0": self.d0}),
                  **{f"dog_{k}": v for k, v in self.dog.items()},
                  **{f"cp_{k}": v for k, v in self.coch_params.items()})
 
@@ -282,4 +288,5 @@ class SWEncoder:
         return cls(d["W"], d["b"], float(d["scale"]), cp, primary_gain=float(d["primary_gain"]),
                    dog=dog, threshold=float(d["threshold"]), keep=d["keep"],
                    D=d["D"] if "D" in d else None, d0=d["d0"] if "d0" in d else None,
-                   mu=d["mu"] if "mu" in d else None)
+                   mu=d["mu"] if "mu" in d else None,
+                   primary_noise=bool(d["primary_noise"]) if "primary_noise" in d else True)

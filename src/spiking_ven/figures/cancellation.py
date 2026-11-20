@@ -9,7 +9,7 @@ figure draws exactly the spikes the metrics score.
 
 Public API
 ----------
-make_figure(ven, st, out_tag="", *, out_dir="outputs", extra_rates=None)
+make_figure(ven, st, out_tag="", *, out_dir="outputs", extra_rates=None, ven_before=None)
 
 Saves ``cancellation{out_tag}.png`` and ``.pdf`` in ``out_dir``.
 """
@@ -58,7 +58,7 @@ def specgram(sig, n_samples, sr):
 
 def make_figure(ven, st, out_tag="", *, out_dir="outputs",
                 extra_rates: dict[int, tuple[np.ndarray, str]] | None = None,
-                shown_label: str = "shown rendition"):
+                shown_label: str = "shown rendition", ven_before=None):
     """Run the network on each column's stimulus and save the figure.
 
     ``ven`` is a VocalErrorNet; ``st`` is ``stimuli.build_stimuli``'s output. The
@@ -66,11 +66,18 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs",
     own inference pass. ``extra_rates`` maps a column index to ``(rate, label)``: a second
     E population rate (Hz per ms bin, e.g. averaged over renditions) drawn on that
     column's bottom row, with a legend (``shown_label`` names the column's own trace).
+    ``ven_before``: the same network before training; adds a first column with the
+    training song through it (``extra_rates`` indices count that column).
     """
     extra_rates = extra_rates or {}
     os.makedirs(str(out_dir), exist_ok=True)
     T_song, sr = st["T_song"], st["sr"]
     cols: list[_Column] = []
+    if ven_before is not None:
+        sE, sI = ven_before.transform_all(st["hvc_on"], st["aud_correct"],
+                                          hvc_prelude=st.get("hvc_prelude"))
+        cols.append(_Column(title="Training song, before training", sig=st["sig_train"],
+                            aud=st["aud_correct"], sE=sE, sI=sI))
     for title, sig_key, aud_key in COLUMNS:
         sE, sI = ven.transform_all(st["hvc_on"], st[aud_key],
                                    hvc_prelude=st.get("hvc_prelude"))

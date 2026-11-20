@@ -81,9 +81,17 @@ def main() -> None:
         ex["no HVC"] = r["no HVC"][sk].mean() - base_s
         canc = 1 - ex["aligned"] / ex["no HVC"]
         timed = 1 - ex["aligned"] / ex["shifted"]
+        # Against the not-singing baseline (Mandelblat-Cerf's comparison): the HVC-only
+        # run carries the learned inhibition with nothing to cancel, so it sits below the
+        # target and inflates the residual above.
+        canc_s = 1 - (r["aligned"][sk].mean() - base_s) / ex["no HVC"]
+        # Temporal flatness: how much of the song-locked modulation is removed.
+        flat = 1 - r["aligned"][sk].std() / r["no HVC"][sk].std()
         line = (f"{lab}: excess Hz aligned {ex['aligned']:.2f}, shifted {ex['shifted']:.2f}, "
                 f"no HVC {ex['no HVC']:.2f}, reversed {ex['reversed']:.2f}; "
-                f"cancelled {canc:.0%}, timed {timed:.0%}")
+                f"cancelled {canc:.0%}, timed {timed:.0%}; vs not singing: cancelled "
+                f"{canc_s:.0%} (silent {base_s:.2f} Hz, HVC only {base_h:.2f}, aligned "
+                f"{r['aligned'][sk].mean():.2f}); flatness {flat:.0%}")
         print(line, flush=True)
         for k in ("no HVC", "shifted", "reversed", "aligned", "HVC only"):
             ax.plot(gaussian_filter1d(r[k], 3), color=COLORS[k], lw=1.6 if k == "aligned"

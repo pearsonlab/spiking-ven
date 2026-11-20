@@ -908,3 +908,30 @@ each E cell has ~6 auditory synapses at 400 nS, so each (Poisson) BS spike is a 
 that the E cell relays almost one for one; learned inhibition can follow only the mean
 timing, so cancelling a peak needs a veto-strength shunt that over-inhibits. Round F
 spreads the same drive over more, weaker synapses.
+
+**Round F (more, weaker auditory synapses; refuted).** n_ih 1200, eta 3: c_aud 0.1 / aud
+200 nS and c_aud 0.2 / aud 100 nS, constant target and lam 1 / tau_slow 500. Cancelled
+35-46%, rev/tr 1.07-1.16, DAF xs 0.56-0.74: worse on every count. But the aligned residual
+stays ~2.2 Hz whatever the song response (3.3-5.6 Hz) -- a metric artefact, below.
+
+**Metric correction.** "Cancelled" measured the excess over the HVC-only run, which carries
+the learned inhibition with nothing to cancel and so sits below the target: even a perfect
+canceller shows ~2 Hz of "residual". `cancellation_check.py` now also reports cancellation
+against the not-singing (silent) baseline -- Mandelblat-Cerf's comparison -- and temporal
+flatness, `1 - std(aligned PSTH) / std(no-HVC PSTH)` (the time-locked syllable peaks):
+
+| model | old cancelled | vs not singing | flatness | aligned / silent Hz |
+|---|---|---|---|---|
+| V2, causal encoder | 63% | 126% | 44% | 5.20 / 5.82 |
+| S6 best (150 I_HVC) | 46% | 87% | 37% | 6.60 / 5.87 |
+| 600 I_HVC eta 3 (S7) | 58% | 87% | 41% | 6.58 / 5.87 |
+| 1200 lam 1, no anchor (C) | 66% | 123% | 56% | 4.58 / 5.86 |
+| 1200 lam 1, tau_slow 1000 (D) | 62% | 102% | 48% | 5.75 / 5.86 |
+| 1200 lam 1, tau_slow 500 (E) | 60% | 95% | 46% | 6.15 / 5.86 |
+| 1200 c_aud 0.1 (F) | 44% | 89% | 38% | 6.19 / 5.71 |
+| 1200 c_aud 0.2 (F) | 35% | 89% | 39% | 6.03 / 5.68 |
+
+The mean song drive is essentially fully cancelled against not singing (by construction of
+the rate-target rule); the open problem is flatness. The anchored local target on 1200
+I_HVC beats the causal-encoder V2 on flatness (48% vs 44%) with the mean held at the silent
+rate.

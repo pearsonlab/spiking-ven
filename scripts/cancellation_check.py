@@ -34,6 +34,28 @@ COLORS = {"aligned": "#2a78d6", "shifted": "#eb6834", "no HVC": "#5f5e58",
           "reversed": "#1baf7a", "HVC only": "#b8b6ae"}
 
 
+def pooled_scores(ven, st, *, n_trials, seed=11):
+    """Flatness and cancellation vs not singing on each rendition of the training pool
+    (aligned HVC vs no HVC on that rendition), averaged. The template-only scores test one
+    rendition, which for some auditory units is far from the pool the network learned on."""
+    rng = np.random.default_rng(seed)
+    cells = np.flatnonzero(np.asarray(ven.A).any(axis=1))
+    T = int(st["T_song"])
+    pre = st.get("hvc_prelude")
+    sk = slice(SKIP, None)
+    silent = np.mean([ven.transform(st["hvc_off"], np.zeros_like(st["aud_correct"]), rng=rng)
+                      [cells, :T].mean(axis=0) for _ in range(n_trials)], axis=0)[sk].mean() * 1000
+    flat, canc = [], []
+    for aud in st["correct_pool"]:
+        al = np.mean([ven.transform(st["hvc_on"], aud, rng=rng, hvc_prelude=pre)[cells, :T]
+                      .mean(axis=0) for _ in range(n_trials)], axis=0)[sk] * 1000
+        no = np.mean([ven.transform(st["hvc_off"], aud, rng=rng)[cells, :T].mean(axis=0)
+                      for _ in range(n_trials)], axis=0)[sk] * 1000
+        flat.append(1 - al.std() / no.std())
+        canc.append(1 - (al.mean() - silent) / max(no.mean() - silent, 1e-9))
+    return np.array(flat), np.array(canc)
+
+
 def psths(ven, st, *, n_trials, shift_ms, seed=7):
     rng = np.random.default_rng(seed)
     cells = np.flatnonzero(np.asarray(ven.A).any(axis=1))
@@ -64,6 +86,9 @@ def main() -> None:
     p.add_argument("--label", action="append", required=True)
     p.add_argument("--trials", type=int, default=20)
     p.add_argument("--shift-ms", type=int, default=150)
+    p.add_argument("--pool", type=int, default=0, metavar="N",
+                   help="also score every rendition of the training pool (N noise draws "
+                        "each) and report flatness / cancellation averaged over them")
     p.add_argument("--out", required=True)
     a = p.parse_args()
     n = len(a.model)
@@ -93,6 +118,11 @@ def main() -> None:
                 f"{canc_s:.0%} (silent {base_s:.2f} Hz, HVC only {base_h:.2f}, aligned "
                 f"{r['aligned'][sk].mean():.2f}); flatness {flat:.0%}")
         print(line, flush=True)
+        if a.pool:
+            fl, cn = pooled_scores(ven, st, n_trials=a.pool)
+            print(f"   over {len(fl)} renditions: flatness {fl.mean():.0%} (10-90% "
+                  f"{np.percentile(fl, 10):.0%}-{np.percentile(fl, 90):.0%}), cancelled vs not "
+                  f"singing {cn.mean():.0%}", flush=True)
         for k in ("no HVC", "shifted", "reversed", "aligned", "HVC only"):
             ax.plot(gaussian_filter1d(r[k], 3), color=COLORS[k], lw=1.6 if k == "aligned"
                     else 1.0, label=k)

@@ -57,6 +57,11 @@ def main() -> None:
     p.add_argument("--set", nargs="*", default=[], help="overrides, key=value")
     p.add_argument("--out", required=True)
     p.add_argument("--n-example", type=int, default=8)
+    p.add_argument("--init", default=None,
+                   help="continue training this saved model (skips targets and burn-in)")
+    p.add_argument("--save-j", action="store_true",
+                   help="also store the full I_HVC -> E weights and the E population PSTH "
+                        "(singing the trained song) at each checkpoint")
     a = p.parse_args()
     cfg: dict[str, Any] = dict(BASE)
     for kv in a.set:
@@ -65,8 +70,11 @@ def main() -> None:
     st = sweep._stimuli()
     T = int(st["T_song"])
     pre = st["hvc_prelude"]
-    ven = VocalErrorNet(n_aud=st["n_channels"], seed=42, **cfg)
-    ven.set_rate_targets(ven.n_hvc, ven.n_aud)
+    if a.init:
+        ven = VocalErrorNet.load(a.init, seed=42)
+    else:
+        ven = VocalErrorNet(n_aud=st["n_channels"], seed=42, **cfg)
+        ven.set_rate_targets(ven.n_hvc, ven.n_aud)
     rng = np.random.default_rng(7)
     M = np.asarray(ven.M_HH, dtype=bool)
     pool = st["correct_pool"]
@@ -76,7 +84,7 @@ def main() -> None:
     ex = np.random.default_rng(0).choice(ven.n_ih, a.n_example, replace=False)
     trace: dict[str, list] = {"rend": [], "eff_inputs": [], "top_frac": [], "ih_rate": [],
                               "example_rows": [], "e_sing": [], "e_rev": [], "e_quiet": [],
-                              "i_h": []}
+                              "i_h": [], "j_he": [], "e_psth": []}
     trace_path = a.out.replace(".npz", "_trace.npz")
     print(f"config: {cfg}", flush=True)
     print(" rend   eff.inputs(med/min)  maxw   IHVC Hz  silent  win/cell  J_HE   "
@@ -86,8 +94,9 @@ def main() -> None:
         if r % a.every == 0:
             B = np.where(M, ven.B_H, 0.0).astype(np.float64)
             pr = B.sum(1) ** 2 / np.maximum((B ** 2).sum(1), 1e-12)
-            sing = ven.transform(st["hvc_on"], st["aud_correct"], rng=rng,
-                                 hvc_prelude=pre)[:, :T].mean() * 1000
+            e_sing = ven.transform(st["hvc_on"], st["aud_correct"], rng=rng,
+                                   hvc_prelude=pre)[:, :T]
+            sing = e_sing.mean() * 1000
             ih = np.asarray(ven.last_ih)[:, :T]
             rate = ih.sum(1) / (T / 1000)
             rev = ven.transform(st["hvc_on"], st["aud_reversed"], rng=rng,
@@ -105,6 +114,9 @@ def main() -> None:
             trace["e_sing"].append(sing)
             trace["e_rev"].append(rev)
             trace["e_quiet"].append(quiet)
+            if a.save_j:
+                trace["j_he"].append(np.asarray(ven.J_HE, dtype=np.float16))
+                trace["e_psth"].append(e_sing.mean(axis=0) * 1000)
             trace["i_h"].append(i_h)
             arrays: dict[str, Any] = {"burst_t": burst_t, "example": ex, "M_HH": M,
                                       **{k: np.asarray(v) for k, v in trace.items()}}
@@ -123,7 +135,7 @@ def main() -> None:
                 break
         if r == a.n_rend:
             break
-        if r == 0:
+        if r == 0 and not a.init:
             ven.fit(st["hvc_burn"], st["aud_burn"])
         else:
             ven.fit(st["hvc_on"], pool[r % len(pool)], hvc_prelude=pre)

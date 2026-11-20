@@ -102,7 +102,8 @@ def main() -> None:
         st = pickle.load(fh)
     enc = CausalFilterEncoder.load(a.encoder)
     ven = VocalErrorNet.load(a.model, seed=a.seed)
-    onset, burst_ms = daf_window_ms(st["daf_window_s"])
+    onset, burst = daf_window_ms(st["daf_window_s"])
+    burst_ms = int(round(burst))
     T = int(st["T_song"])
 
     def simulate():

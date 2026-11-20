@@ -1044,3 +1044,43 @@ neurons; the halved Vogels post term (a deviation from the published rule); per-
 loudness normalisation; aud synapses of 400 nS mean (strong; weaker/more synapses were
 worse, round F). Open: peak latency 82 ms; `set_rate_targets` onset-transient bias (+6%);
 a few large syllable peaks (~530, ~805 ms) still about half cancelled.
+
+## Round K: plastic HVC -> I_HVC (learned temporal basis), 2026-11-20
+
+Idea (user): start with HVC input to ~all I_HVC cells at small uniform weights and let
+I_HVC -> E Vogels plasticity propagate back to the HVC synapses that drove each I_HVC
+spike, so each I_HVC cell learns the timing its E targets need. Vogels post term back to
+standard (g = 1), constant per-cell targets.
+
+Rules (`hvc_plastic`; `network.py` HVC_ELIG_*, VOGELS_*_CREDIT):
+- I_HVC -> E (W_ik, sparse, `c_he`): Vogels, standard. Every change dW_ik is summed into
+  the I_HVC cell's credit c_k (1 ms bins).
+- HVC -> I_HVC (B_kj, 90% connectivity, start 0.9 nS uniform -> ~1 Hz I_HVC during song,
+  0 Hz silent): pre trace x_kj (tau 5 ms); eligibility e_kj += x_kj at each I_HVC spike,
+  decays tau_elig 10 ms; every 1 ms B_kj += kappa e_kj c_k (kappa 0.02).
+- Between renditions: per-cell total S_k scaled toward a target I_HVC rate (`ih_scale`
+  0.02, factor clipped [0.5, 1.5]), then divisive normalisation B_kj *= S_k / sum_j B_kj.
+  (Also built, not in the final config: relaxation toward uniform `h_relax`, a tonic
+  homeostatic current `I_H`, maintenance credit `beta_maint`.)
+
+Monitored short runs (`scripts/monitor_hvc_plastic.py`, `plot_hvc_concentration.py`;
+traces in `outputs/sweeps/rK_monitor/`, plots `outputs/hvc_concentration_*.png`):
+
+| run | what happened | E singing (silent ~5.9) |
+|---|---|---|
+| relax 0.02, no homeostasis, 10 targets | 1/3 of cells concentrate onto one burst time and fire ~17 Hz; the rest stay silent and never get credit; learned timing erodes once credit -> 0 | 8.3 (plateau) |
+| + tonic I_H homeostasis + maintenance credit | recruitment fixed (silent cells 85% -> 11%); erosion persists; I_H bound (+-50 pA) binds | 6.9 |
+| divisive scaling (S_k), no relax, 10 targets | concentration population-wide (median 540 -> 20 effective inputs); but each E has ~20 single-window I_HVC -> coverage ~200 ms of 850 | 8.4 (worsening) |
+| 40 targets per I_HVC, 2 Hz target | coverage fixed; plateau as scaling cuts I_HVC rate faster than Vogels raises weights | 7.1 |
+| 40 targets, 5 Hz target | | 6.2 |
+| **40 targets, 8 Hz target** | cells keep ~6 windows; contrast best | 5.5 |
+| 40 targets, 12 Hz target | slightly more over-cancellation, no gain | 5.2 |
+
+8 Hz model (`outputs/sweeps/rK_monitor/rate8.npz`, 150 renditions), full diagnostics:
+cancelled vs not singing 105%, flatness 52%, pooled singing / not singing 0.94x (median
+per-cell 0.98, 47% of cells higher singing; low-rate cells sit above the diagonal),
+reversed vs trained clearly larger. Same cancellation as the hand-built one-window basis
+(round J: flatness 53%, vs-silent 97%, pooled 1.03x), but learned. The big syllable peaks
+(~530, ~630, ~805 ms) are still about half cancelled. Figures:
+`outputs/cancellation_hvcplastic_rate8.png`, `outputs/singing_scatter_hvcplastic_rate8.png`,
+`outputs/cancellation_check_hvcplastic_rate8.png`.

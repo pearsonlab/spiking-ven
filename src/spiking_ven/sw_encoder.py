@@ -172,8 +172,9 @@ def dog_kernel(sigma_e: float = 6.4, mu_e: float = 13.0, sigma_i: float = 42.0,
 
 
 class SWEncoder:
-    """Primary AC (dense rectified STRFs -> Poisson spikes) -> higher AC (difference-of-
-    Gaussians on each primary spike train -> threshold -> ReLU). See the module docstring."""
+    """Primary AC (dense rectified STRFs) -> higher AC (difference-of-Gaussians on each
+    primary unit's rate -- or its Poisson spike train with ``primary_noise`` -> per-unit
+    threshold -> ReLU). See the module docstring."""
 
     kind = "sw"
 

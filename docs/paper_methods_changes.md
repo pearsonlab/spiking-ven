@@ -1,10 +1,34 @@
-# Proposed changes to the paper's Methods (Brian2 port)
+# Proposed changes to the paper's Methods
 
-For `~/Overleaf/critic paper/main.tex`, sections *Vocal error network*, *Model parameters*,
-*Training and plasticity*. The Overleaf file has not been edited. Each item gives the current
-text, the proposed text, and why. LaTeX is ready to paste.
+For `~/Overleaf/critic paper/main.tex`: sections *Vocal error network*, *Model parameters*,
+*Training and plasticity* and *Model evaluation*. The Overleaf file has not been edited. LaTeX
+is ready to paste.
 
-## 1. Simulation (Vocal error network, first paragraph)
+The changes fall into two groups:
+
+- **Part A, shipped.** These are in release v0.7.0: the Brian2 port. Apply them whatever else
+  is decided.
+- **Parts B-F, experimental.** These describe the experiment baseline on branch
+  `brian2-swac` (`configs/baseline.json`; history in `docs/contrast-experiments.md`). They are
+  not merged and not the package defaults. Apply them only if the paper adopts that model.
+  Each part says what it replaces.
+
+| Part | Topic | Status |
+|---|---|---|
+| A | Simulation in Brian2 (time step, noise, gate, sign/unit fixes, retuned values) | shipped, v0.7.0 |
+| B | Balanced E/I network with two inhibitory populations | experimental |
+| C | I_HVC -> E plasticity: Vogels rate-target rule | experimental |
+| D | Plastic HVC -> I_HVC: a learned temporal basis | experimental |
+| E | Schneider & Woolley two-stage auditory front end | experimental |
+| F | Evaluation: new measures and protocol changes | experimental |
+| G | Parameter table for the baseline | experimental |
+| H | Open issues to resolve before writing | -- |
+
+---
+
+## A. Simulation in Brian2 (shipped, v0.7.0)
+
+### A1. Simulation (Vocal error network, first paragraph)
 
 **Now:** "... leaky integrate-and-fire neuron pools, simulated at \qty{1}{\ms} resolution."
 
@@ -16,26 +40,28 @@ We modeled the vocal error network as a pair of excitatory ($N_E=600$) and inhib
 \parencite{stimberg2019brian2} by exponential Euler integration with a \qty{0.1}{\ms} time step.
 ```
 
-Why: the network is now continuous-time equations integrated by Brian2 (the 1 ms discrete
-update is gone). Cite Stimberg, Brette & Goodman (2019), eLife 8:e47314.
+Why: the network is now continuous-time equations integrated by Brian2, so the 1 ms discrete
+update is gone. Cite Stimberg, Brette & Goodman (2019), eLife 8:e47314.
 
-## 2. Sign of the GABA term in the E equation (bug in the current text)
+### A2. Sign of the GABA term in the E equation (bug in the current text)
 
 **Now:** `... - \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V) ...`
 
 **Proposed:** `... + \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V_i) ...`
 
-Why: with the driving force written as `(V_GABA - V)`, every conductance term enters with a plus
-sign, as the AMPA and NMDA terms already do. The minus makes inhibition depolarising. (Also
-`V` -> `V_i` throughout, for consistency.)
+Why: once the driving force is written as `(V_GABA - V)`, every conductance term enters with a
+plus sign, as the AMPA and NMDA terms already do. The minus sign makes inhibition depolarising.
+Also change `V` to `V_i` throughout, for consistency.
 
-## 3. Units of the NMDA term (bug in the current text)
+### A3. Units of the NMDA term (bug in the current text)
 
-**Now:** `\sum_l A_{il} (s^{Aud}_l (V_{AMPA} - V_i) + s^{NMDA}_l g(V)\, (V_{NMDA} - V_i))` with
+**Now:** `\sum_l A_{il} (s^{Aud}_l (V_{AMPA} - V_i) + s^{NMDA}_l g(V)\, (V_{NMDA} - V_i))`, with
 `g(V) = g^{NMDA} / (1 + ...)`.
 
-Here `A_il` (nS) multiplies `g(V)` (nS), which gives nS². In the model the NMDA conductance of a
-connection is `A_il` rescaled so the mean is `g^NMDA`. **Proposed:**
+Here `A_il` (nS) multiplies `g(V)` (nS), which gives nS². In the model, each connection's NMDA
+conductance is `A_il` rescaled so that the mean is `g^NMDA`.
+
+**Proposed:**
 
 ```latex
 \sum_l A_{il} \left(s^{Aud}_l (V_{AMPA} - V_i)
@@ -44,10 +70,10 @@ connection is `A_il` rescaled so the mean is `g^NMDA`. **Proposed:**
 m(V) &= \frac{1}{1 + \frac{[\mathrm{Mg}^{2+}]_o}{3.57} e^{-0.062 V}}
 ```
 
-with $\bar A$ the mean nonzero entry of $A$, and the table row for $g^{NMDA}$ unchanged ("mean
-peak NMDA conductance per connection").
+Here $\bar A$ is the mean nonzero entry of $A$. The table row for $g^{NMDA}$ is unchanged ("mean
+peak NMDA conductance per connection"). In the part B-F baseline, NMDA is off ($g^{NMDA}=0$).
 
-## 4. Noise
+### A4. Noise
 
 **Now:** "$\eta_{it}$ Gaussian white noise with standard deviation \qty{754}{\pA} for every
 \qty{1}{\ms} timestep."
@@ -56,10 +82,10 @@ peak NMDA conductance per connection").
 $\sigma_\eta = \qty{754}{\pA\,\ms^{1/2}}$ (independent across neurons), i.e. a current whose
 average over any \qty{1}{\ms} window has standard deviation \qty{754}{\pA}."
 
-Why: a per-step SD is not a property of a continuous-time model; the intensity is, and it gives
-the same membrane fluctuations at any time step. In the table: `\qty{754}{\pA\,\ms^{1/2}}`.
+Why: a per-step SD is not a property of a continuous-time model. The noise intensity is, and it
+gives the same membrane fluctuations at any time step. In the table: `\qty{754}{\pA\,\ms^{1/2}}`.
 
-## 5. The STDP audio gate
+### A5. The STDP audio gate
 
 **Now:** "$\sigma_i(t)$ is 1 if neuron $i$ received any auditory input spike within the previous
 \qty{20}{\ms}"
@@ -75,20 +101,22 @@ input: $a_i$ is a trace of the auditory spikes neuron $i$ receives,
 so the gate stays open for $\tau_{STDP}$ after an isolated input spike (longer after several).
 ```
 
-Why: the box window was replaced by an equivalent trace, which is a differential equation like the
-rest of the model (and identical to the box for isolated input spikes).
+Why: the box window was replaced by an equivalent trace. The trace is a differential equation
+like the rest of the model, and it matches the box exactly for isolated input spikes. (Part C
+does not use the gate.)
 
-## 6. Training
+### A6. Training
 
-**Now:** "... prefaced by a \qty{300}{\ms} burn-in period ..." -- unchanged (the code's 500 ms
-burn-in includes the 200 ms of intro notes).
+**Now:** "... prefaced by a \qty{300}{\ms} burn-in period ...". Unchanged: the code's 500 ms
+burn-in includes the 200 ms of introductory notes.
 
 Add after "Training cycled through motifs in a fixed order.":
-"Each rendition started the network from rest, carrying over only the learned weights $J^{IE}$."
+"Each rendition started the network from rest, carrying over only the learned weights."
 
-## 7. Parameter tables
+### A7. Parameter tables (shipped model)
 
-Values that change (`constants.py` at this commit). Everything else in Tables 2-3 is unchanged.
+These are the values that change in `constants.py` at v0.7.0. Everything else in Tables 2-3 is
+unchanged.
 
 | Table row | Now | Proposed | Note |
 |---|---|---|---|
@@ -100,9 +128,10 @@ Values that change (`constants.py` at this commit). Everything else in Tables 2-
 | $\beta$ Adaptation step | \qty{7540}{\pA} | \qty{10180}{\pA} | |
 | $r_I$ STDP threshold rate | \qty{46}{\Hz} | \qty{36}{\Hz} | |
 
-The factor 1.176 restores the charge per spike that the 1 ms discrete update delivered
-($1/(1-e^{-1/3})$ ms vs \qty{3}{\ms} of peak AMPA conductance); see `docs/design-notes.md`,
-"Brian2 port". Suggested sentence for *Model evaluation* (after the list of tunable parameters):
+The factor 1.176 restores the charge per spike that the 1 ms discrete update delivered:
+$1/(1-e^{-1/3})$ ms against \qty{3}{\ms} of peak AMPA conductance. See
+`docs/design-notes.md`, "Brian2 port". Suggested sentence for *Model evaluation*, after the list
+of tunable parameters:
 
 ```latex
 The model was first calibrated with a \qty{1}{\ms} discrete-time update and recalibrated for
@@ -112,5 +141,242 @@ continuous-time integration at \qty{0.1}{\ms}: AMPA weights were scaled by $1/[3
 
 Also in the *Training and plasticity* table: $\rho$ = \qty{3.775}{\nano\siemens} is unchanged.
 
-**Results that change** (Table 4 is targets only, so nothing to edit there, but any results text
-quoting model numbers should use the README's "Expected numbers", regenerated for this model).
+---
+
+## B. Balanced E/I network with two inhibitory populations (experimental)
+
+**Replaces:** the single inhibitory pool, which is driven by HVC and E and whose I -> E weights
+start at zero and grow by audio-gated STDP. In the baseline that STDP is off ($\rho = 0$).
+
+**Text (Vocal error network):**
+
+```latex
+The network contains two inhibitory populations. Balancing interneurons ($I^{bal}$, $N_I=150$)
+receive only excitatory input from the E pool, through sparse heterogeneous synapses
+($J^{EI}$, connection probability 0.05, lognormal weights of mean \qty{11}{\nano\siemens},
+s.d. \qty{5.5}{\nano\siemens}), and inhibit E through fixed synapses ($J^{IE}$, connection
+probability 0.5, lognormal, mean \qty{6}{\nano\siemens}, s.d. \qty{3}{\nano\siemens}),
+holding the network in an E/I-balanced state. HVC-driven interneurons ($I^{HVC}$,
+$N_{IH}=1200$) receive HVC input and no input from E (Section D), and inhibit E through
+plastic synapses $W^{HE}$ (Section C). Each $I^{HVC}$ neuron contacts a random subset of
+$\approx 40$ E neurons (connection probability $2/30$). E receives a tonic current of
+\qty{2500}{\pA}. HVC does not project to $I^{bal}$ or to E.
+```
+
+Why: the balanced state quenches auditory transients, so the network tolerates the strong
+auditory drive needed for the DAF response. Separating the HVC-driven inhibition makes the
+cancellation pathway explicit and keeps HVC input from shifting the mean inhibitory rate.
+
+**Equations:** the E equation gains a second inhibitory term:
+
+```latex
++ \left(\sum_{j} J^{IE}_{ij} s^{I}_j + \sum_k W^{HE}_{ik} s^{IH}_k\right) (V_{GABA} - V_i)
+```
+
+$I^{HVC}$ neurons use the same membrane equation as $I^{bal}$.
+
+---
+
+## C. I_HVC -> E plasticity: the Vogels rate-target rule (experimental)
+
+**Replaces:** audio-gated STDP on I -> E (*Training and plasticity*) for the HVC-driven pathway.
+
+**Text:**
+
+```latex
+Synapses from $I^{HVC}$ onto E learn by the inhibitory rate-target rule of
+\textcite{vogels2011inhibitory}. Each neuron keeps a spike trace,
+$\tau_{STDP}\,\dot{x}_n = -x_n + \tau_{STDP}\sum_k \delta(t - t_{nk})$, and
+\begin{align*}
+    \text{at each } I^{HVC} \text{ spike of } k: \quad
+        W^{HE}_{ik} &\leftarrow \big[W^{HE}_{ik} + \eta\,(x^E_i - \alpha_i)\big]_+ \\
+    \text{at each E spike of } i: \quad
+        W^{HE}_{ik} &\leftarrow \big[W^{HE}_{ik} + \eta\, x^{IH}_k\big]_+ ,
+\end{align*}
+with $\alpha_i = 2\rho_i\tau_{STDP}$, $\tau_{STDP} = \qty{20}{\ms}$ and
+$\eta = \qty{3}{\nano\siemens}$. The target $\rho_i$ is each E neuron's own firing rate in
+silence (no song, no HVC input), measured before training, so learning drives each neuron's
+rate during singing back to its non-singing rate. The rule is not gated by auditory input.
+```
+
+Why: it cancels the predictable auditory drive while holding each cell near its own baseline,
+which reproduces the singing vs not-singing per-cell scatter (Mandelblat-Cerf et al. 2014,
+Fig 7D). A gated version broke that per-cell match (`contrast-experiments.md`). $\tau_{STDP}$ =
+20 ms follows the Vogels supplement.
+
+Known bias, for the text or a footnote: song-locked $I^{HVC}$ firing correlates I and E spikes,
+which pulls the fixed point slightly below $\rho_i$. The singing rate ends about 5% below the
+silent rate (Section H).
+
+---
+
+## D. Plastic HVC -> I_HVC: a learned temporal basis (experimental)
+
+**Replaces:** fixed sparse HVC -> inhibitory weights.
+
+**Text:**
+
+```latex
+Each $I^{HVC}$ neuron initially receives input from 90\% of HVC neurons through weak, uniform
+synapses ($B^{H}_{kj} = w_0 = \qty{0.9}{\nano\siemens}$), so that before learning it fires
+sparsely ($\approx\qty{1}{\Hz}$) and without temporal preference while the bird sings, and
+not at all in silence. These synapses learn which HVC inputs time each $I^{HVC}$ neuron's
+spikes to the moments its E targets need inhibition. Each synapse carries a presynaptic trace
+and an eligibility trace,
+\begin{align*}
+    \tau_h\,\dot{x}_{kj} &= -x_{kj} + \tau_h \textstyle\sum_m \delta(t - t^{HVC}_{jm}), \\
+    \tau_e\,\dot{e}_{kj} &= -e_{kj} + \tau_e\, x_{kj} \textstyle\sum_m \delta(t - t^{IH}_{km}),
+\end{align*}
+($\tau_h = \qty{5}{\ms}$, $\tau_e = \qty{10}{\ms}$): an input becomes eligible when it fires
+shortly before its $I^{HVC}$ neuron does. Each $I^{HVC}$ neuron $k$ accumulates a credit
+$c_k$, the summed change of its outgoing weights under the rule of Section C,
+$c_k = \sum_i \Delta W^{HE}_{ik}$, and every \qty{1}{\ms}
+\begin{equation*}
+    B^{H}_{kj} \leftarrow \big[B^{H}_{kj} + \kappa\, e_{kj}\, c_k\big]_+, \qquad \kappa = 0.02,
+\end{equation*}
+after which $c_k$ is reset. Inputs that drove spikes at times when the neuron's inhibition was
+strengthened (its targets fired above their set point) grow; inputs that drove spikes where
+the inhibition was weakened shrink. Between renditions, each neuron's total HVC input $S_k$ is
+scaled homeostatically toward a target $I^{HVC}$ rate $r^* = \qty{8}{\Hz}$ during song,
+\begin{equation*}
+    S_k \leftarrow S_k \cdot \mathrm{clip}\!\left(1 + \gamma\,\frac{r^* - r_k}{r^*},\,
+    0.5,\, 1.5\right), \qquad \gamma = 0.02,
+\end{equation*}
+($r_k$ the neuron's rate in that rendition), and its weights are rescaled divisively to that
+total, $B^H_{kj} \leftarrow B^H_{kj}\, S_k / \sum_{j'} B^H_{kj'}$, so inputs that grew take
+weight from the rest.
+```
+
+Why, and what the experiments showed (round K):
+
+- Starting from near-uniform input, each $I^{HVC}$ neuron concentrates onto a few HVC burst
+  times within about 30 renditions.
+- Without homeostasis, most cells stayed silent and never learned.
+- A 2 Hz target left too few spikes per window. 8 Hz cancels best.
+- About 40 targets per I_HVC cell (not 10) are needed so that each E cell's inhibition covers
+  the whole motif.
+- Cancellation matches a hand-built single-window basis: flatness 52% vs 53%.
+
+---
+
+## E. Schneider & Woolley two-stage auditory front end (experimental)
+
+**Replaces:** the sparse-coding causal filter bank with ISTA inference (*Auditory input*).
+
+**Text:**
+
+```latex
+Auditory input follows the two-stage model of \textcite{schneider2013sparse}. Song waveforms
+are normalized to a common RMS level, each rendition by its own RMS, and converted to
+cochleagrams (40 ERB-spaced channels, \qtyrange{200}{8000}{\Hz}, \qty{2}{\ms} frames).
+
+\emph{Primary auditory cortex.} $K = 128$ units with spectrotemporal receptive fields
+$V_k$ (40 channels $\times$ \qty{64}{\ms}) respond to the strictly past window $x_t$ of the
+cochleagram as $r_k(t) = g\,\big[V_k\cdot(x_t - \mu) + b_k\big]_+$, with $\mu$ the mean
+window over the corpus. The STRFs were learned as the encoder of a rectified autoencoder that
+reconstructs each window from the code through a linear decoder with unit-norm rows. After
+each gradient step, the STRFs were smoothed (an $L_2$ penalty on first differences across
+channel and lag, weight 0.1), pulled 25\% toward their minimum-phase versions, and
+soft-thresholded ($L_1$, weight $2\times10^{-4}$), for 80 epochs over the corpus. Units that
+never responded were dropped (126 kept), and the gain $g$ was set so that the mean primary
+rate during song is \qty{32}{\Hz}.
+
+\emph{Higher auditory cortex.} Each primary unit's rate is filtered by a causal
+difference-of-Gaussians kernel (excitatory lobe centred \qty{13}{\ms}, s.d. \qty{6.4}{\ms};
+inhibitory lobe centred \qty{60}{\ms}, s.d. \qty{42}{\ms}, equal area), starting from the
+steady state the primary rate reaches in silence. The output is thresholded per unit at its
+90th percentile on the song corpus and rectified, giving the activity $a_l(t)$ of 126
+higher-auditory units. The population is divisively normalized,
+\begin{equation*}
+    \tilde a_l(t) = \frac{a_l(t)}{1 + \big(\sum_{l'} a_{l'}(t)/\sigma\big)^2},
+    \qquad \sigma = 0.3,
+\end{equation*}
+and converted to Poisson spike trains whose mean rate over the song is \qty{2.5}{\Hz}
+\parencite{schneider2013sparse}.
+```
+
+Why:
+
+- Sparse, syllable-locked higher-auditory responses at the reported rates: about 32 Hz primary,
+  about 2.5 Hz higher.
+- The DoG on *rates* rather than primary spikes is needed for responses that repeat across
+  renditions. On spikes, primary Poisson noise dominated, with about 0.5 spikes per excitatory
+  lobe.
+- Per-unit thresholds give a spread of higher-AC rates, a median of 2.2 Hz with 10-90% of units
+  at 0.2-4.9 Hz.
+- The squared normalization brings the DAF response to target: broadband noise recruits the
+  whole population at once.
+- Per-rendition RMS removes a loudness confound: the template was the loudest rendition, and
+  loudness correlated 0.82 with higher-AC rate.
+
+Also drop the ISTA / dictionary-learning description and its parameters (Table 2 auditory
+rows), and the 1.176 scaling of $A$ (A7) no longer applies. Part G gives the baseline's
+$A$ instead.
+
+---
+
+## F. Evaluation: new measures and protocol changes (experimental)
+
+Add to *Model evaluation*:
+
+1. **Randomized DAF onsets:** "DAF noise bursts (\qty{50}{\ms}) were placed at random times
+   inside syllables, as in the experiment, and each trial was aligned to its own onset."
+2. **Singing vs not singing (new target, Fig 7D):** "For each E neuron we compared its rate
+   while singing, averaged over all training renditions, with its rate in silence without HVC
+   input. Target: population ratio 0.5-2, per-cell points near the diagonal." The first
+   \qty{20}{\ms} of every run are excluded. A run without the HVC prelude starts from rest,
+   with an onset transient that otherwise inflates the not-singing rate by about 0.4 Hz.
+3. **Cancellation measures** (replacing the reversed/trained ratio as the main contrast
+   measure):
+   - cancellation against not singing,
+     $1 - (\bar r_{\mathrm{aligned}} - \bar r_{\mathrm{silent}})/(\bar r_{\mathrm{no\,HVC}} -
+     \bar r_{\mathrm{silent}})$;
+   - temporal flatness, $1 - \mathrm{sd}_t(r_{\mathrm{aligned}})/\mathrm{sd}_t(r_{\mathrm{no\,HVC}})$,
+     computed on each training rendition and averaged.
+
+   Here $r$ is the E population rate, averaged over neurons with auditory input and over noise
+   draws.
+4. **HVC-shift test:** the cancellation that remains when HVC input is shifted by 150 ms
+   measures how much of it is time-locked.
+
+---
+
+## G. Parameter table for the baseline (experimental)
+
+| Parameter | Value |
+|---|---|
+| $N_E$, $N_I$ ($I^{bal}$), $N_{IH}$ ($I^{HVC}$) | 600, 150, 1200 |
+| Tonic current to E | \qty{2500}{\pA} |
+| $J^{EI}$: probability, mean (s.d.) | 0.05, \qty{11}{\nano\siemens} (5.5) |
+| $J^{IE}$ ($I^{bal}\to$E, fixed): probability, mean (s.d.) | 0.5, \qty{6}{\nano\siemens} (3) |
+| $A$ (Aud$\to$E): probability, mean (s.d.) | 0.05, \qty{400}{\nano\siemens} (200) |
+| NMDA | off |
+| HVC$\to I^{bal}$, HVC$\to$E | none |
+| $E_{GABA}$, $\tau_{GABA}$, $\tau_{AMPA}$ | \qty{-70}{\mV}, \qty{15}{\ms}, \qty{3}{\ms} |
+| Auditory delay | \qty{2}{\ms} |
+| Vogels rule: $\eta$, $\tau_{STDP}$, target | \qty{3}{\nano\siemens}, \qty{20}{\ms}, own silent rate |
+| $I^{HVC}\to$E connection probability | 0.0667 ($\approx 40$ targets) |
+| HVC$\to I^{HVC}$: probability, $w_0$ | 0.9, \qty{0.9}{\nano\siemens} |
+| $\tau_h$, $\tau_e$, $\kappa$ | \qty{5}{\ms}, \qty{10}{\ms}, 0.02 |
+| $I^{HVC}$ target rate $r^*$, scaling gain $\gamma$ | \qty{8}{\Hz}, 0.02 |
+| Auditory front end | Part E (126 units; $\sigma = 0.3$, squared normalization) |
+| Training | 150 renditions cycling 38 motifs |
+
+---
+
+## H. Open issues to resolve before writing
+
+- **Residual peaks.** About half of the song-locked modulation remains on each rendition
+  (flatness about 52%). This traces to rendition-to-rendition variability of single higher-AC
+  units relayed through one ~500 nS synapse, and to multi-window $I^{HVC}$ cells. The paper
+  should either report it or wait for a fix.
+- **Singing rate.** It sits about 5% below silent (pooled ratio 0.94, median per cell 0.98).
+  This is within target, but could be tuned by scaling the Vogels targets.
+- **DAF peak latency.** 76-86 ms in recent models, against the 35-75 ms target.
+- **Biological plausibility to check:**
+  - 1200 $I^{HVC}$ cells firing about 8 Hz during song;
+  - \qty{400}{\nano\siemens} auditory synapses;
+  - per-rendition loudness normalization;
+  - the homeostatic scaling of HVC input.
+- **Rate-target bias.** `set_rate_targets` includes the same onset transient (+6% on
+  $\rho_i$). It is left as is because changing it changes every trained model.

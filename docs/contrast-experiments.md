@@ -766,3 +766,17 @@ motif onset (DoG onset transient). Encoders in `outputs/encoders/pen/`.
   modulation depth. `outputs/sw_bs_rate_distribution.png`,
   `outputs/sw_unit_strfs_l1_2e-4_sm_1e-1_pu90.png`. Candidate:
   `outputs/encoders/pen/l1_2e-4_sm_1e-1_pu90.npz`.
+
+### S5. V2 trained on the S4 encoder (sweep sw2)
+
+| aud nS | E Hz | resp | lat | dur | pk lat | xs | rev/tr | song-excess rev/tr | sing/not |
+|---|---|---|---|---|---|---|---|---|---|
+| 400 | 7.0 | 0.86 | 24 | 45 | 36 | 5.3 | 1.18 | 1.51 | 1.05 |
+| 250 | 6.5 | 0.74 | 26 | 41 | 36 | 3.4 | 1.10 | 1.42 | 0.99 |
+| 170 | 6.3 | 0.62 | 29 | 40 | 36 | 2.5 | 1.06 | 1.34 | 0.96 |
+
+Latency now on target (sw1: 38-44 ms); DAF magnitude worse than sw1 (xs 2.5-5.3 vs 0.8-1.0;
+responders 0.62-0.86 vs 0.41): broadband DAF noise pushes nearly every BS unit over its
+own threshold at once. Per-cell scatter (aud 170, pooled): 0.85x, median per-cell 0.79, 34%
+higher singing; low-rate cells pushed below the diagonal. `outputs/cancellation_sw2_aud170.png`,
+`outputs/singing_scatter_sw2_aud170.png`.

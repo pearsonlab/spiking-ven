@@ -54,6 +54,7 @@ STIMULUS_DEFAULTS = {
     "daf_window_s": tuple(DAF_WINDOW_S),
     "hvc_intro": tuple(HVC_INTRO),
     "norm_sigma": None,
+    "norm_power": None,
 }
 
 #: What a model that records its stimuli but not a setting was trained with: the setting
@@ -110,7 +111,8 @@ def encode_acts(sig, encoder, *, sr, n_ista, T_out_ms, rms_from):
 
 def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
                     mean_rate_hz: float = AUD_MEAN_RATE_HZ,
-                    n_ista: int = N_ISTA, seed: int = 0, norm_sigma: float | None = None):
+                    n_ista: int = N_ISTA, seed: int = 0, norm_sigma: float | None = None,
+                    norm_power: float | None = None):
     """Waveform to auditory spike train, on the shared reference.
 
     Both normalisation stages take their reference from the song: the waveform scaling
@@ -119,7 +121,8 @@ def encode_stimulus(sig, encoder, *, sr, T_out_ms, acts_train, rms_from,
     acts = encode_acts(sig, encoder, sr=sr, n_ista=n_ista, T_out_ms=T_out_ms,
                        rms_from=rms_from)
     return acts_to_spikes(acts, mean_rate_hz=mean_rate_hz, frame_rate=1000, seed=seed,
-                          calibrate_on=acts_train, norm_sigma=norm_sigma).astype(np.float32)
+                          calibrate_on=acts_train, norm_sigma=norm_sigma,
+                          norm_power=norm_power).astype(np.float32)
 
 
 def build_stimuli(
@@ -136,6 +139,7 @@ def build_stimuli(
     daf_window_s: tuple[float, float] = DAF_WINDOW_S,
     hvc_intro: tuple[int, int, int] = HVC_INTRO,
     norm_sigma: float | None = None,
+    norm_power: float | None = None,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -179,7 +183,7 @@ def build_stimuli(
         return encode_stimulus(sig, encoder, sr=sr, T_out_ms=T_rend, acts_train=acts_train,
                                rms_from=sig_train, mean_rate_hz=mean_rate_hz,
                                n_ista=n_ista, seed=seed + seed_offset,
-                               norm_sigma=norm_sigma)
+                               norm_sigma=norm_sigma, norm_power=norm_power)
 
     if verbose:
         print(f"T_song={T_song} ms  T_rend={T_rend} ms  train_motif={train_idx}  "
@@ -274,6 +278,7 @@ def build_stimuli(
         "mean_rate_hz": mean_rate_hz,
         "n_ista": n_ista,
         "norm_sigma": norm_sigma,
+        "norm_power": norm_power,
         "daf_window_s": daf_window_s,
         "fwd_rev_corr": fwd_rev_corr,
         "n_kernels": n_kernels,
@@ -307,6 +312,8 @@ def stimulus_record(st: dict, *, encoder_path=None, motifs_path=None) -> dict:
     }
     if st.get("norm_sigma") is not None:
         rec["norm_sigma"] = float(st["norm_sigma"])
+    if st.get("norm_power") is not None:
+        rec["norm_power"] = float(st["norm_power"])
     if encoder_path is not None:
         rec["encoder_sha256"] = sha256_file(encoder_path)
     if motifs_path is not None:

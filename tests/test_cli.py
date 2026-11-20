@@ -124,7 +124,7 @@ def test_stimulus_fallbacks_are_the_constants():
         "t_post": C.T_POST, "t_burn": C.T_BURN,
         "mean_rate_hz": C.AUD_MEAN_RATE_HZ, "n_ista": C.N_ISTA,
         "daf_window_s": tuple(C.DAF_WINDOW_S), "hvc_intro": tuple(C.HVC_INTRO),
-        "norm_sigma": None,
+        "norm_sigma": None, "norm_power": None,
     }
 
 

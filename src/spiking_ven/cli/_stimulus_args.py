@@ -36,6 +36,9 @@ def add_stimulus_flags(p: argparse.ArgumentParser) -> None:
     g.add_argument("--norm-sigma", type=float, default=None,
                    help="divisive normalisation of the auditory population (sigma); "
                         "default: the model's recorded value, else none")
+    g.add_argument("--norm-power", type=float, default=None,
+                   help="exponent n of the normalisation, 1 + (sum/sigma)**n; "
+                        "default: the model's recorded value, else 1")
 
 
 def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
@@ -54,7 +57,8 @@ def stimuli_for_model(ven, encoder, args, *, encoder_path, motifs_path,
         {"sr": args.sr, "seed": args.stimulus_seed, "t_post": args.t_post,
          "t_burn": args.t_burn, "mean_rate_hz": args.mean_rate_hz,
          "n_ista": args.n_ista, "daf_window_s": args.daf_window_s,
-         "hvc_intro": args.hvc_intro, "norm_sigma": args.norm_sigma},
+         "hvc_intro": args.hvc_intro, "norm_sigma": args.norm_sigma,
+         "norm_power": args.norm_power},
         encoder_path=encoder_path, motifs_path=motifs_path,
     )
     seed = settings.pop("seed")

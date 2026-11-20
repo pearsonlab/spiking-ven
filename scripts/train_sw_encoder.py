@@ -47,6 +47,9 @@ def main() -> None:
                    help="tied decoder (default: linear decoder with unit-norm rows)")
     p.add_argument("--threshold-pct", type=float, default=90.0,
                    help="higher-AC threshold: this percentile of the DoG output on song")
+    p.add_argument("--primary-spikes", action="store_true",
+                   help="feed the DoG Poisson primary spikes (default: primary rates, as in "
+                        "Schneider & Woolley's model)")
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
 
@@ -76,7 +79,8 @@ def main() -> None:
                         for X in cochs], axis=1)
     keep = np.flatnonzero((R > 0).any(axis=1))
     gain = PRIMARY_RATE_HZ / float(R[keep].mean())
-    enc = SWEncoder(W, b, scale, cp, primary_gain=gain, keep=keep, D=D, d0=d0, mu=mu)
+    enc = SWEncoder(W, b, scale, cp, primary_gain=gain, keep=keep, D=D, d0=d0, mu=mu,
+                    primary_noise=a.primary_spikes)
     print(f"kept {keep.size}/{a.k} units; primary gain {gain:.2f} Hz/unit; "
           f"active fraction {(R[keep] > 0).mean():.1%}")
 

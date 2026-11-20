@@ -178,7 +178,7 @@ class SWEncoder:
 
     def __init__(self, W, b, scale, coch_params, *, primary_gain, dog=None,
                  threshold=0.0, keep=None, D=None, d0=None, mu=None,
-                 primary_noise=True):
+                 primary_noise=False):
         self.W = np.asarray(W, dtype=np.float64)
         #: Mean window subtracted before the STRFs (the autoencoder's centring).
         self.mu = (np.zeros((self.W.shape[1], 1)) if mu is None
@@ -193,8 +193,8 @@ class SWEncoder:
         self.keep = (np.arange(self.W.shape[0]) if keep is None
                      else np.asarray(keep, dtype=int))
         self.lam = 0.0                                    # dense code (interface parity)
-        #: False feeds the DoG the primary units' expected spike trains (noise-free), a
-        #: diagnostic for how much higher-AC variability is primary Poisson noise.
+        #: False (default) feeds the DoG the primary rates (as expected spikes per 1 ms bin),
+        #: as in Schneider & Woolley's model; True feeds it Poisson primary spikes.
         self.primary_noise = bool(primary_noise)
         #: The autoencoder's decoder (for diagnostics: reconstructions), if saved.
         self.D = None if D is None else np.asarray(D, dtype=np.float64)

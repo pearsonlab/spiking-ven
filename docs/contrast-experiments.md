@@ -963,8 +963,11 @@ left as is (changing it changes every trained model) -- TODO for review.
 **Open: rendition variability of the S&W front end.** Pooled over the 38 renditions the
 best model sings at 0.81x (4.75 vs 5.87 Hz; `outputs/singing_scatter_best_overnight.png`).
 The S&W encoder gives the template far more BS activity than the other renditions (2.96 Hz
-vs a pool mean of 1.82, range 0.79-2.96; the causal encoder: 2.53 vs 2.29). Not loudness
-(corr 0.23 with rms). Training cycles all 38, so one HVC-locked inhibition pattern sits
+vs 1.79 for the other 37, range 0.79-2.95; the causal encoder: 2.53 vs 2.29). It is
+loudness: corr(rms, BS rate) = 0.82. The template is the loudest rendition (others
+0.59-0.99 of its rms), every rendition is scaled by the *template's* rms
+(`rms_from=sig_train`), and the per-unit DoG thresholds turn a 25% quieter rendition into
+much less BS activity. Training cycles all 38, so one HVC-locked inhibition pattern sits
 between them: the template lands at the silent rate, the average rendition ~1 Hz below.
-Also unexplained: the template's `aud_correct` (2.96 Hz) vs its pool re-encoding -- worth
-checking the BS thresholds / calibration across renditions before more network tuning.
+Candidate fixes: normalise each rendition by its own rms (auditory gain control), or a
+median-loudness template; either needs a retrain.

@@ -891,3 +891,20 @@ fluctuations are flattened against the cell's slow rate while the mean stays at 
 The anchor recovers sing/not (0.74 -> 0.90) for a few points of cancellation. r_slow is
 reset to R_TARGET each rendition, so a long tau_slow barely moves and does not anchor
 (3000 is worse than 1000); 1800 I_HVC adds nothing over 1200.
+
+**Round E (shorter slow reference).** n_ih 1200, lam 1, eta 3:
+
+| tau_loc / tau_slow | cancelled | timed | rev/tr | song-excess rev/tr | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| 100 / 300 | 59% | 54% | 1.28 | 1.99 | 1.01 | 0.94 / 0.49 |
+| 100 / 500 | 60% | 55% | 1.30 | 2.05 | 0.97 | 0.92 / 0.51 |
+| 50 / 300 | 59% | 54% | 1.30 | 2.02 | 1.00 | 0.94 / 0.51 |
+| 30 / 200 | 58% | 54% | 1.28 | 1.95 | 1.02 | 0.95 / 0.48 |
+
+With the mean held (sing/not ~1), every variant lands at 58-60% cancelled: the local
+target's extra cancellation in B-D came mostly from the mean drifting down (more
+inhibition everywhere), not from better-shaped inhibition. Hypothesis for the ~60% floor:
+each E cell has ~6 auditory synapses at 400 nS, so each (Poisson) BS spike is a huge EPSP
+that the E cell relays almost one for one; learned inhibition can follow only the mean
+timing, so cancelling a peak needs a veto-strength shunt that over-inhibits. Round F
+spreads the same drive over more, weaker synapses.

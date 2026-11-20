@@ -140,6 +140,7 @@ def build_stimuli(
     hvc_intro: tuple[int, int, int] = HVC_INTRO,
     norm_sigma: float | None = None,
     norm_power: float | None = None,
+    rms_per_rendition: bool = False,
     verbose: bool = True,
 ) -> dict:
     """Build every stimulus the trainer and the metrics need.
@@ -179,9 +180,12 @@ def build_stimuli(
     acts_train = encode_acts(sig_train, encoder, sr=sr, n_ista=n_ista,
                              T_out_ms=T_rend, rms_from=sig_train)
 
-    def sig_to_aud(sig, seed_offset: int):
+    def sig_to_aud(sig, seed_offset: int, own_rms: bool = False):
+        # ``own_rms``: scale this waveform by its own rms rather than the song's (auditory
+        # gain control across renditions of differing loudness).
         return encode_stimulus(sig, encoder, sr=sr, T_out_ms=T_rend, acts_train=acts_train,
-                               rms_from=sig_train, mean_rate_hz=mean_rate_hz,
+                               rms_from=sig if own_rms else sig_train,
+                               mean_rate_hz=mean_rate_hz,
                                n_ista=n_ista, seed=seed + seed_offset,
                                norm_sigma=norm_sigma, norm_power=norm_power)
 
@@ -195,7 +199,8 @@ def build_stimuli(
     for ci in range(n_motifs):
         if ci == train_idx:
             continue
-        correct_pool.append(sig_to_aud(corpus.signal(ci), 100 + ci))
+        correct_pool.append(sig_to_aud(corpus.signal(ci), 100 + ci,
+                                       own_rms=rms_per_rendition))
 
     sig_rev = sig_train[::-1].astype(np.float64)
     aud_reversed = sig_to_aud(sig_rev, 200)
@@ -279,6 +284,7 @@ def build_stimuli(
         "n_ista": n_ista,
         "norm_sigma": norm_sigma,
         "norm_power": norm_power,
+        "rms_per_rendition": bool(rms_per_rendition),
         "daf_window_s": daf_window_s,
         "fwd_rev_corr": fwd_rev_corr,
         "n_kernels": n_kernels,
@@ -314,6 +320,8 @@ def stimulus_record(st: dict, *, encoder_path=None, motifs_path=None) -> dict:
         rec["norm_sigma"] = float(st["norm_sigma"])
     if st.get("norm_power") is not None:
         rec["norm_power"] = float(st["norm_power"])
+    if st.get("rms_per_rendition"):
+        rec["rms_per_rendition"] = True
     if encoder_path is not None:
         rec["encoder_sha256"] = sha256_file(encoder_path)
     if motifs_path is not None:

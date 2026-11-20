@@ -16,6 +16,7 @@ pipeline.
 from __future__ import annotations
 
 import argparse
+import os
 
 import numpy as np
 
@@ -66,9 +67,16 @@ def main() -> None:
     p.add_argument("--recon-tau-ms", type=float, default=None,
                    help="weight each lag's reconstruction error by exp(-lag/tau) "
                         "(default: uniform over the window)")
-    p.add_argument("--predict-next", action="store_true",
-                   help="objective: predict the next cochleagram frame from the code of the "
-                        "past window (instead of reconstructing the window)")
+    p.add_argument("--predict-frames", type=int, default=0,
+                   help="objective: predict the next N cochleagram frames from the code of "
+                        "the past window (instead of reconstructing the window); 0 = off")
+    p.add_argument("--checkpoint", default=None,
+                   help="save the STRFs after every epoch here (default: <out>.ckpt.npz), "
+                        "so the run can be stopped and plotted (scripts/plot_strfs.py)")
+    p.add_argument("--resume", action="store_true",
+                   help="continue from the checkpoint (same arguments as the original run); "
+                        "lower --epochs to the checkpoint's epoch to just finalize the encoder "
+                        "from the best weights so far")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -101,19 +109,35 @@ def main() -> None:
               f"bouts ({sum(c.shape[1] for c in train)} frames), {len(val)} held out")
     print(f"{len(cochs)} motifs, {sum(c.shape[1] for c in cochs)} frames (calibration); "
           f"training {a.k} STRFs x {cp['n_channels']} ch x {a.l_frames} frames")
+    ckpt_path = a.checkpoint or a.out.replace(".npz", ".ckpt.npz")
+
+    def save_ckpt(state):
+        # Write then rename, so killing the run mid-write never leaves a broken checkpoint.
+        tmp = ckpt_path.replace(".npz", ".tmp.npz")
+        np.savez(tmp, frame_ms=1000.0 / cp["frame_rate"], **state)
+        os.replace(tmp, ckpt_path)
+
+    resume = None
+    if a.resume and os.path.exists(ckpt_path):
+        resume = dict(np.load(ckpt_path, allow_pickle=False))
+        print(f"resuming from {ckpt_path} (epoch {int(resume['epoch'])})")
+    elif a.resume:
+        print(f"no checkpoint at {ckpt_path}: starting fresh")
+
     V, b, mu, Dk = learn_relu(train, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
                               reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
                               l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
                               patience=a.patience, min_delta=a.min_delta,
                               log_every=a.log_every,
                               smooth_axes=(1,) if a.smooth_freq_only else (1, 2),
-                              recon_tau_ms=a.recon_tau_ms, predict_next=a.predict_next)
+                              recon_tau_ms=a.recon_tau_ms, predict_frames=a.predict_frames,
+                              checkpoint=save_ckpt, resume=resume)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)
     D, d0, scale = Dk.T.copy(), np.zeros_like(mu), 1.0
-    if a.predict_next:
-        # The decoder predicts the next frame, not the window: nothing to reconstruct with.
+    if a.predict_frames:
+        # The decoder predicts future frames, not the window: nothing to reconstruct with.
         D, d0 = None, None
 
     # Units that never activate on the corpus are dropped (silent channels).

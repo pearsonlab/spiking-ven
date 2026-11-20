@@ -21,6 +21,7 @@ pipeline, training and metrics use it unchanged.
 
 from __future__ import annotations
 
+import json
 import zlib
 from typing import Any
 
@@ -94,7 +95,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
                val_cochs=None, patience: int = 0, min_delta: float = 0.002,
                log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
-               recon_tau_ms: float | None = None, predict_next: bool = False):
+               recon_tau_ms: float | None = None, predict_frames: int = 0,
+               checkpoint=None, resume=None):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -126,10 +128,16 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     lag's reconstruction error by ``exp(-lag / recon_tau_ms)`` (1 at the newest frame):
     the code is then asked to describe the recent past, so STRF energy at long lags
     survives only where it helps; reported errors are weighted the same way.
-    ``predict_next``: instead of reconstructing the window, the (untied) decoder predicts
-    the NEXT frame ``X[:, t]`` (centred by the corpus mean frame) from the code of the
-    strictly-past window; ``D`` is then (K, C). STRFs keep the history that predicts what
-    comes next."""
+    ``predict_frames`` = h > 0: instead of reconstructing the window, the (untied) decoder
+    predicts the NEXT h frames ``X[:, t:t+h]`` (each centred by the corpus mean frame;
+    zero past the end of a bout) from the code of the strictly-past window; ``D`` is then
+    (K, C*h). STRFs keep the history that predicts what comes next.
+
+    ``checkpoint``: called after every epoch with a dict of the full training state (current
+    ``V``, ``b``, ``D``, ``mu``, ``epoch`` (1-based), held-out error, best weights so far,
+    patience counter, RNG state), so a run can be stopped at any time, its latest STRFs
+    inspected, and training continued by passing that dict back as ``resume`` (same corpus
+    and settings): the continuation is identical to an uninterrupted run."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -140,19 +148,23 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     b = np.zeros(K)
-    if predict_next and tied:
-        raise ValueError("predict_next needs the untied decoder")
-    if predict_next:
-        mu_y = np.concatenate([X for X in cochs], axis=1).mean(axis=1)       # (C,)
-        D = rng.standard_normal((K, C))
+    if predict_frames and tied:
+        raise ValueError("predict_frames needs the untied decoder")
+    h = int(predict_frames)
+    mu_y = np.concatenate([X for X in cochs], axis=1).mean(axis=1)           # (C,)
+    if h:
+        D = rng.standard_normal((K, C * h))
         D /= np.linalg.norm(D, axis=1, keepdims=True)
     else:
-        mu_y = None
         D = None if tied else V.reshape(K, C * L).copy()
 
     def target(X, P):
-        """What the code must reproduce: the window, or the next frame."""
-        return (X.T - mu_y) if predict_next else P
+        """What the code must reproduce: the window, or the next h frames (T, C*h)."""
+        if not h:
+            return P
+        Xc = X - mu_y[:, None]
+        Xp = np.concatenate([Xc, np.zeros((C, h - 1))], axis=1)
+        return np.concatenate([Xp[:, j:j + X.shape[1]].T for j in range(h)], axis=1)
     lag_ms = (L - 1 - np.arange(L)) * frame_ms + frame_ms / 2     # oldest column first
     # Reconstruction weight per window column (channel-major, lag inner): exp(-lag/tau),
     # 1 at the newest frame. Uniform without recon_tau_ms.
@@ -167,7 +179,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             P = _past_windows(X, L) - mu
             Y = target(X, P)
             R = Y - np.maximum(P @ W.T + b, 0.0) @ Dk
-            w = 1.0 if predict_next else wcol
+            w = 1.0 if predict_frames else wcol
             num += float((w * R ** 2).sum())
             den += float((w * Y ** 2).sum())
         return num / max(den, 1e-12)
@@ -179,8 +191,20 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             float(np.median((e * lag_ms).sum(axis=1)))
 
     best = (np.inf, V.copy(), b.copy(), None if D is None else D.copy(), -1)
-    stale = 0
-    for ep in range(n_epochs):
+    stale, start = 0, 0
+    if resume is not None:
+        V, b = np.array(resume["V"], dtype=np.float64), np.array(resume["b"], dtype=np.float64)
+        if D is not None:
+            D = np.array(resume["D"], dtype=np.float64)
+        best = (float(resume["best_val"]), np.array(resume["best_V"]), np.array(resume["best_b"]),
+                None if D is None else np.array(resume["best_D"]), int(resume["best_epoch"]))
+        stale, start = int(resume["stale"]), int(resume["epoch"])
+        if bool(resume["stopped"]):
+            start = n_epochs                  # already early-stopped: just return the best
+        rng.bit_generator.state = json.loads(str(resume["rng_state"]))
+        log(f"  resuming after epoch {start} (best epoch {best[4] + 1}, {best[0]:.3f}; "
+            f"{stale} stale)")
+    for ep in range(start, n_epochs):
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
@@ -191,7 +215,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             Dk = W if D is None else D
             Y = target(X, P)
             R = Y - S @ Dk                                     # residual
-            Rw = R if predict_next else R * wcol               # lag-weighted residual
+            Rw = R if predict_frames else R * wcol             # lag-weighted residual
             gZ = (Rw @ Dk.T) * (Z > 0)                         # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             n = max(T, 1)
@@ -208,7 +232,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
-            w = 1.0 if predict_next else wcol
+            w = 1.0 if predict_frames else wcol
             err += float(np.mean(w * R ** 2)) / float(np.mean(w * Y ** 2))
             act += float(np.mean(S > 0))
             alive |= (S > 0).any(axis=0)
@@ -219,6 +243,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             else:
                 stale += 1
         stop = patience > 0 and stale >= patience
+        if checkpoint is not None:
+            state = {"V": V, "b": b, "mu": mu, "epoch": ep + 1, "val_error": ve,
+                     "stale": stale, "stopped": stop, "best_val": best[0],
+                     "best_V": best[1], "best_b": best[2], "best_epoch": best[4],
+                     "rng_state": json.dumps(rng.bit_generator.state)}
+            if D is not None:
+                state |= {"D": D, "best_D": best[3]}
+            checkpoint(state)
         if ep % log_every == 0 or ep == n_epochs - 1 or stop:
             near, mlag = compactness(V)
             log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance train "

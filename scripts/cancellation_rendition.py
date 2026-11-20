@@ -7,7 +7,8 @@ The template is an outlier for some auditory units (it is the loudest rendition)
 draws the first column from another rendition of the training pool: its auditory spikes
 and its waveform. ``--median`` picks the rendition whose mean BS rate is the median of the
 pool (excluding the template). The reversed-motif and DAF columns stay the template's test
-stimuli.
+stimuli. The bottom row also shows the E population rate averaged over every rendition
+of the pool (one noise draw each, ``--pool-trials`` to change).
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ def main() -> None:
     p.add_argument("--median", action="store_true")
     p.add_argument("--tag", default="")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--pool-trials", type=int, default=1)
     a = p.parse_args()
     with open(a.cache, "rb") as fh:
         st = pickle.load(fh)
@@ -52,7 +54,15 @@ def main() -> None:
     st2["aud_correct"] = st["correct_pool"][k]
     st2["sig_train"] = np.asarray(corpus.signal(order[k]), dtype=np.float64)
     ven = VocalErrorNet.load(a.model, seed=a.seed)
-    make_figure(ven, st2, a.tag or f"_rendition{k}", out_dir=a.out_dir)
+    rng = np.random.default_rng(a.seed + 1)
+    pool_rate = np.mean([ven.transform(st["hvc_on"], aud, rng=rng,
+                                       hvc_prelude=st.get("hvc_prelude")).mean(axis=0)
+                         for aud in st["correct_pool"] for _ in range(a.pool_trials)],
+                        axis=0) * 1000.0
+    n = len(st["correct_pool"])
+    make_figure(ven, st2, a.tag or f"_rendition{k}", out_dir=a.out_dir,
+                extra_rates={0: (pool_rate, f"all renditions (n={n})")},
+                shown_label="shown rendition")
 
 
 if __name__ == "__main__":

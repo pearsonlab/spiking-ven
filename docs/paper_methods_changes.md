@@ -1,8 +1,11 @@
 # Proposed changes to the paper's Methods
 
-For `~/Overleaf/critic paper/main.tex`: sections *Vocal error network*, *Model parameters*,
-*Training and plasticity* and *Model evaluation*. The Overleaf file has not been edited. LaTeX
-is ready to paste.
+For `~/Overleaf/critic paper/main.tex`: sections *Auditory data*, *Sparse auditory coding*,
+*Vocal error network*, *Model parameters*, *Training and plasticity* and *Model evaluation*.
+The Overleaf file has not been edited. LaTeX is ready to paste.
+
+All "Now:" quotes and line references were checked against `main.tex` as of 2026-11-17 19:33,
+its last modification. Re-check them if the file has changed since.
 
 The changes fall into two groups:
 
@@ -43,15 +46,12 @@ We modeled the vocal error network as a pair of excitatory ($N_E=600$) and inhib
 Why: the network is now continuous-time equations integrated by Brian2, so the 1 ms discrete
 update is gone. Cite Stimberg, Brette & Goodman (2019), eLife 8:e47314.
 
-### A2. Sign of the GABA term in the E equation (bug in the current text)
+### A2. `V` -> `V_i` in the driving forces (the GABA sign is already fixed)
 
-**Now:** `... - \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V) ...`
-
-**Proposed:** `... + \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V_i) ...`
-
-Why: once the driving force is written as `(V_GABA - V)`, every conductance term enters with a
-plus sign, as the AMPA and NMDA terms already do. The minus sign makes inhibition depolarising.
-Also change `V` to `V_i` throughout, for consistency.
+The E equation (line 178) already reads `+ \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V)`,
+so the sign bug flagged earlier has been fixed. What remains is consistency: write `V_i` in
+the driving force, both in the E equation's GABA term and in the I equation (line 168),
+`(V_{AMPA} - V)` -> `(V_{AMPA} - V_i)`.
 
 ### A3. Units of the NMDA term (bug in the current text)
 
@@ -141,12 +141,45 @@ continuous-time integration at \qty{0.1}{\ms}: AMPA weights were scaled by $1/[3
 
 Also in the *Training and plasticity* table: $\rho$ = \qty{3.775}{\nano\siemens} is unchanged.
 
+### A8. Loudness normalization (text does not match the shipped code)
+
+**Now** (*Auditory data*, line 132): "Prior to encoding, signals were globally rescaled such
+that the template had RMS value 0.1. During model training, all signals were normalized to 0.1
+RMS to remove loudness as a confounding factor."
+
+The shipped model (v0.7.0) does *not* normalize each rendition. Every rendition is scaled by
+the template's RMS (`build_stimuli`, `rms_from=sig_train`), so quieter renditions arrive
+quieter. Their RMS is 0.59-1.0 of the template's, and the template is the loudest. Either:
+
+- **(v0.7.0)** drop the second sentence: "All signals were scaled by the same factor, which
+  set the template's RMS to 0.1, so renditions kept their natural loudness differences."; or
+- **(baseline, Parts B-F)** keep the second sentence. The baseline normalizes each training
+  rendition by its own RMS (`rms_per_rendition`), which is what the sentence describes. Then
+  add "The DAF and time-reversed test stimuli were scaled with the template's factor."
+
 ---
 
 ## B. Balanced E/I network with two inhibitory populations (experimental)
 
 **Replaces:** the single inhibitory pool, which is driven by HVC and E and whose I -> E weights
 start at zero and grow by audio-gated STDP. In the baseline that STDP is off ($\rho = 0$).
+
+Sentences in the current text that become false, to remove or replace (*Vocal error network*):
+
+- line 166: "tonic input currents, calibrated such that the E neuron population has a mean
+  rate of \qty{25}{\Hz} absent other inputs and the I population only fires when driven by
+  HVC input". In the baseline, E receives \qty{2500}{\pA} balanced by $I^{bal}$, giving a
+  silent E rate of $\approx\qty{6}{\Hz}$. $I^{bal}$ receives no tonic current and fires on E
+  input.
+- line 168: the I equation's HVC term $\sum_l B_{il} s^{HVC}_l$. It moves to $I^{HVC}$; $I^{bal}$
+  gets no HVC input.
+- line 174: "Connection weights $J^{EI}$ are nonzero with probability 0.5 ... HVC input
+  weights $B$ are nonzero with probability 0.1 ...". Becomes probability 0.05 (mean 11 nS,
+  s.d. 5.5) for $J^{EI}$ and no $B$ (see below).
+- line 192: "Connections in $J^{IE}$ ... were initialized to 0 and learned via plasticity
+  rules". Becomes fixed, as below.
+- Table 2 (`tab:params-net`): $I_E$ (\qty{453}{\pA}, "for a 25 Hz tonic rate"), $I_I$
+  (\qty{53.7}{\pA}), $B$, $J^{EI}$ and the NMDA block all change. See Part G.
 
 **Text (Vocal error network):**
 
@@ -179,7 +212,11 @@ $I^{HVC}$ neurons use the same membrane equation as $I^{bal}$.
 
 ## C. I_HVC -> E plasticity: the Vogels rate-target rule (experimental)
 
-**Replaces:** audio-gated STDP on I -> E (*Training and plasticity*) for the HVC-driven pathway.
+**Replaces:** audio-gated STDP on I -> E (*Training and plasticity*, lines 288-297: the
+three-factor rule, its gate and kernel) for the HVC-driven pathway, and the plasticity
+table `tab:params-train` ($\rho$, $r_I$, "Initial $J^{IE}$ 0"). Training-table rows that
+change: training renditions, 600 -> 150 for the baseline (`configs/baseline.json`; it
+converges by about 100, see round K).
 
 **Text:**
 
@@ -261,25 +298,51 @@ Why, and what the experiments showed (round K):
 
 ## E. Schneider & Woolley two-stage auditory front end (experimental)
 
-**Replaces:** the sparse-coding causal filter bank with ISTA inference (*Auditory input*).
+**Replaces:** the *Sparse auditory coding* subsection (lines 139-158) and the "Sparse
+auditory encoder" block of Table 1 (lines 222-233). The *Auditory data* and *Cochleagram*
+subsections stay (but see A8). The same 40-channel cochleagram at 500 Hz frames feeds the new
+encoder.
 
-**Text:**
+What carries over from the current text:
+
+- **The three regularizers** (lines 141-153): $L_1$ on kernel entries, $L_2$ on kernel
+  gradients, and the minimum-phase pull with $a = 0.25$. The new STRF training applies the
+  same three steps after each update. Keep the itemized list, cepstrum explanation included,
+  and change only the numbers. $L_1$: $7\times10^{-5}$ -> $2\times10^{-4}$. Smoothness:
+  $10^{-3}$ -> $0.1$. Learning rate: 10 -> 0.1. The steps now act at the gradient step size.
+- **The spike conversion** (line 158): Poisson counts in 1 ms bins, a 2 ms refractory period,
+  rates calibrated to a 2.5 Hz mean over the rendition (motif plus 200 ms silence). This is
+  unchanged.
+
+What changes:
+
+- the model, a rectified autoencoder rather than ISTA sparse coding;
+- the context, 64 ms (32 frames) rather than 32 ms (16);
+- 128 filters (126 active) rather than 64 (54);
+- the input, which is centred by the corpus-mean window rather than locally de-meaned;
+- the higher-AC stage, which is new.
+
+Drop $\lambda$ = 0.3, the ISTA iterations and "Sparsity comes from the iterative soft
+thresholding". Sparsity now comes from the per-unit thresholds of the second stage.
+
+**Text** (new *Auditory coding* subsection, replacing lines 139-157; regularizer list kept):
 
 ```latex
-Auditory input follows the two-stage model of \textcite{schneider2013sparse}. Song waveforms
-are normalized to a common RMS level, each rendition by its own RMS, and converted to
-cochleagrams (40 ERB-spaced channels, \qtyrange{200}{8000}{\Hz}, \qty{2}{\ms} frames).
+We transformed the cochleagram into auditory cortical responses with a two-stage model after
+\textcite{schneider2013sparse}: dense primary responses, and sparse responses in higher
+auditory cortex as observed experimentally \parencite{keller2009neural,schneider2013sparse}.
 
 \emph{Primary auditory cortex.} $K = 128$ units with spectrotemporal receptive fields
-$V_k$ (40 channels $\times$ \qty{64}{\ms}) respond to the strictly past window $x_t$ of the
-cochleagram as $r_k(t) = g\,\big[V_k\cdot(x_t - \mu) + b_k\big]_+$, with $\mu$ the mean
-window over the corpus. The STRFs were learned as the encoder of a rectified autoencoder that
-reconstructs each window from the code through a linear decoder with unit-norm rows. After
-each gradient step, the STRFs were smoothed (an $L_2$ penalty on first differences across
-channel and lag, weight 0.1), pulled 25\% toward their minimum-phase versions, and
-soft-thresholded ($L_1$, weight $2\times10^{-4}$), for 80 epochs over the corpus. Units that
-never responded were dropped (126 kept), and the gain $g$ was set so that the mean primary
-rate during song is \qty{32}{\Hz}.
+(STRFs) $V_k$ (40 channels $\times$ \qty{64}{\ms}) respond to the strictly past window $x_t$
+of the cochleagram as $r_k(t) = g\,\big[V_k\cdot(x_t - \mu) + b_k\big]_+$, with $\mu$ the
+mean window over the corpus. The STRFs were learned as the encoder of a rectified
+autoencoder that reconstructs each window from the code through a linear decoder with
+unit-norm rows, subject to the following regularizations, each applied after every gradient
+step:
+% keep the current itemize (L1 on kernel entries; L2 on kernel gradients; minimum-phase pull
+% with the cepstrum explanation and a = 0.25) here unchanged
+Training ran for 80 epochs over the corpus. Units that never responded were dropped (126
+kept), and the gain $g$ was set so that the mean primary rate during song is \qty{32}{\Hz}.
 
 \emph{Higher auditory cortex.} Each primary unit's rate is filtered by a causal
 difference-of-Gaussians kernel (excitatory lobe centred \qty{13}{\ms}, s.d. \qty{6.4}{\ms};
@@ -291,9 +354,29 @@ higher-auditory units. The population is divisively normalized,
     \tilde a_l(t) = \frac{a_l(t)}{1 + \big(\sum_{l'} a_{l'}(t)/\sigma\big)^2},
     \qquad \sigma = 0.3,
 \end{equation*}
-and converted to Poisson spike trains whose mean rate over the song is \qty{2.5}{\Hz}
-\parencite{schneider2013sparse}.
+and converted to spikes as before (keep line 158 as it is).
 ```
+
+Table 1 "Sparse auditory encoder" block, replacement rows:
+
+| Row | Now | Proposed |
+|---|---|---|
+| Filters trained (active) | 64 (54) | 128 (126) |
+| Filter context | 16 frames (32 ms) | 32 frames (64 ms) |
+| $\lambda$ code shrinkage | 0.3 | (remove) |
+| $L_1$ on kernel entries | 7e-5 | 2e-4 |
+| Smoothness on kernel gradients | 1e-3 | 0.1 |
+| $a$ minimum-phase pull | 0.25 | 0.25 |
+| Learning rate | 10 | 0.1 |
+| Training epochs | 80 | 80 |
+| ISTA iterations | 20 / 50 | (remove) |
+| (new) Primary rate during song | -- | 32 Hz |
+| (new) DoG kernel, exc. centre / s.d. | -- | 13 ms / 6.4 ms |
+| (new) DoG kernel, inh. centre / s.d. | -- | 60 ms / 42 ms |
+| (new) Higher-AC threshold | -- | 90th percentile per unit |
+| (new) Normalization $\sigma$, exponent | -- | 0.3, 2 |
+| Target mean auditory firing rate | 2.5 Hz | 2.5 Hz |
+| Auditory refractory period | 2 ms | 2 ms |
 
 Why:
 
@@ -316,6 +399,18 @@ $A$ instead.
 ---
 
 ## F. Evaluation: new measures and protocol changes (experimental)
+
+**A sentence that becomes false** (*Model evaluation*, line 324): "the DAF response latency
+and magnitude proved most constraining, requiring that auditory input currents to excitatory
+cells be strongly NMDA-dominated and that E cells rapidly adapt ...". The baseline has no
+NMDA. Proposed: "... the DAF response magnitude proved most constraining. It was set by the
+strength of auditory input to E cells together with divisive normalization of the auditory
+population, which compresses the broadband noise burst far more than song." The
+tunable-parameter list in the same paragraph also changes: add $\sigma$, the $I^{HVC}$
+target rate and $\kappa$; drop $g_{NMDA}$, $\rho$ and $r_I$.
+
+**Targets table** (`tab:targets`), new row under *Vocal error neurons*:
+`Singing / not-singing rate per neuron (Fig.~7D) & \numrange{0.5}{2} \\`.
 
 Add to *Model evaluation*:
 

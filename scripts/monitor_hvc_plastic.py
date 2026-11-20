@@ -1,8 +1,11 @@
 """Short, monitored training run for plastic HVC -> I_HVC synapses.
 
-    SWEEP_ENCODER=... SWEEP_AUD_NORM=0.3 SWEEP_AUD_NORM_POW=2 SWEEP_RMS_SELF=1 \\
-    python scripts/monitor_hvc_plastic.py --n-rend 150 --every 15 --out model.npz \\
-        --set kappa_h=0.02 tau_elig_ms=10
+    python scripts/monitor_hvc_plastic.py --out model.npz [--set kappa_h=0.01 ...]
+
+Starts from the experiment baseline (``configs/baseline.json``, ``--config`` for another):
+its model parameters, overridden by ``--set``, and its stimulus settings (encoder,
+auditory normalisation, per-rendition rms) unless the ``SWEEP_*`` environment variables
+already set them.
 
 Trains as ``sweep.py`` does (per-cell rate targets, burn-in, then the training pool) and
 every ``--every`` renditions prints: how concentrated each I_HVC cell's HVC input has
@@ -19,6 +22,8 @@ weight rows of ``--n-example`` cells, with each HVC neuron's burst time.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -31,12 +36,8 @@ import sweep  # noqa: E402
 
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 
-BASE = dict(c_ie=0.5, ie_init_mean_ns=6.0, ie_init_sd_ns=3.0, i_drive_i_pa=0.0,
-            i_drive_e_pa=2500.0, c_ei=0.05, ei_mean_ns=11.0, ei_sd_ns=5.5, c_hvc=0.0,
-            aud_mean_ns=400.0, aud_sd_ns=200.0, c_aud=0.05, g_nmda_mean_ns=0.0,
-            n_ih=1200, rho_ns=0.0, c_hvc_h=0.9, hvc_h_mean_ns=0.9, hvc_h_sd_ns=0.0,
-            vogels_h=1.0, eta_h_ns=3.0, c_he=10 / 600, hvc_plastic=1.0, kappa_h=0.02,
-            tau_elig_ms=10.0, h_relax=0.02)
+#: The experiment baseline (model, stimulus and training settings).
+BASELINE = Path(__file__).resolve().parents[1] / "configs" / "baseline.json"
 
 
 def windows(ih):
@@ -52,7 +53,9 @@ def windows(ih):
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--n-rend", type=int, default=150)
+    p.add_argument("--config", default=str(BASELINE))
+    p.add_argument("--n-rend", type=int, default=None,
+                   help="renditions (default: the config's training.n_rend)")
     p.add_argument("--every", type=int, default=15)
     p.add_argument("--set", nargs="*", default=[], help="overrides, key=value")
     p.add_argument("--out", required=True)
@@ -63,10 +66,17 @@ def main() -> None:
                    help="also store the full I_HVC -> E weights and the E population PSTH "
                         "(singing the trained song) at each checkpoint")
     a = p.parse_args()
-    cfg: dict[str, Any] = dict(BASE)
+    base = json.loads(Path(a.config).read_text())
+    cfg: dict[str, Any] = dict(base["model"])
     for kv in a.set:
         k, v = kv.split("=")
         cfg[k] = float(v)
+    if a.n_rend is None:
+        a.n_rend = int(base.get("training", {}).get("n_rend", 150))
+    if not os.environ.get("SWEEP_ENCODER"):
+        stim = base.get("stimulus", {})
+        sweep.configure(stim.get("encoder"), stim.get("aud_norm"),
+                        stim.get("aud_norm_power"), bool(stim.get("rms_per_rendition")))
     st = sweep._stimuli()
     T = int(st["T_song"])
     pre = st["hvc_prelude"]

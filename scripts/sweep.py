@@ -31,11 +31,37 @@ NORM_POW = (float(os.environ["SWEEP_AUD_NORM_POW"]) if os.environ.get("SWEEP_AUD
             else None)
 #: Each training rendition scaled by its own rms (``--rms-per-rendition``).
 RMS_SELF = bool(os.environ.get("SWEEP_RMS_SELF"))
-CACHE = Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER == "outputs/causal_encoder.npz"
-                                  else f"stimuli_cache_{Path(ENCODER).stem}")
-             + ("" if NORM is None else f"_norm{NORM:g}")
-             + ("" if NORM_POW is None else f"_pow{NORM_POW:g}")
-             + ("_rmsself" if RMS_SELF else "") + ".pkl")
+
+
+def _cache_path() -> Path:
+    """The stimulus cache for the current encoder and auditory-normalisation settings."""
+    return Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER == "outputs/causal_encoder.npz"
+                                     else f"stimuli_cache_{Path(ENCODER).stem}")
+                + ("" if NORM is None else f"_norm{NORM:g}")
+                + ("" if NORM_POW is None else f"_pow{NORM_POW:g}")
+                + ("_rmsself" if RMS_SELF else "") + ".pkl")
+
+
+CACHE = _cache_path()
+
+
+def configure(encoder: str | None = None, aud_norm: float | None = None,
+              aud_norm_power: float | None = None, rms_per_rendition: bool = False) -> None:
+    """Set the stimulus settings (and the environment, for worker processes)."""
+    global ENCODER, CACHE, NORM, NORM_POW, RMS_SELF
+    if encoder:
+        os.environ["SWEEP_ENCODER"] = encoder
+        ENCODER = encoder
+    if aud_norm is not None:
+        os.environ["SWEEP_AUD_NORM"] = str(aud_norm)
+        NORM = aud_norm
+    if aud_norm_power is not None:
+        os.environ["SWEEP_AUD_NORM_POW"] = str(aud_norm_power)
+        NORM_POW = aud_norm_power
+    if rms_per_rendition:
+        os.environ["SWEEP_RMS_SELF"] = "1"
+        RMS_SELF = True
+    CACHE = _cache_path()
 
 
 def _stimuli():
@@ -126,27 +152,7 @@ def main() -> None:
                    help="encoder .npz (default outputs/causal_encoder.npz); its own cache")
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     a = p.parse_args()
-    global ENCODER, CACHE, NORM, NORM_POW, RMS_SELF
-    if a.encoder:
-        os.environ["SWEEP_ENCODER"] = a.encoder
-        ENCODER = a.encoder
-    if a.aud_norm is not None:
-        os.environ["SWEEP_AUD_NORM"] = str(a.aud_norm)
-        NORM = a.aud_norm
-    if a.aud_norm_power is not None:
-        os.environ["SWEEP_AUD_NORM_POW"] = str(a.aud_norm_power)
-        NORM_POW = a.aud_norm_power
-    if a.rms_per_rendition:
-        os.environ["SWEEP_RMS_SELF"] = "1"
-        RMS_SELF = True
-    if (a.encoder or a.aud_norm is not None or a.aud_norm_power is not None
-            or a.rms_per_rendition):
-        CACHE = Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER ==
-                                          "outputs/causal_encoder.npz"
-                                          else f"stimuli_cache_{Path(ENCODER).stem}")
-                     + ("" if NORM is None else f"_norm{NORM:g}")
-             + ("" if NORM_POW is None else f"_pow{NORM_POW:g}")
-             + ("_rmsself" if RMS_SELF else "") + ".pkl")
+    configure(a.encoder, a.aud_norm, a.aud_norm_power, a.rms_per_rendition)
     if a.grid:
         g = json.loads(a.grid)
         configs = [dict(zip(g, vals)) for vals in itertools.product(*g.values())]

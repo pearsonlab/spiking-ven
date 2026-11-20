@@ -935,3 +935,36 @@ The mean song drive is essentially fully cancelled against not singing (by const
 the rate-target rule); the open problem is flatness. The anchored local target on 1200
 I_HVC beats the causal-encoder V2 on flatness (48% vs 44%) with the mean held at the silent
 rate.
+
+**Round G (push flatness, mean anchored).** n_ih 1200, tau_loc 100:
+
+| config | flatness | vs not singing | aligned / silent Hz | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|
+| lam 2, tau_slow 1000 | 83% | 168% | 2.09 / 5.86 | 0.34 | 0.39 / 0.38 |
+| lam 2, tau_slow 500 | 55% | 122% | 4.66 / 5.86 | 0.74 | 0.83 / 0.68 |
+| lam 1, tau_slow 1000, eta 10 | 51% | 110% | 5.29 / 5.86 | 0.84 | 0.91 / 0.53 |
+| **lam 1, tau_slow 1000, 1500 rend** | 49% | 100% | 5.88 / 5.86 | 0.93 | 0.91 / 0.51 |
+
+lam > 1 runs away into over-inhibition (flat because silenced); eta 10 trades mean for
+flatness. The 1500-rendition anchored model is converged and is the best balanced one:
+`outputs/sweeps/rG_long/0fec29c5fb.npz`. Its full metrics: cancelled vs not singing 100%,
+flatness 49%, rev/tr 1.33, song-excess rev/tr 2.19, random-onset DAF xs 0.91, responders
+0.51, latency 41 ms, duration 44 ms, peak latency 80 ms (target 35-75), peak +28 Hz.
+
+**Scatter bias found and fixed.** `singing_scatter.py`'s not-singing runs have no HVC
+prelude, so the network starts from rest with a ~60 Hz onset transient (~10 ms) that added
+~0.4 Hz to every cell's not-singing rate -- most visible, proportionally, in low-rate cells
+(the sag below the diagonal in every earlier scatter). It now skips the first 20 ms in both
+conditions. Best model, template song (10 trials): 5.87 -> 5.88 Hz (1.00x), 45% of cells
+higher singing, on the diagonal (`outputs/singing_scatter_best_overnight_template.png`).
+`set_rate_targets` has the same bias (R_TARGET mean 6.21 vs 5.87 Hz true silent rate, +6%);
+left as is (changing it changes every trained model) -- TODO for review.
+
+**Open: rendition variability of the S&W front end.** Pooled over the 38 renditions the
+best model sings at 0.81x (4.75 vs 5.87 Hz; `outputs/singing_scatter_best_overnight.png`).
+The S&W encoder gives the template far more BS activity than the other renditions (2.96 Hz
+vs a pool mean of 1.82, range 0.79-2.96; the causal encoder: 2.53 vs 2.29). Not loudness
+(corr 0.23 with rms). Training cycles all 38, so one HVC-locked inhibition pattern sits
+between them: the template lands at the silent rate, the average rendition ~1 Hz below.
+Also unexplained: the template's `aud_correct` (2.96 Hz) vs its pool re-encoding -- worth
+checking the BS thresholds / calibration across renditions before more network tuning.

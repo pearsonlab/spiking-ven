@@ -27,6 +27,10 @@ from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 INK, INK2, GRID = "#1f1f1e", "#5f5e58", "#e4e3df"
 COLOR = "#2a78d6"
 FLOOR = 0.1     # Hz: axis floor; neurons silent in a condition are drawn here
+#: ms excluded at the start of the motif window: the not-singing runs have no HVC prelude,
+#: so the network starts from rest with a ~60 Hz onset transient (~10 ms) that would add
+#: ~0.4 Hz to every cell's not-singing rate.
+SKIP_MS = 20
 
 
 def rates(v, st, trials, pool=False):
@@ -38,10 +42,10 @@ def rates(v, st, trials, pool=False):
     z = np.zeros_like(st["aud_correct"])
     songs = st["correct_pool"] if pool else [st["aud_correct"]] * trials
     sing = np.mean([v.transform(st["hvc_on"], a, rng=rng,
-                                hvc_prelude=st["hvc_prelude"])[:, :T] for a in songs],
+                                hvc_prelude=st["hvc_prelude"])[:, SKIP_MS:T] for a in songs],
                    axis=(0, 2)) * 1000
-    quiet = np.mean([v.transform(st["hvc_off"], z, rng=rng)[:, :T] for _ in range(trials)],
-                    axis=(0, 2)) * 1000
+    quiet = np.mean([v.transform(st["hvc_off"], z, rng=rng)[:, SKIP_MS:T]
+                     for _ in range(trials)], axis=(0, 2)) * 1000
     return quiet, sing
 
 

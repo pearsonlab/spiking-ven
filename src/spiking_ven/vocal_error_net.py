@@ -46,7 +46,7 @@ _FLOAT_KEYS = (
     "c_ei", "ei_mean_ns", "ei_sd_ns",
     "c_ie", "ie_init_mean_ns", "ie_init_sd_ns",
     "c_hvc_h", "hvc_h_mean_ns", "hvc_h_sd_ns", "rho_h_ns", "r_ih_hz", "i_drive_ih_pa",
-    "vogels_h", "eta_h_ns", "vogels_gate",
+    "vogels_h", "eta_h_ns", "vogels_gate", "lam_loc", "tau_loc_ms",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
@@ -101,6 +101,9 @@ class VocalErrorNet:
                    instead (each E cell held at its rate in ``R_TARGET``); 0 = the STDP rule
     eta_h_ns     : its learning rate (nS)
     vogels_gate  : 1 = gate that rule by the E cell's auditory input (as the STDP rule is)
+    lam_loc, tau_loc_ms : that rule's target is ``(1 - lam_loc) R_TARGET + lam_loc r_loc``,
+                   with ``r_loc`` the cell's own rate averaged over ``tau_loc_ms`` -- a local
+                   target that flattens the rate on shorter timescales (0 = constant)
     rho_ns       : STDP step (nS); ``None`` is ``constants.rho_for(tau_stdp)``
     rho_pre_ns   : presynaptic depression per I spike while the audio gate is open (nS)
     j_ie_row_max_ns : cap on each E cell's total I -> E weight (nS), enforced by scaling
@@ -183,6 +186,8 @@ class VocalErrorNet:
     vogels_h: float
     eta_h_ns: float
     vogels_gate: float
+    lam_loc: float
+    tau_loc_ms: float
     R_TARGET: np.ndarray
     c_ie: float
     ie_init_mean_ns: float
@@ -238,6 +243,8 @@ class VocalErrorNet:
         vogels_h: float = 0.0,
         eta_h_ns: float = 1.0,
         vogels_gate: float = 0.0,
+        lam_loc: float = 0.0,
+        tau_loc_ms: float = 100.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -359,6 +366,7 @@ class VocalErrorNet:
             "theta_h": self.r_ih_hz * self.tau_stdp * 1e-3,
             "vogels_h": bool(self.vogels_h),
             "vogels_gate": bool(self.vogels_gate),
+            "lam_loc": float(self.lam_loc), "tau_loc": self.tau_loc_ms * ms,
             "E": {"C": self.c_e_pf * pF, "g_L": self.g_l_e * nS,
                   "I_tonic": self.i_drive_e_pa * pA, "sigma": self.noise_e * pA * sqrt_ms,
                   "beta": self.beta_adapt_pa * pA},
@@ -469,7 +477,8 @@ class VocalErrorNet:
                     "hvc_h_mean_ns": 20.0, "hvc_h_sd_ns": 10.0,
                     "rho_h_ns": float(d["rho_ns"]) if "rho_ns" in d else 0.0,
                     "r_ih_hz": 5.0, "i_drive_ih_pa": 0.0, "vogels_h": 0.0,
-                    "eta_h_ns": 1.0, "vogels_gate": 0.0}   # the constructor's defaults
+                    "eta_h_ns": 1.0, "vogels_gate": 0.0, "lam_loc": 0.0,
+                    "tau_loc_ms": 100.0}   # the constructor's defaults
         optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "R_TARGET")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults and k not in optional_arrays]
@@ -524,7 +533,7 @@ class VocalErrorNet:
 
     def _sim(self, hvc_spikes, aud_spikes, learn: bool = False,
              rng: np.random.Generator | None = None, hvc_prelude=None):
-        from brian2 import ms, nS, seed as brian_seed
+        from brian2 import Hz, ms, nS, seed as brian_seed
         from .network import bin_spikes, spike_events
 
         n_pre = 0 if hvc_prelude is None else int(np.asarray(hvc_prelude).shape[1])
@@ -553,6 +562,8 @@ class VocalErrorNet:
                 ih_e.eta = (self.eta_h_ns if learn else 0.0) * nS
                 o["E"].alpha_e = 2.0 * np.asarray(self.R_TARGET, dtype=np.float64) \
                     * self.tau_stdp * 1e-3
+                # The local rate estimate starts at the cell's target rate.
+                o["E"].r_loc = np.asarray(self.R_TARGET, dtype=np.float64) * Hz
             else:
                 ih_e.rho = (self.rho_h_ns if learn else 0.0) * nS
                 ih_e.rho_dep = (self.rho_pre_ns if learn else 0.0) * nS

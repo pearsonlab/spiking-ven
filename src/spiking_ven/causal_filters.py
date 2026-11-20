@@ -62,7 +62,7 @@ def _past_windows(X, L):
     return win.transpose(1, 0, 2).reshape(T, C * L)
 
 
-def _roughness_grad(V):
+def _roughness_grad(V, axes=(1, 2)):
     """Gradient of 0.5 * ||D V||^2, D the first difference along channel and lag.
 
     This is the smoothness prior, not weight decay. A plain L2 penalty on the entries
@@ -71,10 +71,11 @@ def _roughness_grad(V):
     L1 soft-threshold for the same reason). Penalising *differences* changes entries
     relative to each other, so it survives the renormalisation.
 
-    Neumann (reflecting) boundaries, so the edges are not pulled toward zero.
+    Neumann (reflecting) boundaries, so the edges are not pulled toward zero. ``axes``
+    picks the directions penalised (1 = channel, 2 = lag).
     """
     g = np.zeros_like(V)
-    for axis in (1, 2):
+    for axis in axes:
         d = np.diff(V, axis=axis)
         g -= np.diff(d, axis=axis, prepend=0.0, append=0.0)
     return g

@@ -93,7 +93,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
                l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
                val_cochs=None, patience: int = 0, min_delta: float = 0.002,
-               log_every: int = 5, frame_ms: float = 2.0):
+               log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2)):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -119,7 +119,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     log reports the held-out unexplained variance and STRF compactness (share of kernel
     energy at lags <= 20 ms, energy-weighted mean lag). With ``patience`` > 0, training
     stops once the held-out error has not improved by ``min_delta`` for ``patience``
-    epochs, and the best epoch's weights are returned."""
+    epochs, and the best epoch's weights are returned. ``smooth_axes`` picks the
+    directions the roughness penalty acts along: (1, 2) channel and lag, (1,) channel only
+    (smoothing along lag favours long horizontal bands)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -173,7 +175,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             V = V + lr * G.reshape(K, C, L) / n
             b = b + lr * gZ.sum(axis=0) / n
             if smooth_V > 0:
-                V = V - reg_lr * smooth_V * _roughness_grad(V)
+                V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
             if mp_strength > 0:
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
             if l1_V > 0:

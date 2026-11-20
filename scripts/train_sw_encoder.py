@@ -61,6 +61,8 @@ def main() -> None:
                    help="stop when held-out error has not improved for this many epochs "
                         "(needs --train-corpus; 0 = run all epochs)")
     p.add_argument("--min-delta", type=float, default=0.002)
+    p.add_argument("--smooth-freq-only", action="store_true",
+                   help="roughness penalty across frequency only, not along lag")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -97,7 +99,8 @@ def main() -> None:
                               reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
                               l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
                               patience=a.patience, min_delta=a.min_delta,
-                              log_every=a.log_every)
+                              log_every=a.log_every,
+                              smooth_axes=(1,) if a.smooth_freq_only else (1, 2))
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

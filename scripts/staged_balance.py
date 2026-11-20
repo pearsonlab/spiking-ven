@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-import sweep  # type: ignore  # noqa: E402
+import sweep  # noqa: E402
 
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 

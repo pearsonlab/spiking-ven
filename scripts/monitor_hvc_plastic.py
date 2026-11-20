@@ -22,11 +22,12 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-import sweep  # type: ignore  # noqa: E402
+import sweep  # noqa: E402
 
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
 
@@ -57,7 +58,7 @@ def main() -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--n-example", type=int, default=8)
     a = p.parse_args()
-    cfg = dict(BASE)
+    cfg: dict[str, Any] = dict(BASE)
     for kv in a.set:
         k, v = kv.split("=")
         cfg[k] = float(v)
@@ -105,8 +106,9 @@ def main() -> None:
             trace["e_rev"].append(rev)
             trace["e_quiet"].append(quiet)
             trace["i_h"].append(i_h)
-            np.savez(trace_path, burst_t=burst_t, example=ex, M_HH=M,
-                     **{k: np.asarray(v) for k, v in trace.items()})
+            arrays: dict[str, Any] = {"burst_t": burst_t, "example": ex, "M_HH": M,
+                                      **{k: np.asarray(v) for k, v in trace.items()}}
+            np.savez(trace_path, **arrays)
             jhe = float(ven.J_HE[ven.M_HE].mean())
             dt = (time.time() - t0) / max(r, 1)
             print(f"{r:5d}   {np.median(pr):7.1f} / {pr.min():6.1f}   {B.max():5.1f}  "

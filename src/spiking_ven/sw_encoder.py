@@ -22,6 +22,7 @@ pipeline, training and metrics use it unchanged.
 from __future__ import annotations
 
 import zlib
+from typing import Any
 
 import numpy as np
 
@@ -288,11 +289,15 @@ class SWEncoder:
 
     # ---- persistence --------------------------------------------------------------------
     def save(self, path):
-        np.savez(path, kind=np.array("sw"), W=self.W, b=self.b, scale=self.scale,
-                 primary_gain=self.primary_gain, threshold=self.threshold, keep=self.keep,
-                 mu=self.mu, primary_noise=self.primary_noise, **({} if self.D is None else {"D": self.D, "d0": self.d0}),
-                 **{f"dog_{k}": v for k, v in self.dog.items()},
-                 **{f"cp_{k}": v for k, v in self.coch_params.items()})
+        arrays: dict[str, Any] = {
+            "kind": np.array("sw"), "W": self.W, "b": self.b, "scale": self.scale,
+            "primary_gain": self.primary_gain, "threshold": self.threshold,
+            "keep": self.keep, "mu": self.mu, "primary_noise": self.primary_noise,
+            **{f"dog_{k}": v for k, v in self.dog.items()},
+            **{f"cp_{k}": v for k, v in self.coch_params.items()}}
+        if self.D is not None:
+            arrays.update(D=self.D, d0=self.d0)
+        np.savez(path, **arrays)
 
     @classmethod
     def load(cls, path):

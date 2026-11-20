@@ -13,9 +13,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
-import sweep  # type: ignore  # noqa: E402
+import sweep  # noqa: E402
 
 from spiking_ven.metrics import daf_inputs, daf_response  # noqa: E402
 from spiking_ven.vocal_error_net import VocalErrorNet  # noqa: E402
@@ -40,8 +41,10 @@ def main() -> None:
     for m in a.models:
         v = VocalErrorNet.load(m, seed=42)
         res = {}
-        for name, kw in (("fixed", {"inputs": fixed_in}),
-                         ("random", {"inputs": rand_in, "random_onsets": True})):
+        runs: tuple[tuple[str, dict[str, Any]], ...] = (
+            ("fixed", {"inputs": fixed_in}),
+            ("random", {"inputs": rand_in, "random_onsets": True}))
+        for name, kw in runs:
             r = daf_response(v, enc, st, seed=42, **kw)
             res[name] = {k: r[k] for k in KEYS} | {"psth": r["psth_responders"]}
             print(f"{m} [{name:6s}] " + " ".join(f"{k.split('_')[0]}={r[k]:.2f}"

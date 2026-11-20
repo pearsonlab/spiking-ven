@@ -63,6 +63,7 @@ dI_adapt/dt = -I_adapt / tau_adapt : amp
 da_aud/dt = -a_aud / tau_stdp : 1
 dx_e/dt = -x_e / tau_stdp : 1
 dr_loc/dt = -r_loc / tau_loc : Hz
+dr_slow/dt = -r_slow / tau_slow : Hz
 alpha_e : 1
 g_nmda : siemens
 mg_block = 1 / (1 + Mg / (3.57*mM) * exp(-0.062 * v/mV)) : 1 (constant over dt)
@@ -74,7 +75,7 @@ I_noise = sigma * randn() / sqrt(dt) : amp (constant over dt)
 # is the cell's own spike trace and ``alpha_e`` its rate target (``2 r tau_stdp``), used
 # only by the optional rate-target rule (``VOGELS_ON_PRE``). ``r_loc`` is the cell's own
 # rate averaged over ``tau_loc`` (an exponential running mean), for the rule's local
-# target (``lam_loc``).
+# target (``lam_loc``); ``r_slow`` the same over ``tau_slow``, its optional reference.
 # ``g_nmda`` is summed from the NMDA synapses (see ``build_network``).
 
 #: Inhibitory interneurons. ``x_stdp`` is the presynaptic STDP trace.
@@ -111,8 +112,12 @@ STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)
 #: The target is the constant ``alpha_e`` blended (weight ``lam_loc``) with a local one,
 #: ``2 tau_stdp r_loc``: the cell's own rate over the last ``tau_loc``. ``lam_loc = 0`` is
 #: the constant target of Vogels et al.; ``lam_loc = 1`` asks the rule to flatten the rate
-#: on timescales shorter than ``tau_loc`` only.
-_TARGET = "((1 - lam_loc) * alpha_e_post + lam_loc * 2 * tau_stdp * r_loc_post)"
+#: on timescales shorter than ``tau_loc`` only. With ``use_slow``, the local term is
+#: measured against the cell's rate over ``tau_slow`` instead of its target, so the target
+#: becomes ``alpha_e + lam_loc 2 tau_stdp (r_loc - r_slow)``: fast fluctuations are
+#: flattened while the mean stays anchored at ``alpha_e`` (a high-pass target).
+_REF = "(use_slow * 2 * tau_stdp * r_slow_post + (1 - use_slow) * alpha_e_post)"
+_TARGET = f"(alpha_e_post + lam_loc * (2 * tau_stdp * r_loc_post - {_REF}))"
 VOGELS_ON_PRE = f"g_gaba_post += w; w = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS)"
 VOGELS_ON_POST = "w = clip(w + eta * x_stdp_pre, 0*nS, inf*nS)"
 #: The same, with both terms multiplied by the E cell's audio gate (learning only while
@@ -160,7 +165,8 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     # E and I are the paper's population names.
     E = NeuronGroup(n_e, E_EQS, threshold="v > V_th",
-                    reset=f"{reset_v}; I_adapt += beta; x_e += 1; r_loc += 1/tau_loc",
+                    reset=(f"{reset_v}; I_adapt += beta; x_e += 1; r_loc += 1/tau_loc; "
+                           "r_slow += 1/tau_slow"),
                     refractory="t_ref",
                     method="exponential_euler", namespace={**shared, **ns["E"]},
                     dt=dt, name="E")

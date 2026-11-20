@@ -32,12 +32,15 @@ def main() -> None:
     st = sweep._stimuli()
     from spiking_ven.causal_filters import CausalFilterEncoder
     enc = CausalFilterEncoder.load(sweep.ENCODER)
+    # Rebuilt rather than read from the cache, so a cache made before a fix to the
+    # stimulus pipeline cannot leak stale DAF trials into the score.
+    fixed_in = daf_inputs(enc, st, seed=42)
     rand_in = daf_inputs(enc, st, seed=42, random_onsets=True)
     out = {}
     for m in a.models:
         v = VocalErrorNet.load(m, seed=42)
         res = {}
-        for name, kw in (("fixed", {"inputs": st["daf_inputs"]}),
+        for name, kw in (("fixed", {"inputs": fixed_in}),
                          ("random", {"inputs": rand_in, "random_onsets": True})):
             r = daf_response(v, enc, st, seed=42, **kw)
             res[name] = {k: r[k] for k in KEYS} | {"psth": r["psth_responders"]}

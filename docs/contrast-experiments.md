@@ -780,3 +780,29 @@ responders 0.62-0.86 vs 0.41): broadband DAF noise pushes nearly every BS unit o
 own threshold at once. Per-cell scatter (aud 170, pooled): 0.85x, median per-cell 0.79, 34%
 higher singing; low-rate cells pushed below the diagonal. `outputs/cancellation_sw2_aud170.png`,
 `outputs/singing_scatter_sw2_aud170.png`.
+
+### S6. Divisive normalisation of the BS population, linear and squared (sw3, sw4)
+
+`a_i / (1 + (sum_k a_k / sigma)^n)` (`norm_power` n; new). Pop sum: song peaks ~0.30, DAF
+window ~0.92. Bug found and fixed: `metrics.daf_inputs` dropped `norm_power`, so the sw4
+sweep's own DAF scores used linear-norm DAF trials; sw4 rescored with `rescore_daf.py`
+(which now rebuilds the fixed-onset trials too). sw3 (linear) is unaffected.
+
+Linear (sweep score, fixed onsets): xs 1.3 (sigma 0.1, aud 250) .. 2.9 (sigma 1, aud 400);
+responders 0.55-0.78; rev/tr 1.07-1.17. Better than sw2, still over target.
+
+Squared, rescored (random onsets / fixed onsets):
+
+| config | xs | resp | lat | dur | pk lat | pk Hz | rev/tr | sing/not |
+|---|---|---|---|---|---|---|---|---|
+| s0.5, aud 250 | 0.94 / 1.19 | 0.46 / 0.54 | 32 / 44 | 50 / 37 | 80 / 22 | 24 / 42 | 1.08 | 1.00 |
+| s0.5, aud 400 | 1.14 / 1.55 | 0.55 / 0.62 | 26 / 38 | 55 / 40 | 76 / 22 | 28 / 54 | 1.15 | 1.06 |
+| s0.3, aud 250 | 0.76 / 1.03 | 0.35 / 0.49 | 48 / 59 | 41 / 32 | 86 / 20 | 24 / 36 | 1.09 | 0.98 |
+| **s0.3, aud 400** | 0.90 / 1.28 | 0.43 / 0.57 | 39 / 49 | 44 / 36 | 86 / 20 | 28 / 44 | 1.16 | 1.03 |
+
+Best (s0.3 squared, aud 400, `outputs/sweeps/sw4_sq_n03/57377c9091.npz`): random-onset
+DAF meets xs, responders, latency, duration; peak latency late (86 vs 35-75). Per-cell
+scatter tight on the diagonal but shifted down (0.83x, median 0.81, 17% higher singing).
+Caveat: squared norm at sigma 0.3 nearly abolishes the BS input during the DAF window (the
+E response comes through the network, not a big input burst); rev/tr still weak (1.16).
+`outputs/cancellation_sw4_sq03_aud400.png`, `outputs/singing_scatter_sw4_sq03_aud400.png`.

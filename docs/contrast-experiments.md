@@ -1084,3 +1084,34 @@ reversed vs trained clearly larger. Same cancellation as the hand-built one-wind
 (~530, ~630, ~805 ms) are still about half cancelled. Figures:
 `outputs/cancellation_hvcplastic_rate8.png`, `outputs/singing_scatter_hvcplastic_rate8.png`,
 `outputs/cancellation_check_hvcplastic_rate8.png`.
+
+### Round K follow-ups: what limits the residual peaks
+
+- **Coverage is fine.** Every E cell firing at a residual peak (530, 630, 805 ms) has
+  15-27 active, strong I_HVC inputs then; inhibition is 1.4-2.5x its motif mean at peaks,
+  0.18x in gaps. But the hardest-driven cells keep ~75% of a 100+ Hz excess.
+- **Converged, compromise weights.** Continuing the 8 Hz model 150 -> 300 renditions with
+  weight snapshots (`rate8_cont_trace.npz`): weights onto peak cells move <10%, peak rates
+  flat. Inputs from I_HVC cells active at the peak are no stronger than the cell's other
+  I_HVC inputs (each I_HVC cell fires ~6 windows, so its weight averages over them).
+- **Single-synapse relay.** At each peak, 86-100% of a peak cell's auditory drive comes from
+  ONE ~450-520 nS synapse (ordinary weight; the tail is not special): one BS unit tuned to
+  the syllable, its Poisson spikes relayed spike for spike.
+- **Rendition variability.** The BS units driving 805 ms fire 2 spikes on the template but
+  none on 68% of renditions (count CV 2.0); 530 ms similar (52%, 7.8 ms jitter); 630 ms not.
+- **Aud 250 nS, sigma 0.5 squared** (`rK_monitor/aud250.npz`): DAF still on target
+  (random onsets xs 0.84, responders 0.45, latency 36, duration 50, peak latency 76), but
+  flatness and contrast drop.
+- **Pooled flatness** (`cancellation_check.py --pool`, per rendition, averaged over 38):
+
+| model | template | over renditions (10-90%) | vs not singing |
+|---|---|---|---|
+| plastic, 8 Hz, aud 400 | 52% | 52% (46-58%) | 106% |
+| plastic, 8 Hz, aud 250 | 42% | 45% (40-50%) | 110% |
+| hand-built one-window (J) | 53% | 53% (48-58%) | 97% |
+
+The template is not a flatness outlier; each rendition keeps about half its song-locked
+modulation. The rendition-averaged PSTH looks flatter only because rendition-specific
+residuals average out (`outputs/cancellation_hvcplastic_aud{400,250}_rend5.png`, dashed
+line). Weaker auditory drive does not help. Remaining limit: per-rendition variability of
+the auditory input, which learned (average) inhibition cannot cancel.

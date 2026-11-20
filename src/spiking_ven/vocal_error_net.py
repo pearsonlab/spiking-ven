@@ -49,13 +49,14 @@ _FLOAT_KEYS = (
     "vogels_h", "eta_h_ns", "vogels_gate", "lam_loc", "tau_loc_ms", "tau_slow_ms",
     "vogels_post", "c_he", "hvc_plastic", "kappa_h", "tau_elig_ms", "tau_hpre_ms",
     "h_relax", "beta_maint", "ih_rate_hz", "ih_homeo_pa", "ih_homeo_max_pa",
+    "ih_scale",
     "rho_ns", "rho_pre_ns", "j_ie_row_max_ns", "r_i_hz", "tau_stdp",
     "aud_delay_ms", "hvc_delay_ms",
     "g_nmda_mean_ns", "tau_nmda_rise", "tau_nmda_decay", "alpha_nmda", "mg_mm", "e_nmda_mv",
 )
 _INT_KEYS = ("n_e", "n_i", "n_hvc", "n_aud", "n_ih")
 _ARRAY_KEYS = ("A", "B", "J_EI", "J_IE", "M_IE", "B_H", "J_HE", "M_HE", "M_HH", "I_H",
-               "R_TARGET")
+               "S_H", "R_TARGET")
 
 
 class VocalErrorNet:
@@ -124,6 +125,11 @@ class VocalErrorNet:
                    HVC input only): after each training rendition each cell's tonic
                    current ``I_H`` moves ``ih_homeo_pa`` pA per Hz of (``ih_rate_hz`` minus
                    its rate over the rendition), clipped to +-``ih_homeo_max_pa``
+    ih_scale     : I_HVC synaptic scaling (plastic HVC input only; the alternative to
+                   ``I_H``): after each training rendition each cell's total HVC weight
+                   ``S_H`` is multiplied by ``1 + ih_scale (ih_rate_hz - rate) /
+                   ih_rate_hz`` (factor clipped to [0.5, 1.5]), and its weights rescaled
+                   to it -- divisive, so inputs that grew take weight from the rest
     tau_slow_ms  : > 0 measures that local term against the cell's rate over this longer
                    time instead of ``R_TARGET``: target ``R_TARGET + lam_loc (r_loc -
                    r_slow)``, flattening fast fluctuations with the mean anchored
@@ -223,8 +229,10 @@ class VocalErrorNet:
     ih_rate_hz: float
     ih_homeo_pa: float
     ih_homeo_max_pa: float
+    ih_scale: float
     M_HH: np.ndarray
     I_H: np.ndarray
+    S_H: np.ndarray
     R_TARGET: np.ndarray
     c_ie: float
     ie_init_mean_ns: float
@@ -294,6 +302,7 @@ class VocalErrorNet:
         ih_rate_hz: float = 2.0,
         ih_homeo_pa: float = 0.0,
         ih_homeo_max_pa: float = 50.0,
+        ih_scale: float = 0.0,
         rho_ns: float | None = None,
         rho_pre_ns: float = C.RHO_PRE_NS,
         j_ie_row_max_ns: float = C.J_IE_ROW_MAX_NS,
@@ -368,6 +377,8 @@ class VocalErrorNet:
         self.M_HH = np.asarray(self.B_H) > 0
         #: Per-cell homeostatic tonic current on I_HVC (pA).
         self.I_H = np.zeros(self.n_ih, dtype=np.float32)
+        #: Per-cell total HVC -> I_HVC weight (nS), the target of the divisive rescaling.
+        self.S_H = (self.M_HH.sum(axis=1) * float(hvc_h_mean_ns)).astype(np.float32)
         self.R_TARGET = np.zeros(n_e, dtype=np.float32)
         self.last_ih = None
         self._built = None
@@ -544,8 +555,9 @@ class VocalErrorNet:
                     "vogels_post": 1.0, "c_he": 1.0, "hvc_plastic": 0.0,
                     "kappa_h": 0.0, "tau_elig_ms": 10.0, "tau_hpre_ms": 5.0,
                     "h_relax": 0.0, "beta_maint": 0.0, "ih_rate_hz": 2.0,
-                    "ih_homeo_pa": 0.0, "ih_homeo_max_pa": 50.0}   # the constructor's defaults
-        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "M_HH", "I_H", "R_TARGET")
+                    "ih_homeo_pa": 0.0, "ih_homeo_max_pa": 50.0, "ih_scale": 0.0}   # the constructor's defaults
+        optional_arrays = ("M_IE", "B_H", "J_HE", "M_HE", "M_HH", "I_H", "S_H",
+                           "R_TARGET")
         missing = [k for k in _INT_KEYS + _FLOAT_KEYS + _ARRAY_KEYS
                    if k not in d and k not in defaults and k not in optional_arrays]
         if missing:
@@ -572,6 +584,8 @@ class VocalErrorNet:
                 obj.M_HH = np.asarray(obj.B_H) > 0
             elif k == "I_H":
                 obj.I_H = np.zeros(np.asarray(obj.B_H).shape[0], dtype=np.float32)
+            elif k == "S_H":
+                obj.S_H = np.asarray(obj.B_H, dtype=np.float32).sum(axis=1)
             else:                                    # J_HE, M_HE: no I_HVC
                 obj.J_HE = np.zeros((int(d["n_e"]), 0), dtype=np.float32)
                 obj.M_HE = np.ones((int(d["n_e"]), 0), dtype=bool)
@@ -604,9 +618,11 @@ class VocalErrorNet:
             self._built = built
         return built[1]
 
-    def _renormalise_hvc_h(self, hvc_ih) -> np.ndarray:
+    def _renormalise_hvc_h(self, hvc_ih, rate=None) -> np.ndarray:
         """Read the learned HVC -> I_HVC weights back; relax each a fraction ``h_relax``
-        toward the uniform start; rescale each cell's inputs to the starting total."""
+        toward the uniform start; with ``ih_scale``, move each cell's total ``S_H`` toward
+        the one that gives ``ih_rate_hz`` (``rate``: its rate this rendition); rescale each
+        cell's inputs to its total."""
         from brian2 import nS
         W = np.zeros_like(self.B_H, dtype=np.float64)
         W[np.asarray(hvc_ih.j), np.asarray(hvc_ih.i)] = np.asarray(hvc_ih.w / nS)
@@ -614,7 +630,10 @@ class VocalErrorNet:
         w0 = float(self.hvc_h_mean_ns)
         W = np.where(M, w0 + (W - w0) * (1.0 - self.h_relax), 0.0)
         W = np.maximum(W, 0.0)
-        total = M.sum(axis=1, keepdims=True) * w0
+        if self.ih_scale > 0 and rate is not None:
+            f = 1.0 + self.ih_scale * (self.ih_rate_hz - rate) / self.ih_rate_hz
+            self.S_H = (self.S_H * np.clip(f, 0.5, 1.5)).astype(np.float32)
+        total = np.asarray(self.S_H, dtype=np.float64)[:, None]
         W *= total / np.maximum(W.sum(axis=1, keepdims=True), 1e-12)
         return W.astype(np.float32)
 
@@ -678,10 +697,10 @@ class VocalErrorNet:
                 H[np.asarray(ih_e.j), np.asarray(ih_e.i)] = np.asarray(ih_e.w / nS)
                 self.J_HE = H
             if hvc_ih is not None:
-                self.B_H = self._renormalise_hvc_h(hvc_ih)
+                ih = bin_spikes(o["mon_ih"], self.n_ih, T)[:, n_pre:]
+                rate = ih.sum(axis=1) / (ih.shape[1] / 1000.0)
+                self.B_H = self._renormalise_hvc_h(hvc_ih, rate)
                 if self.ih_homeo_pa > 0:
-                    ih = bin_spikes(o["mon_ih"], self.n_ih, T)[:, n_pre:]
-                    rate = ih.sum(axis=1) / (ih.shape[1] / 1000.0)
                     self.I_H = np.clip(
                         self.I_H + self.ih_homeo_pa * (self.ih_rate_hz - rate),
                         -self.ih_homeo_max_pa, self.ih_homeo_max_pa).astype(np.float32)

@@ -115,7 +115,8 @@ def main() -> None:
                   f"{rate.mean():6.2f}  {np.mean(rate == 0):5.0%}  {np.median(w):6.0f}"
                   f"    {jhe:5.2f}  {sing:6.2f}  {rev:5.2f}  {quiet:6.2f}     {dt:5.1f}"
                   f"   IHVC silent {ih_quiet:.2f} Hz, I_h {i_h.mean():+.1f} pA "
-                  f"[{i_h.min():+.0f}, {i_h.max():+.0f}]",
+                  f"[{i_h.min():+.0f}, {i_h.max():+.0f}], S_H median "
+                  f"{np.median(ven.S_H):.0f} [{np.min(ven.S_H):.0f}, {np.max(ven.S_H):.0f}] nS",
                   flush=True)
             if not np.isfinite(B).all() or rate.mean() > 100:
                 print("diverging; stopping", flush=True)

@@ -4,8 +4,9 @@ For `~/Overleaf/critic paper/main.tex`: sections *Auditory data*, *Sparse audito
 *Vocal error network*, *Model parameters*, *Training and plasticity* and *Model evaluation*.
 The Overleaf file has not been edited. LaTeX is ready to paste.
 
-All "Now:" quotes and line references were checked against `main.tex` as of 2026-11-17 19:33,
-its last modification. Re-check them if the file has changed since.
+All "Now:" quotes and line references were checked against `main.tex` as of 2026-11-20 13:53,
+its last modification. Re-check them if the file has changed since. Items marked DONE are
+already applied.
 
 The changes fall into two groups:
 
@@ -46,12 +47,12 @@ We modeled the vocal error network as a pair of excitatory ($N_E=600$) and inhib
 Why: the network is now continuous-time equations integrated by Brian2, so the 1 ms discrete
 update is gone. Cite Stimberg, Brette & Goodman (2019), eLife 8:e47314.
 
-### A2. `V` -> `V_i` in the driving forces (the GABA sign is already fixed)
+### A2. GABA sign and `V` -> `V_i` -- DONE
 
-The E equation (line 178) already reads `+ \left(\sum_{j} J^{IE}_{ij} s^I_j\right) (V_{GABA} - V)`,
-so the sign bug flagged earlier has been fixed. What remains is consistency: write `V_i` in
-the driving force, both in the E equation's GABA term and in the I equation (line 168),
-`(V_{AMPA} - V)` -> `(V_{AMPA} - V_i)`.
+Applied in `main.tex` (checked 2026-11-20 13:53). The E equation (line 178) reads
+`+ (\sum_j J^{IE}_{ij} s^I_j)(V_{GABA} - V_i)`, and the I equation (line 168)
+`(V_{AMPA} - V_i)`. The one remaining bare `V` is `g(V)` in the NMDA term, which A3
+rewrites as `m(V_i)`.
 
 ### A3. Units of the NMDA term (bug in the current text)
 

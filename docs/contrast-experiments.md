@@ -751,3 +751,18 @@ Network not yet trained on S2 (awaiting review).
 Selectivity rasters (`sven-figure --view units`, `outputs/sw_unit_strfs_*.png`): some BS
 units lock to syllables across motifs, others look Poisson-random at ~2 Hz; many fire at
 motif onset (DoG onset transient). Encoders in `outputs/encoders/pen/`.
+
+### S4. Rates into the DoG, steady-state start, per-unit thresholds
+
+- Unrepeatable rasters were primary Poisson noise: ~0.5 primary spikes fall in the DoG's
+  ~15 ms excitatory lobe at 30 Hz. Feeding the DoG primary *rates* (S&W) gives tight
+  syllable-locked columns. Now the default (`--primary-spikes` for the old behaviour).
+- Onset artefact: the DoG started from zero history although the dense primary code is far
+  from zero in silence, so every unit saw a spurious step at sound onset. Fixed by starting
+  from the silent-input primary rate (`SWEncoder.drive`). Applies to all SW encoders.
+- Per-unit thresholds (each unit's 90th pct of its drive on the corpus): population mean
+  pinned at 2.4 Hz by the global scale, per-unit rates median 2.2, 10-90% 0.2-4.9 Hz,
+  max 7.5, CV 0.69; independent of the percentile (80/90/95), since the spread comes from
+  modulation depth. `outputs/sw_bs_rate_distribution.png`,
+  `outputs/sw_unit_strfs_l1_2e-4_sm_1e-1_pu90.png`. Candidate:
+  `outputs/encoders/pen/l1_2e-4_sm_1e-1_pu90.npz`.

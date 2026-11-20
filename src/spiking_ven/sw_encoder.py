@@ -189,7 +189,9 @@ class SWEncoder:
         self.L = int(self.coch_params["K_frames"])
         self.primary_gain = float(primary_gain)          # Hz per unit of ReLU output
         self.dog = dict(dog or {})
-        self.threshold = float(threshold)
+        #: Higher-AC threshold: a scalar, or one value per kept unit (shape (n_kept, 1)).
+        th = np.asarray(threshold, dtype=np.float64)
+        self.threshold = float(th) if th.ndim == 0 else th.reshape(-1, 1)
         self.keep = (np.arange(self.W.shape[0]) if keep is None
                      else np.asarray(keep, dtype=int))
         self.lam = 0.0                                    # dense code (interface parity)
@@ -252,6 +254,20 @@ class SWEncoder:
             out[i] = np.convolve(s, k)[:T]
         return out
 
+    def drive(self, X, *, seed) -> np.ndarray:
+        """Higher-AC drive (DoG output before threshold) at 1 ms for cochleagram ``X``.
+
+        The DoG starts from steady state: its history is the primary rate for silence (a
+        dense code is not zero in silence), not zero. Without this, every unit sees a
+        spurious step at the start of the sound -- an onset transient larger than anything
+        the song itself drives."""
+        ms = 1000 // int(self.coch_params["frame_rate"])
+        n_pad = -(-dog_kernel(**self.dog).size // ms)            # frames, rounded up
+        silent = self.primary_rate(np.zeros((X.shape[0], 1)))     # (n_kept, 1)
+        rate = np.concatenate([np.repeat(silent, n_pad, axis=1), self.primary_rate(X)],
+                              axis=1)
+        return self.higher_drive(self.primary_spikes(rate, seed=seed))[:, n_pad * ms:]
+
     def encode_signal(self, signal, *, sr, n_ista=None, upsample_to_ms=False, T_out_ms=None,
                       rms_from=None, seed=None):
         """Waveform -> higher-AC activations ``(n_channels, T)`` at 1 ms (``upsample_to_ms``
@@ -262,8 +278,7 @@ class SWEncoder:
         if seed is None:
             seed = zlib.crc32(np.ascontiguousarray(sig, dtype=np.float32).tobytes())
         X = self.cochleagram(sig, sr=sr, rms_from=rms_from)
-        spikes = self.primary_spikes(self.primary_rate(X), seed=seed)
-        acts = np.maximum(self.higher_drive(spikes) - self.threshold, 0.0)
+        acts = np.maximum(self.drive(X, seed=seed) - self.threshold, 0.0)
         if T_out_ms is not None:
             T = int(T_out_ms)
             acts = (acts[:, :T] if acts.shape[1] >= T else
@@ -286,7 +301,7 @@ class SWEncoder:
               if k.startswith("cp_")}
         dog = {k[4:]: float(v) for k, v in d.items() if k.startswith("dog_")}
         return cls(d["W"], d["b"], float(d["scale"]), cp, primary_gain=float(d["primary_gain"]),
-                   dog=dog, threshold=float(d["threshold"]), keep=d["keep"],
+                   dog=dog, threshold=d["threshold"], keep=d["keep"],
                    D=d["D"] if "D" in d else None, d0=d["d0"] if "d0" in d else None,
                    mu=d["mu"] if "mu" in d else None,
                    primary_noise=bool(d["primary_noise"]) if "primary_noise" in d else True)

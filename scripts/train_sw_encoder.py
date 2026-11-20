@@ -7,8 +7,9 @@ autoencoder with roughness, minimum-phase and L1 steps and no kernel renormalisa
 ``sw_encoder.learn_relu``) on the raw cochleagrams of the corpus motifs (same cochleagram
 settings as the causal encoder). Units that never activate are dropped; the
 primary gain is set so the song's mean primary rate is 32 Hz. Stage 2: the
-difference-of-Gaussians threshold is set at a percentile of the DoG output on the song, so
-that higher-AC activity is sparse; its spike rate is calibrated later, by the stimulus
+difference-of-Gaussians threshold is set per unit, at a percentile of that unit's DoG output
+on the song (``--global-threshold`` for one population-wide percentile), so that higher-AC
+activity is sparse and every unit responds to something; its spike rate is calibrated later, by the stimulus
 pipeline.
 """
 
@@ -47,6 +48,8 @@ def main() -> None:
                    help="tied decoder (default: linear decoder with unit-norm rows)")
     p.add_argument("--threshold-pct", type=float, default=90.0,
                    help="higher-AC threshold: this percentile of the DoG output on song")
+    p.add_argument("--global-threshold", action="store_true",
+                   help="one threshold for all units (default: one per unit)")
     p.add_argument("--primary-spikes", action="store_true",
                    help="feed the DoG Poisson primary spikes (default: primary rates, as in "
                         "Schneider & Woolley's model)")
@@ -84,16 +87,20 @@ def main() -> None:
     print(f"kept {keep.size}/{a.k} units; primary gain {gain:.2f} Hz/unit; "
           f"active fraction {(R[keep] > 0).mean():.1%}")
 
-    # Higher-AC threshold from the DoG output on the song (primary spikes included).
+    # Higher-AC thresholds from the DoG output on the song.
     drive = []
     for i, sig in enumerate(corpus.signals()):
         X = enc.cochleagram(sig, sr=sr)
-        drive.append(enc.higher_drive(enc.primary_spikes(enc.primary_rate(X),
-                                                         seed=a.seed + i)))
+        drive.append(enc.drive(X, seed=a.seed + i))
     drive = np.concatenate(drive, axis=1)
-    enc.threshold = float(np.percentile(drive, a.threshold_pct))
+    enc.threshold = (float(np.percentile(drive, a.threshold_pct)) if a.global_threshold
+                     else np.percentile(drive, a.threshold_pct, axis=1)[:, None])
     act = np.maximum(drive - enc.threshold, 0.0)
-    print(f"higher-AC threshold {enc.threshold:.4f} ({a.threshold_pct:g}th pct); "
+    rate = act.mean(axis=1) / act.mean() * 2.4
+    print(f"higher-AC threshold {np.median(enc.threshold):.4f} (median; "
+          f"{a.threshold_pct:g}th pct); unit rates at a 2.4 Hz mean: median "
+          f"{np.median(rate):.2f}, 10-90% {np.percentile(rate, 10):.2f}-"
+          f"{np.percentile(rate, 90):.2f} Hz; "
           f"active fraction {(act > 0).mean():.1%}; units ever active "
           f"{(act > 0).any(axis=1).sum()}/{keep.size}")
     enc.save(a.out)

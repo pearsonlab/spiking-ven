@@ -863,3 +863,18 @@ learning-time limit.
 
 lam 1 is the best contrast so far; its cost is the expected one -- with no anchor, the
 singing rate drifts below not-singing (0.85).
+
+**Round C (local-target timescale, blend, denser basis).** eta 3, 600 renditions:
+
+| config | cancelled | timed | rev/tr | song-excess rev/tr | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| lam 1, tau_loc 50 | 61% | 60% | 1.40 | 2.15 | 0.80 | 0.99 / 0.52 |
+| lam 1, tau_loc 200 | 61% | 57% | 1.31 | 2.04 | 0.91 | 0.90 / 0.51 |
+| lam 0.75, tau_loc 100 | 59% | 54% | 1.30 | 1.97 | 0.97 | 0.92 / 0.51 |
+| n_ih 1200, lam 1 | 66% | 65% | 1.46 | 2.48 | 0.74 | 0.83 / 0.54 |
+
+A denser basis (~8 I_HVC cells per ms) plus the local target beats the causal-encoder
+baseline (63%). But each gain in contrast lowers sing/not: the local target follows the
+rate down (inhibition lowers the rate, the target follows, nothing restores the mean).
+Fix: a high-pass target, `R_TARGET + lam (r_loc - r_slow)` (`tau_slow_ms`), so fast
+fluctuations are flattened against the cell's slow rate while the mean stays at R_TARGET.

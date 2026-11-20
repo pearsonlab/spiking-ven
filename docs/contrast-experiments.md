@@ -806,3 +806,29 @@ scatter tight on the diagonal but shifted down (0.83x, median 0.81, 17% higher s
 Caveat: squared norm at sigma 0.3 nearly abolishes the BS input during the DAF window (the
 E response comes through the network, not a big input burst); rev/tr still weak (1.16).
 `outputs/cancellation_sw4_sq03_aud400.png`, `outputs/singing_scatter_sw4_sq03_aud400.png`.
+
+### S7. Cancellation diagnosis and a one-window I_HVC basis (sw5_1win)
+
+`scripts/cancellation_check.py` (trial-averaged E PSTH, aud-input cells; cancelled = 1 -
+aligned/no-HVC excess, timed = 1 - aligned/shifted excess). V2 on the causal encoder: 63%
+cancelled / 53% timed; S&W no norm: 33/33; S&W sigma 0.3 squared aud 400: 46/40, on a
+song response 2.3x larger (5.5 vs 2.4 Hz excess).
+
+`scripts/ihvc_windows.py`: I_HVC windows were already sharp (7 ms) and tiled 99% of the
+motif (~5 cells per ms), but each cell had ~5 windows at unrelated times (~12 HVC inputs,
+one burst each). With non-negative weights, cancelling one peak inhibits the other windows
+too -> under-cancelled peaks, over-inhibited gaps (scatter below the diagonal).
+
+One-window basis: n_ih 600, c_hvc_h 0.004 (median 2 inputs, 1 window per cell, 4 cells per
+ms, I_HVC 1.2 Hz singing), sigma 0.3 squared, aud 400:
+
+| variant | cancelled | timed | rev/tr | song-excess rev/tr | DAF xs / resp (random) |
+|---|---|---|---|---|---|
+| 150 I_HVC (S6 best) | 46% | 40% | 1.16 | 1.43 | 0.90 / 0.43 |
+| p 0.004, eta 1 | 52% | 45% | 1.19 | 1.65 | 0.92 / 0.47 |
+| p 0.004, eta 3 | 58% | 50% | 1.24 | 1.81 | 0.91 / 0.47 |
+| p 0.006, eta 1 | 54% | 45% | 1.21 | 1.69 | 0.91 / 0.49 |
+
+Better, not solved: eta 3 > eta 1 suggests learning has not converged (each synapse now
+sees ~1 event per motif). Big syllable peaks (~345, 530, 805 ms) are still about half
+cancelled. `outputs/cancellation_check_1win.png`, `outputs/ihvc_windows_1win.png`.

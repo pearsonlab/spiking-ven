@@ -878,3 +878,16 @@ baseline (63%). But each gain in contrast lowers sing/not: the local target foll
 rate down (inhibition lowers the rate, the target follows, nothing restores the mean).
 Fix: a high-pass target, `R_TARGET + lam (r_loc - r_slow)` (`tau_slow_ms`), so fast
 fluctuations are flattened against the cell's slow rate while the mean stays at R_TARGET.
+
+**Round D (anchored local target).** n_ih 1200, lam 1, eta 3:
+
+| config | cancelled | timed | rev/tr | song-excess rev/tr | sing/not | DAF xs / resp |
+|---|---|---|---|---|---|---|
+| tau_slow 1000 | 62% | 58% | 1.35 | 2.19 | 0.91 | 0.88 / 0.54 |
+| tau_slow 3000 | 64% | 61% | 1.39 | 2.33 | 0.82 | 0.86 / 0.54 |
+| tau_loc 50, tau_slow 1000 | 62% | 57% | 1.33 | 2.18 | 0.90 | 0.89 / 0.56 |
+| n_ih 1800, tau_slow 1000 | 62% | 58% | 1.36 | 2.18 | 0.90 | 0.91 / 0.53 |
+
+The anchor recovers sing/not (0.74 -> 0.90) for a few points of cancellation. r_slow is
+reset to R_TARGET each rendition, so a long tau_slow barely moves and does not anchor
+(3000 is worse than 1000); 1800 I_HVC adds nothing over 1200.

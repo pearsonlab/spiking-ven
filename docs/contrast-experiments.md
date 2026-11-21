@@ -1278,3 +1278,14 @@ STRFs makes them net-positive (Pos/Neg 2-4) and adds a secondary DAF bump at 80-
 Best overall: 16 ms decoder + L2 1e-3 (`koch18_conv8_l2V1e-3`): S&W-like extent (96% <=20 ms,
 mean lag 9 ms), near-balanced (Pos/Neg 1.31), shortest DAF tail of any encoder (21 ms).
 Figure: outputs/strf_compactness_conv_L1_L2.png.
+
+L1 + L2 together (L1 2e-5, L2 1e-3):
+
+| decoder span | best epoch | held-out | STRF <=20 ms / mean lag | Pos/Neg | BMF in 10-150 | DAF peak / 10% tail |
+|---|---|---|---|---|---|---|
+| 32 ms | 16 | 0.044 | 75% / 14 ms | 1.98 | 75% | 39 / 63 ms |
+| 16 ms | 22 | 0.035 | 100% / 8 ms | 2.03 | 71% | 37 / 61 ms |
+
+Any STRF L1 (alone or with L2) gives sparse, net-positive patches (Pos/Neg ~2), worse
+held-out error, and the secondary DAF bump at ~80-110 ms; L2 alone does not. Keep L2 only.
+Figure: outputs/strf_compactness_conv_L1L2.png.

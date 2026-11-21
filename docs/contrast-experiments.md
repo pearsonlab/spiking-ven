@@ -1151,3 +1151,23 @@ flatness 53% over renditions (1200: 52%), cancelled vs not singing 107%, pooled 
 not singing 0.94 (median per cell 0.97). Same cancellation with a third of the interneurons
 (E:I 600:450) and about twice as fast. `configs/baseline.json` is updated; model
 `outputs/sweeps/rK_monitor/nih300.npz`.
+
+## Prediction-objective encoders (2026-11-20/21, 18-bird Koch corpus)
+
+`train_sw_encoder.py --predict-frames h` (decoder predicts the next h frames from the code
+of the strictly-past window); early stopping patience 5, min_delta 0.002.
+
+| run | penalties | stopped (best) | held-out | learned STRFs |
+|---|---|---|---|---|
+| pred1/2/4 | L1 2e-4, smooth 0.1 (freq), min-phase 0.25 | killed at ep 7 | 0.228 / 0.277 / 0.316 | newest-frame copy, 100% <=20 ms, mean lag 1 ms; units dying |
+| noreg_pred1 | none | ep 69 | 0.073 | change from init: 62% <=20 ms, mean lag 19 ms |
+| noreg_pred2 | none | ep 50 | 0.113 | 66%, 17 ms |
+| noreg_pred4 | none | ep 36 | 0.180 | 70%, 16 ms |
+
+Unregularized: the random initial weights never decay (no penalty, and data-free directions
+get no gradient), so the raw STRFs still look like noise (metrics 33%/31 ms). The learned
+change (`plot_strfs.py --minus-init 42`) mixes sharp signed onset/edge columns at the newest
+frames with slow horizontal spectral bands spanning tens of ms. Longer horizons are slightly
+more compact. The penalties (L1 above all) are what collapse the solution onto the newest
+frame. Next: remove the init noise (zero/small init or small L2 decay), then titrate
+penalties up.

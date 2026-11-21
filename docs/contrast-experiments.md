@@ -1189,3 +1189,17 @@ linear code). In the DAF time course the compact STRFs move the raw peak ~10 ms 
 but do NOT shorten the tail: a shoulder at 70-110 ms (20-60 ms after noise offset) remains,
 so the lingering response is set downstream of the STRFs (DoG / thresholding), not by STRF
 length. Figure: outputs/strf_compactness_noreg0.png.
+
+Longer horizons (same settings; frames are 2 ms, so pred4 = 8 ms):
+
+| horizon | best epoch | held-out | STRF <=20 ms / mean lag | DAF raw peak |
+|---|---|---|---|---|
+| 16 ms (pred8) | 25 | 0.288 | 93% / 5 ms | 33 ms |
+| 32 ms (pred16) | 14 | 0.475 | 87% / 8 ms | 32 ms |
+
+The longer horizons add a little lag-spread (faint broad bands, mostly suppressive) and give
+the fastest DAF peak and the steepest fall after noise offset (below 0.25 of peak by ~75 ms,
+vs ~90 ms for 2-8 ms horizons). Their reported 10% "tail" (185-188 ms) is a metric artifact:
+`strf_compactness.py` takes the last sample above 10%, and these encoders respond relatively
+more to the song syllables around the burst (bumps at -65, ~105 and ~235 ms). Figure:
+outputs/strf_compactness_noreg0_horizons.png.

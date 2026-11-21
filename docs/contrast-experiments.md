@@ -1289,3 +1289,10 @@ L1 + L2 together (L1 2e-5, L2 1e-3):
 Any STRF L1 (alone or with L2) gives sparse, net-positive patches (Pos/Neg ~2), worse
 held-out error, and the secondary DAF bump at ~80-110 ms; L2 alone does not. Keep L2 only.
 Figure: outputs/strf_compactness_conv_L1L2.png.
+
+16 ms decoder + L2 1e-3 + smoothness 0.1 (channel and lag), `koch18_conv8_l2sm`: stopped at
+best epoch 11, held-out 0.115 (vs 0.021 without smoothing). Qualitatively much closer to S&W:
+smooth excitatory blobs at short latency (last ~10-15 ms) with inhibitory flanks in frequency,
+instead of speckle. But subfields are broad in frequency and there is a diffuse low-amplitude
+wash across the whole window (nothing removes it without L1). Smoothness 0.1 is likely too
+strong. Figure: outputs/strfs_conv8_l2_smooth.png.

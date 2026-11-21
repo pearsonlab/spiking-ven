@@ -1261,3 +1261,20 @@ L (Pos/Neg ~1, BMF in range for 81-95%, 50% width 10-12 ms). λ=0 gives the shor
 of any encoder (23 ms vs baseline 29); code sparsity (λ 1e-2) lengthens it. Next: M = 8
 (16 ms) to test whether the decoder span sets STRF extent. Figure:
 outputs/strf_compactness_conv16.png.
+
+### Shorter decoder spans + small STRF penalties (code λ = 0, zero init)
+
+| decoder span | STRF penalty | best epoch | held-out | STRF <=20 ms / mean lag | Pos/Neg | BMF in 10-150 | 50% width | DAF peak / 10% tail |
+|---|---|---|---|---|---|---|---|---|
+| 32 ms | none | 24 | 0.016 | 66% / 16 ms | 1.43 | 81% | 12 ms | 40 / 23 ms |
+| 16 ms | L1 2e-5 | 21 | 0.031 | 100% / 8 ms | 2.25 | 68% | 8 ms | 37 / 58 ms |
+| 16 ms | L2 1e-3 | 20 | 0.021 | 96% / 9 ms | 1.31 | 76% | 8 ms | 39 / 21 ms |
+| 8 ms | L1 2e-5 | 21 | 0.025 | 100% / 4 ms | 4.38 | 52% | 5 ms | 34 / 61 ms |
+| 8 ms | L2 1e-3 | 24 | 0.018 | 98% / 5 ms | 1.77 | 72% | 6 ms | 36 / 49 ms |
+
+The decoder span sets STRF extent (32 -> 16 -> 8 ms gives mean lag 16 -> 9 -> 5 ms). L1 on the
+STRFs makes them net-positive (Pos/Neg 2-4) and adds a secondary DAF bump at 80-100 ms
+(which is what inflates their 10% tail); L2 keeps them balanced and keeps the clean decay.
+Best overall: 16 ms decoder + L2 1e-3 (`koch18_conv8_l2V1e-3`): S&W-like extent (96% <=20 ms,
+mean lag 9 ms), near-balanced (Pos/Neg 1.31), shortest DAF tail of any encoder (21 ms).
+Figure: outputs/strf_compactness_conv_L1_L2.png.

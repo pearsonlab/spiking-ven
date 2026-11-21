@@ -97,7 +97,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
                recon_tau_ms: float | None = None, predict_frames: int = 0,
                checkpoint=None, resume=None, init_scale: float = 1.0,
-               init_bias: float = 0.0):
+               init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -142,7 +142,15 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
 
     ``init_scale`` scales the random unit-norm initial STRFs (0 = start from zero, so the
     STRFs hold only what was learned; needs ``init_bias`` > 0 to keep the ReLUs alive, and
-    the random decoder breaks the symmetry between units). ``init_bias``: initial bias."""
+    the random decoder breaks the symmetry between units). ``init_bias``: initial bias.
+
+    ``conv_frames`` = M > 0: convolutional (overlap-add) reconstruction instead of the
+    sliding-window one. Each centred frame is reconstructed ONCE, jointly by the codes of the
+    M following time steps (all of which had it in their past window):
+    ``xhat_s = sum_k sum_{m=1..M} D_k(m) r_k(s+m)``, loss
+    ``1/2 sum_s |x_s - xhat_s|^2 + code_l1 * sum r``. ``D`` is (K, M*C) (lag-major, each
+    unit's kernel unit-norm). A unit only explains the part of the signal near its own time,
+    so short STRFs suffice; ``code_l1`` keeps the overcomplete code sparse."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -156,12 +164,15 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     b = np.full(K, float(init_bias))
     if init_scale == 0 and init_bias <= 0:
         raise ValueError("zero-init STRFs need init_bias > 0 (otherwise every ReLU is dead)")
-    if predict_frames and tied:
-        raise ValueError("predict_frames needs the untied decoder")
+    if (predict_frames or conv_frames) and tied:
+        raise ValueError("predict_frames / conv_frames need the untied decoder")
+    if predict_frames and conv_frames:
+        raise ValueError("choose predict_frames or conv_frames, not both")
+    M = int(conv_frames)
     h = int(predict_frames)
     mu_y = np.concatenate([X for X in cochs], axis=1).mean(axis=1)           # (C,)
-    if h:
-        D = rng.standard_normal((K, C * h))
+    if h or M:
+        D = rng.standard_normal((K, C * (h or M)))
         D /= np.linalg.norm(D, axis=1, keepdims=True)
     else:
         D = None if tied else V.reshape(K, C * L).copy()
@@ -182,7 +193,27 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     wcol = (np.tile(np.exp(-(lag_ms - frame_ms / 2) / recon_tau_ms), C)
             if recon_tau_ms else np.ones(C * L))
 
+    def conv_pass(X, P, V, b, D):
+        """Convolutional reconstruction of bout X: (Z, S, F, Y, E) with F the future-code
+        windows (T, K*M), Y the centred frames (T, C) and E = Y - F @ D (T, C)."""
+        T = X.shape[1]
+        Z = P @ V.reshape(K, C * L).T + b
+        S = np.maximum(Z, 0.0)
+        Sp = np.concatenate([S, np.zeros((M, K))], axis=0)
+        F = np.stack([Sp[m:m + T] for m in range(1, M + 1)], axis=2).reshape(T, K * M)
+        D3 = D.reshape(K, M, C)
+        Y = (X - mu_y[:, None]).T
+        E = Y - F @ D3.reshape(K * M, C)
+        return Z, S, F, Y, E
+
     def val_error(V, b, D):
+        if M:
+            num = den = 0.0
+            for X in val_cochs or []:
+                _, _, _, Y, E = conv_pass(X, _past_windows(X, L) - mu, V, b, D)
+                num += float((E ** 2).sum())
+                den += float((Y ** 2).sum())
+            return num / max(den, 1e-12)
         W = V.reshape(K, C * L)
         Dk = W if D is None else D
         num = den = 0.0
@@ -220,6 +251,28 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
             P = _past_windows(X, L) - mu                       # (T, C*L)
+            n = max(T, 1)
+            if M:
+                assert D is not None                   # conv decoder is always untied
+                Z, S, F, Y, E = conv_pass(X, P, V, b, D)
+                # -dLoss/dr_k(t) = sum_m D_k(m) . e_{t-m} - code_l1 (residual over the past)
+                Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
+                Ew = np.stack([Ep[M - m:M - m + T] for m in range(1, M + 1)], axis=1)
+                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * (Z > 0)
+                D = D + lr * (F.T @ E).reshape(K, M * C) / n
+                D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
+                V = V + lr * (gZ.T @ P).reshape(K, C, L) / n
+                b = b + lr * gZ.sum(axis=0) / n
+                if smooth_V > 0:
+                    V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
+                if mp_strength > 0:
+                    V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+                if l1_V > 0:
+                    V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
+                err += float((E ** 2).sum()) / max(float((Y ** 2).sum()), 1e-12)
+                act += float(np.mean(S > 0))
+                alive |= (S > 0).any(axis=0)
+                continue
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
             S = np.maximum(Z, 0.0)                             # (T, K)
@@ -229,7 +282,6 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             Rw = R if predict_frames else R * wcol             # lag-weighted residual
             gZ = (Rw @ Dk.T) * (Z > 0)                         # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
-            n = max(T, 1)
             if D is None:
                 G = G + S.T @ Rw                               # tied: decoder role too
             else:

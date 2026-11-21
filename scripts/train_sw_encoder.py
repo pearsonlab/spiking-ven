@@ -82,6 +82,11 @@ def main() -> None:
                         "--init-bias > 0)")
     p.add_argument("--init-bias", type=float, default=0.0,
                    help="initial bias of every primary unit")
+    p.add_argument("--conv-frames", type=int, default=0,
+                   help="convolutional (overlap-add) reconstruction: each frame rebuilt once "
+                        "from the codes of the next M time steps (decoder kernel M frames)")
+    p.add_argument("--code-l1", type=float, default=0.0,
+                   help="L1 penalty on the code (sparsity; used with --conv-frames)")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -137,12 +142,13 @@ def main() -> None:
                               smooth_axes=(1,) if a.smooth_freq_only else (1, 2),
                               recon_tau_ms=a.recon_tau_ms, predict_frames=a.predict_frames,
                               checkpoint=save_ckpt, resume=resume,
-                              init_scale=a.init_scale, init_bias=a.init_bias)
+                              init_scale=a.init_scale, init_bias=a.init_bias,
+                              conv_frames=a.conv_frames, code_l1=a.code_l1)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)
     D, d0, scale = Dk.T.copy(), np.zeros_like(mu), 1.0
-    if a.predict_frames:
+    if a.predict_frames or a.conv_frames:
         # The decoder predicts future frames, not the window: nothing to reconstruct with.
         D, d0 = None, None
 

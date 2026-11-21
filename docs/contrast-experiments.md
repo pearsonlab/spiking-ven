@@ -1338,3 +1338,16 @@ reconstruction trains V and D only.
 The constraint holds. Limiting how often each unit fires does not shorten STRFs under window
 reconstruction; at 0.2 it produces broad, coarse features and much worse reconstruction.
 Figure: outputs/strfs_tm8_win_act.png.
+
+Activity cost in the objective (`--act-mode penalty`, per-unit Lagrange multipliers, dual step
+1e-3), same setup:
+
+| rho | best epoch | held-out | unit active 10/50/90% | lambda median | look (vs threshold mode at same rho) |
+|---|---|---|---|---|---|
+| 0.5 | 55 | 0.100 | 49/50/51% | 0.020 | more localized narrowband blobs and short bands, cleaner background; still placed throughout the window |
+| 0.2 | 49 | 0.193 (threshold: 0.357) | 19/20/21% | 0.152 | no broad "off" patches; localized blobs, several oriented (FM-sweep-like) features; still spread over the window (mean lag 24 ms) |
+
+The cost does reshape the STRFs (more localized in frequency, sweep-like structure appears)
+and reconstructs far better than threshold-only at 0.2, but under window reconstruction the
+features still sit anywhere in the 64 ms window rather than at short latency. Figure:
+outputs/strfs_tm8_win_penalty.png.

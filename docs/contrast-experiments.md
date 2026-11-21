@@ -1242,3 +1242,22 @@ field L. The unregularized encoders are much closer: Pos/Neg 1.1-1.9, BMF in ran
 73-82% (pred 16/32 ms, noreg tau). Caveat: the prediction filters are dominated by the newest
 2 ms frame (50% width 2 ms), so their BMF is set by a near-impulse plus a faint tail and is
 noisy. Figure: outputs/temporal_filter_stats.png.
+
+## Convolutional (overlap-add) reconstruction (`--conv-frames 16 --code-l1 λ`, 2026-11-21)
+
+Each frame reconstructed once from the codes of the following 16 frames (32 ms decoder
+kernels); zero-init STRFs, no STRF penalties; λ = L1 on the code.
+
+| λ | best epoch | held-out (per frame) | primary active | STRF <=20 ms / mean lag | Pos/Neg | BMF in 10-150 | 50% width | DAF raw peak / 10% tail |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 24 | 0.016 | 98% | 66% / 16 ms | 1.43 | 81% | 12 ms | 40 / 23 ms |
+| 1e-3 | 23 | 0.025 | 80% | 64% / 16 ms | 1.49 | 90% | 10 ms | 52 / 34 ms |
+| 1e-2 | 25 | 0.070 | 34% | 62% / 17 ms | 1.12 | 95% | 12 ms | 50 / 41 ms |
+
+STRFs are signed spectrotemporal patches confined to the newest ~30-35 ms (the decoder span:
+a code only helps reconstruct frames t-1..t-M, so older STRF weight gets no gradient) --
+neither full-window bands nor one-frame copies. Closest yet to Nagel & Doupe loud-level field
+L (Pos/Neg ~1, BMF in range for 81-95%, 50% width 10-12 ms). λ=0 gives the shortest DAF tail
+of any encoder (23 ms vs baseline 29); code sparsity (λ 1e-2) lengthens it. Next: M = 8
+(16 ms) to test whether the decoder span sets STRF extent. Figure:
+outputs/strf_compactness_conv16.png.

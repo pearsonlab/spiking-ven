@@ -26,7 +26,7 @@ from spiking_ven.constants import (
     CAUSAL_MP_STRENGTH, CAUSAL_N_COCH_CH, CAUSAL_RMS_REF, CAUSAL_SMOOTH,
 )
 from spiking_ven.corpus import load_corpus
-from spiking_ven.sw_encoder import PRIMARY_RATE_HZ, SWEncoder, learn_relu, unfold
+from spiking_ven.sw_encoder import PRIMARY_RATE_HZ, SWEncoder, learn_relu, tm_basis, unfold
 
 
 def main() -> None:
@@ -88,6 +88,9 @@ def main() -> None:
                         "from the codes of the next M time steps (decoder kernel M frames)")
     p.add_argument("--code-l1", type=float, default=0.0,
                    help="L1 penalty on the code (sparsity; used with --conv-frames)")
+    p.add_argument("--tm-basis", default=None, metavar="LO,HI,N",
+                   help="constrain each channel's temporal kernel to a Takenaka-Malmquist "
+                        "basis with N real poles, time constants log-spaced LO..HI ms")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -135,6 +138,13 @@ def main() -> None:
     elif a.resume:
         print(f"no checkpoint at {ckpt_path}: starting fresh")
 
+    basis = None
+    if a.tm_basis:
+        lo, hi, nb = a.tm_basis.split(",")
+        taus = np.geomspace(float(lo), float(hi), int(nb))
+        basis = tm_basis(taus, a.l_frames, 1000.0 / cp["frame_rate"])
+        print("TM basis time constants (ms):", np.round(taus, 2).tolist())
+
     V, b, mu, Dk = learn_relu(train, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
                               reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
                               l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
@@ -144,7 +154,8 @@ def main() -> None:
                               recon_tau_ms=a.recon_tau_ms, predict_frames=a.predict_frames,
                               checkpoint=save_ckpt, resume=resume,
                               init_scale=a.init_scale, init_bias=a.init_bias,
-                              conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2)
+                              conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2,
+                              basis=basis)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

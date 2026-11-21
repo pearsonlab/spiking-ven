@@ -90,6 +90,33 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
     return W, b, D, d0, mu, scale
 
 
+def tm_basis(taus_ms, L: int, frame_ms: float = 2.0) -> np.ndarray:
+    """Discrete-time Takenaka-Malmquist basis on the strictly-past window, (nb, L).
+
+    One real pole per time constant, ``xi_k = exp(-frame_ms / tau_k)``:
+
+        F_n(z) = sqrt(1 - xi_n^2) z^-1 / (1 - xi_n z^-1)
+                 * prod_{k<n} (z^-1 - xi_k) / (1 - xi_k z^-1)
+
+    (a first-order low-pass after the all-pass sections of the earlier poles). The F_n are
+    orthonormal on the infinite horizon; all poles equal gives the Laguerre basis. Every
+    kernel in their span is ``sum_k c_k exp(-t/tau_k)`` (distinct poles), i.e. the impulse
+    response of a stable causal linear ODE built from these time constants. Row n is F_n's
+    impulse response at lags 1..L frames, laid out like an STRF window: column 0 is the
+    OLDEST lag, column L-1 lag 1 (the newest past frame)."""
+    from scipy.signal import lfilter
+
+    xi = np.exp(-float(frame_ms) / np.asarray(taus_ms, dtype=np.float64))
+    ap = np.zeros(L + 1)
+    ap[0] = 1.0                                  # unit impulse through the all-pass chain
+    rows = []
+    for x in xi:
+        h = np.sqrt(1.0 - x ** 2) * lfilter([0.0, 1.0], [1.0, -x], ap)
+        rows.append(h[1:L + 1])                  # lags 1..L
+        ap = lfilter([-x, 1.0], [1.0, -x], ap)
+    return np.array(rows)[:, ::-1].copy()
+
+
 def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: float = 0.1,
                reg_lr: float | None = None, seed: int = 42, mp_strength: float = 0.25,
                l1_V: float = 7e-5, smooth_V: float = 1e-3, tied: bool = False, log=print,
@@ -98,7 +125,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                recon_tau_ms: float | None = None, predict_frames: int = 0,
                checkpoint=None, resume=None, init_scale: float = 1.0,
                init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0,
-               l2_V: float = 0.0):
+               l2_V: float = 0.0, basis: np.ndarray | None = None):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -153,8 +180,27 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     unit's kernel unit-norm). A unit only explains the part of the signal near its own time,
     so short STRFs suffice; ``code_l1`` keeps the overcomplete code sparse.
 
-    ``l2_V``: weight decay on the STRFs (``V -= reg_lr * l2_V * V`` after each update)."""
+    ``l2_V``: weight decay on the STRFs (``V -= reg_lr * l2_V * V`` after each update).
+
+    ``basis`` (nb, L), e.g. ``tm_basis``: each channel's temporal kernel is constrained to
+    the span of the basis rows, ``V[k, c] = A[k, c] @ basis``, and trained by gradient
+    descent on the coefficients A (the V-gradient G becomes ``G @ basis.T @ basis``).
+    Anything that leaves the span (smoothing along lag, min-phase, L1) is projected back
+    onto it after each update."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
+
+    if basis is not None:
+        Bm = np.asarray(basis, dtype=np.float64)
+        if Bm.shape[1] != L:
+            raise ValueError(f"basis has {Bm.shape[1]} lags, need L={L}")
+        metric = Bm.T @ Bm                                   # (L, L): coefficient gradient
+        proj = Bm.T @ np.linalg.solve(Bm @ Bm.T, Bm)         # (L, L): projector onto span
+
+    def to_span(V):
+        return V if basis is None else V @ proj
+
+    def step(G):
+        return G if basis is None else G @ metric
 
     if reg_lr is None:
         reg_lr = lr
@@ -164,6 +210,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     V *= init_scale
+    V = to_span(V)
     b = np.full(K, float(init_bias))
     if init_scale == 0 and init_bias <= 0:
         raise ValueError("zero-init STRFs need init_bias > 0 (otherwise every ReLU is dead)")
@@ -264,7 +311,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * (Z > 0)
                 D = D + lr * (F.T @ E).reshape(K, M * C) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
-                V = V + lr * (gZ.T @ P).reshape(K, C, L) / n
+                V = V + lr * step((gZ.T @ P).reshape(K, C, L)) / n
                 b = b + lr * gZ.sum(axis=0) / n
                 if smooth_V > 0:
                     V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
@@ -274,6 +321,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                     V = V * (1.0 - reg_lr * l2_V)
                 if l1_V > 0:
                     V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
+                V = to_span(V)
                 err += float((E ** 2).sum()) / max(float((Y ** 2).sum()), 1e-12)
                 act += float(np.mean(S > 0))
                 alive |= (S > 0).any(axis=0)
@@ -292,7 +340,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             else:
                 D = D + lr * (S.T @ Rw) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
-            V = V + lr * G.reshape(K, C, L) / n
+            V = V + lr * step(G.reshape(K, C, L)) / n
             b = b + lr * gZ.sum(axis=0) / n
             if smooth_V > 0:
                 V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
@@ -302,6 +350,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 V = V * (1.0 - reg_lr * l2_V)
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
+            V = to_span(V)
             w = 1.0 if predict_frames else wcol
             err += float(np.mean(w * R ** 2)) / float(np.mean(w * Y ** 2))
             act += float(np.mean(S > 0))

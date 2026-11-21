@@ -91,6 +91,14 @@ def main() -> None:
     p.add_argument("--tm-basis", default=None, metavar="LO,HI,N",
                    help="constrain each channel's temporal kernel to a Takenaka-Malmquist "
                         "basis with N real poles, time constants log-spaced LO..HI ms")
+    p.add_argument("--act-target", type=float, default=None,
+                   help="per-unit activity constraint: fraction of frames each unit is active "
+                        "(each unit's threshold tracks the (1 - target) quantile of its input)")
+    p.add_argument("--act-lr", type=float, default=0.1,
+                   help="running-average rate of each unit's threshold toward the "
+                        "(1 - target) quantile of its input, per bout")
+    p.add_argument("--act-beta", type=float, default=0.01,
+                   help="sigmoid width of the active-frame surrogate")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -155,7 +163,8 @@ def main() -> None:
                               checkpoint=save_ckpt, resume=resume,
                               init_scale=a.init_scale, init_bias=a.init_bias,
                               conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2,
-                              basis=basis)
+                              basis=basis, act_target=a.act_target, act_lr=a.act_lr,
+                              act_beta=a.act_beta)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

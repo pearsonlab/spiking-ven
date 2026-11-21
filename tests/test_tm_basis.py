@@ -39,3 +39,18 @@ def test_training_keeps_strfs_in_the_basis_span():
     coef, *_ = np.linalg.lstsq(B.T, V.reshape(-1, L).T, rcond=None)
     assert np.allclose(B.T @ coef, V.reshape(-1, L).T, atol=1e-10)
     assert np.abs(V).max() > 0
+
+
+def test_activity_target_holds_every_unit_at_its_firing_fraction():
+    from spiking_ven.causal_filters import _past_windows
+
+    rng = np.random.default_rng(0)
+    cochs = [np.abs(rng.standard_normal((10, 300))) * 0.1 for _ in range(6)]
+    L = 16
+    V, b, mu, _ = learn_relu(cochs, K=12, L=L, n_epochs=30, l1_V=0, smooth_V=0,
+                             mp_strength=0, init_scale=0, init_bias=0.01,
+                             basis=tm_basis([2, 6, 18], L, 2.0), act_target=0.3,
+                             log=lambda s: None)
+    frac = np.concatenate([(_past_windows(X, L) - mu) @ V.reshape(12, -1).T + b > 0
+                           for X in cochs]).mean(axis=0)
+    assert np.all(np.abs(frac - 0.3) < 0.05)

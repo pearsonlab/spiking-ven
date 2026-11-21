@@ -125,7 +125,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                recon_tau_ms: float | None = None, predict_frames: int = 0,
                checkpoint=None, resume=None, init_scale: float = 1.0,
                init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0,
-               l2_V: float = 0.0, basis: np.ndarray | None = None):
+               l2_V: float = 0.0, basis: np.ndarray | None = None,
+               act_target: float | None = None, act_lr: float = 0.1,
+               act_beta: float = 0.01):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -186,7 +188,15 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     the span of the basis rows, ``V[k, c] = A[k, c] @ basis``, and trained by gradient
     descent on the coefficients A (the V-gradient G becomes ``G @ basis.T @ basis``).
     Anything that leaves the span (smoothing along lag, min-phase, L1) is projected back
-    onto it after each update."""
+    onto it after each update.
+
+    ``act_target`` = rho: per-unit activity constraint (fraction of frames each unit is
+    active), enforced on the threshold by projection: after every bout each unit's bias
+    moves toward minus the (1 - rho) quantile of its input ``V x`` on that bout,
+    ``b_k <- (1 - act_lr) b_k + act_lr * (-q_k)`` (a running quantile, so it is scale-free
+    and revives silent units). Reconstruction then trains only V and D; the bias is set by
+    the constraint alone. This fixes how often each unit fires, not how sparse the
+    population is at a given moment. (``act_beta`` is unused.)"""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -284,6 +294,16 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
 
     best = (np.inf, V.copy(), b.copy(), None if D is None else D.copy(), -1)
     stale, start = 0, 0
+
+    gZ_input: list[np.ndarray] = [np.zeros(0)]
+
+    def bias_step(b, gZ, S, n):
+        """Reconstruction gradient on b, or (with act_target) the activity controller."""
+        if act_target is None:
+            return b + lr * gZ.sum(axis=0) / n
+        U = gZ_input[0]                                   # V x (pre-bias), set by caller
+        q = np.quantile(U, 1.0 - act_target, axis=0)
+        return (1.0 - act_lr) * b + act_lr * (1e-9 - q)   # ties count as active
     if resume is not None:
         V, b = np.array(resume["V"], dtype=np.float64), np.array(resume["b"], dtype=np.float64)
         if D is not None:
@@ -298,6 +318,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             f"{stale} stale)")
     for ep in range(start, n_epochs):
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
+        act_unit = np.zeros(K)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
             P = _past_windows(X, L) - mu                       # (T, C*L)
@@ -305,6 +326,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             if M:
                 assert D is not None                   # conv decoder is always untied
                 Z, S, F, Y, E = conv_pass(X, P, V, b, D)
+                gZ_input[0] = Z - b
                 # -dLoss/dr_k(t) = sum_m D_k(m) . e_{t-m} - code_l1 (residual over the past)
                 Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
                 Ew = np.stack([Ep[M - m:M - m + T] for m in range(1, M + 1)], axis=1)
@@ -312,7 +334,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 D = D + lr * (F.T @ E).reshape(K, M * C) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
                 V = V + lr * step((gZ.T @ P).reshape(K, C, L)) / n
-                b = b + lr * gZ.sum(axis=0) / n
+                b = bias_step(b, gZ, S, n)
                 if smooth_V > 0:
                     V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
                 if mp_strength > 0:
@@ -325,9 +347,11 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 err += float((E ** 2).sum()) / max(float((Y ** 2).sum()), 1e-12)
                 act += float(np.mean(S > 0))
                 alive |= (S > 0).any(axis=0)
+                act_unit += (S > 0).mean(axis=0)
                 continue
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
+            gZ_input[0] = Z - b
             S = np.maximum(Z, 0.0)                             # (T, K)
             Dk = W if D is None else D
             Y = target(X, P)
@@ -341,7 +365,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 D = D + lr * (S.T @ Rw) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
             V = V + lr * step(G.reshape(K, C, L)) / n
-            b = b + lr * gZ.sum(axis=0) / n
+            b = bias_step(b, gZ, S, n)
             if smooth_V > 0:
                 V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
             if mp_strength > 0:
@@ -355,6 +379,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             err += float(np.mean(w * R ** 2)) / float(np.mean(w * Y ** 2))
             act += float(np.mean(S > 0))
             alive |= (S > 0).any(axis=0)
+            act_unit += (S > 0).mean(axis=0)
         ve = val_error(V, b, D) if val_cochs is not None else np.nan
         if val_cochs is not None:
             if ve < best[0] - min_delta:
@@ -375,7 +400,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance train "
                 f"{err / len(cochs):.3f} held-out {ve:.3f}  active {act / len(cochs):.1%}  "
                 f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
-                f"STRF energy <=20 ms {near:.0%}, mean lag {mlag:.0f} ms")
+                f"STRF energy <=20 ms {near:.0%}, mean lag {mlag:.0f} ms"
+                + (f"  unit active 10/50/90% {np.percentile(act_unit / len(cochs), 10):.0%}/"
+                   f"{np.median(act_unit / len(cochs)):.0%}/"
+                   f"{np.percentile(act_unit / len(cochs), 90):.0%} "
+                   f"(target {act_target:.0%}), bias med {np.median(b):.3g}"
+                   if act_target is not None else ""))
         if stop:
             log(f"  stopping: held-out error has not improved by {min_delta} for "
                 f"{patience} epochs; best epoch {best[4] + 1} ({best[0]:.3f})")

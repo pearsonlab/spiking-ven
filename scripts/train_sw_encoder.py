@@ -97,6 +97,12 @@ def main() -> None:
     p.add_argument("--act-lr", type=float, default=0.1,
                    help="running-average rate of each unit's threshold toward the "
                         "(1 - target) quantile of its input, per bout")
+    p.add_argument("--act-mode", choices=("threshold", "penalty"), default="threshold",
+                   help="threshold: each unit's threshold tracks a quantile (no effect on STRF "
+                        "shape); penalty: activity cost in the objective with per-unit "
+                        "multipliers (dual ascent), which also reshapes the STRFs")
+    p.add_argument("--act-dual-lr", type=float, default=1e-3,
+                   help="dual-ascent step for the activity multipliers (penalty mode)")
     p.add_argument("--act-beta", type=float, default=0.01,
                    help="sigmoid width of the active-frame surrogate")
     p.add_argument("--log-every", type=int, default=5)
@@ -164,7 +170,8 @@ def main() -> None:
                               init_scale=a.init_scale, init_bias=a.init_bias,
                               conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2,
                               basis=basis, act_target=a.act_target, act_lr=a.act_lr,
-                              act_beta=a.act_beta)
+                              act_beta=a.act_beta, act_mode=a.act_mode,
+                              act_dual_lr=a.act_dual_lr)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

@@ -127,7 +127,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0,
                l2_V: float = 0.0, basis: np.ndarray | None = None,
                act_target: float | None = None, act_lr: float = 0.1,
-               act_beta: float = 0.01):
+               act_beta: float = 0.01, act_mode: str = "threshold",
+               act_dual_lr: float = 1e-3):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -196,7 +197,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``b_k <- (1 - act_lr) b_k + act_lr * (-q_k)`` (a running quantile, so it is scale-free
     and revives silent units). Reconstruction then trains only V and D; the bias is set by
     the constraint alone. This fixes how often each unit fires, not how sparse the
-    population is at a given moment. (``act_beta`` is unused.)"""
+    population is at a given moment. (``act_beta`` is unused.)
+
+    ``act_mode="penalty"``: instead, the activity cost is part of the objective, so it also
+    reshapes the STRFs (as in Karklin & Simoncelli 2011; Jun, Field & Pearson): loss
+    ``+ sum_k lambda_k sum_t r_k(t)`` with per-unit multipliers updated by dual ascent
+    ``lambda_k += act_dual_lr * (fraction of frames unit k was active - rho)`` after every
+    bout (an equality constraint: lambda may go negative). The bias is learned by gradient
+    (including the cost); a unit silent for a whole bout gets a small bias nudge."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -296,11 +304,24 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     stale, start = 0, 0
 
     gZ_input: list[np.ndarray] = [np.zeros(0)]
+    penalty = act_target is not None and act_mode == "penalty"
+    if act_target is not None and act_mode not in ("threshold", "penalty"):
+        raise ValueError(f"act_mode must be 'threshold' or 'penalty', not {act_mode!r}")
+    lam = np.zeros(K)
+
+    def cost_grad(Z):
+        """-d/dZ of the activity cost sum_k lam_k sum_t relu(z) (zero unless penalty mode)."""
+        return -lam * (Z > 0) if penalty else 0.0
 
     def bias_step(b, gZ, S, n):
-        """Reconstruction gradient on b, or (with act_target) the activity controller."""
+        """Gradient step on b; with act_target, the activity constraint."""
+        nonlocal lam
         if act_target is None:
             return b + lr * gZ.sum(axis=0) / n
+        if penalty:
+            frac = (S > 0).mean(axis=0)
+            lam = lam + act_dual_lr * (frac - act_target)
+            return b + lr * gZ.sum(axis=0) / n + 1e-3 * (frac == 0)
         U = gZ_input[0]                                   # V x (pre-bias), set by caller
         q = np.quantile(U, 1.0 - act_target, axis=0)
         return (1.0 - act_lr) * b + act_lr * (1e-9 - q)   # ties count as active
@@ -314,6 +335,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         if bool(resume["stopped"]):
             start = n_epochs                  # already early-stopped: just return the best
         rng.bit_generator.state = json.loads(str(resume["rng_state"]))
+        if "lam" in resume:
+            lam = np.array(resume["lam"], dtype=np.float64)
         log(f"  resuming after epoch {start} (best epoch {best[4] + 1}, {best[0]:.3f}; "
             f"{stale} stale)")
     for ep in range(start, n_epochs):
@@ -330,7 +353,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 # -dLoss/dr_k(t) = sum_m D_k(m) . e_{t-m} - code_l1 (residual over the past)
                 Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
                 Ew = np.stack([Ep[M - m:M - m + T] for m in range(1, M + 1)], axis=1)
-                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * (Z > 0)
+                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * (Z > 0) + cost_grad(Z)
                 D = D + lr * (F.T @ E).reshape(K, M * C) / n
                 D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
                 V = V + lr * step((gZ.T @ P).reshape(K, C, L)) / n
@@ -357,7 +380,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             Y = target(X, P)
             R = Y - S @ Dk                                     # residual
             Rw = R if predict_frames else R * wcol             # lag-weighted residual
-            gZ = (Rw @ Dk.T) * (Z > 0)                         # -dLoss/dZ
+            gZ = (Rw @ Dk.T) * (Z > 0) + cost_grad(Z)         # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             if D is None:
                 G = G + S.T @ Rw                               # tied: decoder role too
@@ -391,7 +414,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             state = {"V": V, "b": b, "mu": mu, "epoch": ep + 1, "val_error": ve,
                      "stale": stale, "stopped": stop, "best_val": best[0],
                      "best_V": best[1], "best_b": best[2], "best_epoch": best[4],
-                     "rng_state": json.dumps(rng.bit_generator.state)}
+                     "rng_state": json.dumps(rng.bit_generator.state), "lam": lam}
             if D is not None:
                 state |= {"D": D, "best_D": best[3]}
             checkpoint(state)
@@ -405,6 +428,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                    f"{np.median(act_unit / len(cochs)):.0%}/"
                    f"{np.percentile(act_unit / len(cochs), 90):.0%} "
                    f"(target {act_target:.0%}), bias med {np.median(b):.3g}"
+                   + (f", lambda 10/50/90% {np.percentile(lam, 10):.3g}/"
+                      f"{np.median(lam):.3g}/{np.percentile(lam, 90):.3g}" if penalty else "")
                    if act_target is not None else ""))
         if stop:
             log(f"  stopping: held-out error has not improved by {min_delta} for "

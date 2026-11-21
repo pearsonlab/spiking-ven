@@ -36,6 +36,10 @@ def main() -> None:
     p.add_argument("files", nargs="+")
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=16, help="STRFs per row")
+    p.add_argument("--minus-init", type=int, default=None, metavar="SEED",
+                   help="plot the learned change V - V_init, regenerating learn_relu's random "
+                        "initial STRFs from this seed (useful without penalties, where the "
+                        "initial noise never decays)")
     a = p.parse_args()
     rows = len(a.files)
     fig, axes = plt.subplots(rows, a.n + 1, figsize=((a.n + 1) * 1.05, rows * 1.25),
@@ -43,6 +47,10 @@ def main() -> None:
     for r, path in enumerate(a.files):
         V, fm, note = load_strfs(path)
         K, C, L = V.shape
+        if a.minus_init is not None:
+            V0 = np.random.default_rng(a.minus_init).standard_normal((K, C, L))
+            V = V - V0 / np.linalg.norm(V0.reshape(K, -1), axis=1)[:, None, None]
+            note += " (minus init)"
         lag = (L - 1 - np.arange(L)) * fm + fm / 2
         e = (V ** 2).sum(axis=1)
         e = e / np.maximum(e.sum(axis=1, keepdims=True), 1e-12)

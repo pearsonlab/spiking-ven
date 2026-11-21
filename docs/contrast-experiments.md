@@ -1311,3 +1311,15 @@ strong. Figure: outputs/strfs_conv8_l2_smooth.png.
 The basis removes the lag speckle at almost no cost in reconstruction; frequency smoothing
 turns the remaining striations into S&W-like subfields, but 0.03 costs a lot of
 reconstruction and stopped at epoch 5. Figure: outputs/strfs_tm8_conv8.png.
+
+Same TM basis with the sliding-window (non-convolutional, uniform) reconstruction:
+
+| objective | smoothing | best epoch | held-out (not comparable across objectives) | STRF <=20 ms / mean lag | look |
+|---|---|---|---|---|---|
+| window | 0 | 39 | 0.076 | 46% / 25 ms | smooth but fills the whole 64 ms window: long horizontal bands, alternating across frequency |
+| window | 0.03 | 39 | 0.113 | 48% / 24 ms | large swirling blobs over the whole window, no short-latency structure |
+
+With the same basis and penalties, the objective sets the temporal extent: window
+reconstruction spreads structure over the whole window; the 16 ms convolutional decoder keeps
+it in the last ~16 ms. The basis only sets smoothness in time. Figure:
+outputs/strfs_tm8_conv_vs_window.png.

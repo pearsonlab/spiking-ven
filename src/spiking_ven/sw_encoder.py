@@ -96,7 +96,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                val_cochs=None, patience: int = 0, min_delta: float = 0.002,
                log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
                recon_tau_ms: float | None = None, predict_frames: int = 0,
-               checkpoint=None, resume=None):
+               checkpoint=None, resume=None, init_scale: float = 1.0,
+               init_bias: float = 0.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -137,7 +138,11 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``V``, ``b``, ``D``, ``mu``, ``epoch`` (1-based), held-out error, best weights so far,
     patience counter, RNG state), so a run can be stopped at any time, its latest STRFs
     inspected, and training continued by passing that dict back as ``resume`` (same corpus
-    and settings): the continuation is identical to an uninterrupted run."""
+    and settings): the continuation is identical to an uninterrupted run.
+
+    ``init_scale`` scales the random unit-norm initial STRFs (0 = start from zero, so the
+    STRFs hold only what was learned; needs ``init_bias`` > 0 to keep the ReLUs alive, and
+    the random decoder breaks the symmetry between units). ``init_bias``: initial bias."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -147,7 +152,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     mu = np.concatenate([_past_windows(X, L) for X in cochs], axis=0).mean(axis=0)
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
-    b = np.zeros(K)
+    V *= init_scale
+    b = np.full(K, float(init_bias))
+    if init_scale == 0 and init_bias <= 0:
+        raise ValueError("zero-init STRFs need init_bias > 0 (otherwise every ReLU is dead)")
     if predict_frames and tied:
         raise ValueError("predict_frames needs the untied decoder")
     h = int(predict_frames)
@@ -157,6 +165,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         D /= np.linalg.norm(D, axis=1, keepdims=True)
     else:
         D = None if tied else V.reshape(K, C * L).copy()
+        if D is not None and init_scale == 0:
+            D = rng.standard_normal((K, C * L))
+            D /= np.linalg.norm(D, axis=1, keepdims=True)
 
     def target(X, P):
         """What the code must reproduce: the window, or the next h frames (T, C*h)."""

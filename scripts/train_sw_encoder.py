@@ -77,6 +77,11 @@ def main() -> None:
                    help="continue from the checkpoint (same arguments as the original run); "
                         "lower --epochs to the checkpoint's epoch to just finalize the encoder "
                         "from the best weights so far")
+    p.add_argument("--init-scale", type=float, default=1.0,
+                   help="scale of the random initial STRFs (0 = start from zero; needs "
+                        "--init-bias > 0)")
+    p.add_argument("--init-bias", type=float, default=0.0,
+                   help="initial bias of every primary unit")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -131,7 +136,8 @@ def main() -> None:
                               log_every=a.log_every,
                               smooth_axes=(1,) if a.smooth_freq_only else (1, 2),
                               recon_tau_ms=a.recon_tau_ms, predict_frames=a.predict_frames,
-                              checkpoint=save_ckpt, resume=resume)
+                              checkpoint=save_ckpt, resume=resume,
+                              init_scale=a.init_scale, init_bias=a.init_bias)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

@@ -97,7 +97,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                log_every: int = 5, frame_ms: float = 2.0, smooth_axes=(1, 2),
                recon_tau_ms: float | None = None, predict_frames: int = 0,
                checkpoint=None, resume=None, init_scale: float = 1.0,
-               init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0):
+               init_bias: float = 0.0, conv_frames: int = 0, code_l1: float = 0.0,
+               l2_V: float = 0.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -150,7 +151,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``xhat_s = sum_k sum_{m=1..M} D_k(m) r_k(s+m)``, loss
     ``1/2 sum_s |x_s - xhat_s|^2 + code_l1 * sum r``. ``D`` is (K, M*C) (lag-major, each
     unit's kernel unit-norm). A unit only explains the part of the signal near its own time,
-    so short STRFs suffice; ``code_l1`` keeps the overcomplete code sparse."""
+    so short STRFs suffice; ``code_l1`` keeps the overcomplete code sparse.
+
+    ``l2_V``: weight decay on the STRFs (``V -= reg_lr * l2_V * V`` after each update)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if reg_lr is None:
@@ -267,6 +270,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                     V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
                 if mp_strength > 0:
                     V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+                if l2_V > 0:
+                    V = V * (1.0 - reg_lr * l2_V)
                 if l1_V > 0:
                     V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
                 err += float((E ** 2).sum()) / max(float((Y ** 2).sum()), 1e-12)
@@ -293,6 +298,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
             if mp_strength > 0:
                 V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+            if l2_V > 0:
+                V = V * (1.0 - reg_lr * l2_V)
             if l1_V > 0:
                 V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
             w = 1.0 if predict_frames else wcol

@@ -41,6 +41,7 @@ def main() -> None:
     p.add_argument("--reg-lr", type=float, default=None,
                    help="step for the L1 and roughness penalties (default: --lr)")
     p.add_argument("--l1", type=float, default=CAUSAL_L1, help="L1 on kernel entries")
+    p.add_argument("--l2", type=float, default=0.0, help="L2 weight decay on kernel entries")
     p.add_argument("--smooth", type=float, default=CAUSAL_SMOOTH,
                    help="roughness penalty (first differences over channel and lag)")
     p.add_argument("--mp-strength", type=float, default=CAUSAL_MP_STRENGTH,
@@ -143,7 +144,7 @@ def main() -> None:
                               recon_tau_ms=a.recon_tau_ms, predict_frames=a.predict_frames,
                               checkpoint=save_ckpt, resume=resume,
                               init_scale=a.init_scale, init_bias=a.init_bias,
-                              conv_frames=a.conv_frames, code_l1=a.code_l1)
+                              conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

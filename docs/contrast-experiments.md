@@ -1296,3 +1296,18 @@ smooth excitatory blobs at short latency (last ~10-15 ms) with inhibitory flanks
 instead of speckle. But subfields are broad in frequency and there is a diffuse low-amplitude
 wash across the whole window (nothing removes it without L1). Smoothness 0.1 is likely too
 strong. Figure: outputs/strfs_conv8_l2_smooth.png.
+
+## Takenaka-Malmquist temporal basis (branch ac-tm-basis, 2026-11-21)
+
+`--tm-basis 2,32,8`: each channel's temporal kernel = sum of 8 exponentials, tau log-spaced
+2-32 ms (fixed real poles). 16 ms conv decoder, L2 1e-3, zero init, code λ 0.
+
+| basis | smoothing (freq only) | best epoch | held-out | look |
+|---|---|---|---|---|
+| none (unconstrained V) | 0 | 20 | 0.021 | speckle in lag and frequency |
+| TM 8 | 0 | 20 | 0.025 | smooth in time; fine alternating bands across frequency remain |
+| TM 8 | 0.03 | 5 | 0.081 | smooth blobs: short-latency excitatory blob + inhibitory flanks in frequency, slower opposite-sign tails -- most S&W-like so far; diffuse background wash; stopped very early |
+
+The basis removes the lag speckle at almost no cost in reconstruction; frequency smoothing
+turns the remaining striations into S&W-like subfields, but 0.03 costs a lot of
+reconstruction and stopped at epoch 5. Figure: outputs/strfs_tm8_conv8.png.

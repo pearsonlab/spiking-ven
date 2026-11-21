@@ -1323,3 +1323,18 @@ With the same basis and penalties, the objective sets the temporal extent: windo
 reconstruction spreads structure over the whole window; the 16 ms convolutional decoder keeps
 it in the last ~16 ms. The basis only sets smoothness in time. Figure:
 outputs/strfs_tm8_conv_vs_window.png.
+
+### Per-unit activity target (`--act-target`, sliding window, TM 8, L2 1e-3, no smoothing)
+
+Each unit's threshold tracks the (1 - rho) quantile of its input (running average per bout);
+reconstruction trains V and D only.
+
+| rho | best epoch | held-out | unit active 10/50/90% | look |
+|---|---|---|---|---|
+| none | 39 | 0.076 | ~94% all | long horizontal bands over the whole window |
+| 0.5 | 41 | 0.108 | 47/50/54% | much like no constraint: bands across the window, a little cleaner |
+| 0.2 | 20 | 0.357 | 21/22/26% | fewer, broader features: big single-sign patches (several broad suppressive "off" units), bands 20-40 ms back; still spread over the window, not short latency |
+
+The constraint holds. Limiting how often each unit fires does not shorten STRFs under window
+reconstruction; at 0.2 it produces broad, coarse features and much worse reconstruction.
+Figure: outputs/strfs_tm8_win_act.png.

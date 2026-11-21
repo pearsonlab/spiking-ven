@@ -1203,3 +1203,21 @@ vs ~90 ms for 2-8 ms horizons). Their reported 10% "tail" (185-188 ms) is a metr
 `strf_compactness.py` takes the last sample above 10%, and these encoders respond relatively
 more to the song syllables around the burst (bumps at -65, ~105 and ~235 ms). Figure:
 outputs/strf_compactness_noreg0_horizons.png.
+
+## Lag-weighted reconstruction, tau 40/80 ms (2026-11-21)
+
+| encoder | best epoch | held-out (weighted) | recon (template) | STRF <=20 ms / mean lag | DAF raw peak / 10% tail |
+|---|---|---|---|---|---|
+| baseline (uniform) | - | - | 82% | 51% / 25 ms | 47 / 29 ms |
+| tau40, L1 2e-4 + freq smooth 0.1 + min-phase | 19 | 0.216 | 79% | 68% / 16 ms | 48 / 32 ms |
+| tau80, same penalties | 19 | 0.198 | 78% | 55% / 20 ms | 49 / 34 ms |
+| tau40, unregularized, zero init | 65 | 0.058 | 95% | 54% / 22 ms | 60 / 57 ms |
+| tau80, unregularized, zero init | 51 | 0.058 | 93% | 45% / 26 ms | 62 / 58 ms |
+
+Regularized: early epochs are compact (~90%, 5 ms), then units turn into isolated narrowband
+blobs placed 5-60 ms back (often doubled in time); intermediate mean lags are a mix of
+lag-0 columns and set-back blobs, not S&W-like kernels. Unregularized: dense, distributed
+signed texture over the whole window (no localized STRFs) -- best reconstruction, but the
+DAF response peaks after noise offset and lingers longest. For the window-reconstruction
+objective the penalties are what produce localized STRFs; for prediction, no penalties give
+compact kernels. Figures: outputs/strfs_tau40_80_final.png, outputs/strf_compactness_tau40_80.png.

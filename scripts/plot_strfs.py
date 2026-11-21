@@ -1,6 +1,7 @@
 """Plot STRFs from a training checkpoint or a saved S&W encoder.
 
     python scripts/plot_strfs.py FILE.npz [FILE2.npz ...] --out fig.png [--n 32]
+        [--labels "row 1 title" "row 2 title" ...]
 
 Accepts ``<out>.ckpt.npz`` checkpoints written every epoch by ``train_sw_encoder.py``
 (``V`` of shape (K, C, L)) or full encoder files (``SWEncoder``). One row of STRFs per file,
@@ -36,14 +37,19 @@ def main() -> None:
     p.add_argument("files", nargs="+")
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=16, help="STRFs per row")
+    p.add_argument("--labels", nargs="+", default=None,
+                   help="readable row titles (one per file; default: file names); use '\\n' "
+                        "for a line break")
     p.add_argument("--minus-init", type=int, default=None, metavar="SEED",
                    help="plot the learned change V - V_init, regenerating learn_relu's random "
                         "initial STRFs from this seed (useful without penalties, where the "
                         "initial noise never decays)")
     a = p.parse_args()
     rows = len(a.files)
-    fig, axes = plt.subplots(rows, a.n + 1, figsize=((a.n + 1) * 1.05, rows * 1.25),
-                             gridspec_kw={"width_ratios": [2.2] + [1] * a.n}, squeeze=False)
+    if a.labels is not None and len(a.labels) != rows:
+        p.error(f"--labels needs {rows} entries, got {len(a.labels)}")
+    fig, axes = plt.subplots(rows, a.n + 1, figsize=((a.n + 2.2) * 1.05, rows * 1.25),
+                             gridspec_kw={"width_ratios": [3.4] + [1] * a.n}, squeeze=False)
     for r, path in enumerate(a.files):
         V, fm, note = load_strfs(path)
         K, C, L = V.shape
@@ -62,7 +68,8 @@ def main() -> None:
         pick = order[np.linspace(0, len(order) - 1, min(a.n, len(order))).astype(int)]
         ax0 = axes[r, 0]
         ax0.axis("off")
-        ax0.text(0, 0.5, f"{Path(path).stem}\n{note}\n<=20 ms: {near:.0%}\nmean lag {mlag:.0f} ms",
+        title = a.labels[r].replace("\\n", "\n") if a.labels else Path(path).stem
+        ax0.text(0, 0.5, f"{title}\n({note}; <=20 ms {near:.0%}, mean lag {mlag:.0f} ms)",
                  fontsize=6.5, va="center")
         for j in range(a.n):
             ax = axes[r, j + 1]

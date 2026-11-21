@@ -50,7 +50,8 @@ __all__ = [
     "G_NMDA_MEAN_NS", "TAU_NMDA_RISE", "TAU_NMDA_DECAY", "ALPHA_NMDA", "MG_MM", "E_NMDA_MV",
     "T_REFR_MS", "TAU_STDP", "R_I_HZ", "BETA_ADAPT_PA", "TAU_ADAPT",
     "T_POST", "T_BURN", "N_ISTA",
-    "RHO_NS_AT_10MS", "rho_for",
+    "RHO_NS_AT_10MS", "rho_for", "RHO_PRE_NS", "J_IE_ROW_MAX_NS",
+    "C_IE", "IE_INIT_MEAN_NS", "IE_INIT_SD_NS",
     # 3. the causal encoder operating point
     "CAUSAL_N_BASES", "CAUSAL_K_FRAMES", "CAUSAL_N_COCH_CH", "CAUSAL_FRAME_RATE",
     "CAUSAL_LO_HZ", "CAUSAL_HI_HZ", "CAUSAL_RMS_REF",
@@ -278,6 +279,22 @@ TAU_ADAPT = 10.0
 T_POST = 200
 T_BURN = 500
 N_ISTA = 50
+
+#: Presynaptic depression of I -> E per I spike while the E cell's audio gate is open (nS).
+#: Off (0) in the shipped model; an option for making the learning competitive.
+RHO_PRE_NS = 0.0
+
+#: I -> E connectivity and initial weights. The shipped model connects every I cell to
+#: every E cell and starts the weights at zero; an E/I-balanced start uses sparse
+#: connections (``C_IE`` < 1) with log-normal initial weights (mean, SD; nS; SD 0 = half
+#: the mean), from which STDP learns changes.
+C_IE = 1.0
+IE_INIT_MEAN_NS = 0.0
+IE_INIT_SD_NS = 0.0
+
+#: Cap on each E cell's total I -> E weight (nS), applied after every training rendition
+#: by scaling the row down. Off (0) in the shipped model.
+J_IE_ROW_MAX_NS = 0.0
 
 #: STDP step (peak GABA_A conductance, nS) per pairing at a 10 ms window; see
 #: :func:`rho_for`.

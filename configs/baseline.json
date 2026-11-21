@@ -1,0 +1,31 @@
+{
+  "name": "hvc_plastic_aud400_nih300",
+  "description": "Experiment baseline (2026-11-20, round K; N_IH 300 with ~160 targets each since the N_IH test: same cancellation as 1200, a third of the interneurons): V2 network on the Schneider & Woolley front end, with plastic HVC -> I_HVC (eligibility traces credited by the I_HVC -> E Vogels change, divisive synaptic scaling to an 8 Hz I_HVC target). See docs/contrast-experiments.md, round K. Not the package defaults (those reproduce v0.7.0).",
+  "model": {
+    "c_ie": 0.5, "ie_init_mean_ns": 6.0, "ie_init_sd_ns": 3.0,
+    "i_drive_i_pa": 0.0, "i_drive_e_pa": 2500.0,
+    "c_ei": 0.05, "ei_mean_ns": 11.0, "ei_sd_ns": 5.5,
+    "c_hvc": 0.0, "rho_ns": 0.0, "g_nmda_mean_ns": 0.0,
+    "aud_mean_ns": 400.0, "aud_sd_ns": 200.0, "c_aud": 0.05,
+    "n_ih": 300, "c_hvc_h": 0.9, "hvc_h_mean_ns": 0.9, "hvc_h_sd_ns": 0.0,
+    "c_he": 0.266667,
+    "vogels_h": 1.0, "eta_h_ns": 3.0,
+    "hvc_plastic": 1.0, "kappa_h": 0.02, "tau_elig_ms": 10.0, "tau_hpre_ms": 5.0,
+    "h_relax": 0.0, "ih_scale": 0.02, "ih_rate_hz": 8.0
+  },
+  "stimulus": {
+    "encoder": "outputs/encoders/pen/l1_2e-4_sm_1e-1_pu90.npz",
+    "aud_norm": 0.3,
+    "aud_norm_power": 2.0,
+    "rms_per_rendition": true
+  },
+  "training": {"n_rend": 150, "seed": 42},
+  "trained_model": "outputs/sweeps/rK_monitor/nih300.npz",
+  "results": {
+    "flatness_template": 0.52,
+    "flatness_over_renditions": 0.53,
+    "cancelled_vs_not_singing": 1.07,
+    "singing_over_not_singing_pooled": 0.94,
+    "median_per_cell_singing_ratio": 0.97
+  }
+}

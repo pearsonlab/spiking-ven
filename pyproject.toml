@@ -70,7 +70,11 @@ extend-exclude = ["src/spiking_ven/filterbank.py"]
 # default set: pyflakes plus the essential pycodestyle errors.
 select = ["E4", "E7", "E9", "F"]
 
+[tool.ty.environment]
+# Scripts import their sibling ``sweep.py`` (via sys.path at run time).
+extra-paths = ["scripts"]
+
 [tool.ty.src]
-# Type-checked in CI, non-blocking for now (see ci.yml). Same vendored exclusion as ruff:
+# Type-checked in CI (blocking; see ci.yml). Same vendored exclusion as ruff:
 # filterbank.py stays byte-for-byte with Gammatone 1.0.3.
 exclude = ["src/spiking_ven/filterbank.py"]

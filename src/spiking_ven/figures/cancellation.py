@@ -9,7 +9,7 @@ figure draws exactly the spikes the metrics score.
 
 Public API
 ----------
-make_figure(ven, st, out_tag="", *, out_dir="outputs")
+make_figure(ven, st, out_tag="", *, out_dir="outputs", extra_rates=None, ven_before=None)
 
 Saves ``cancellation{out_tag}.png`` and ``.pdf`` in ``out_dir``.
 """
@@ -56,17 +56,31 @@ def specgram(sig, n_samples, sr):
     return f / 1000.0, t * 1000.0, 10.0 * np.log10(Sxx + 1e-10)
 
 
-def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
+def make_figure(ven, st, out_tag="", *, out_dir="outputs",
+                extra_rates: dict[int, tuple[np.ndarray, str]] | None = None,
+                shown_label: str = "shown rendition", ven_before=None):
     """Run the network on each column's stimulus and save the figure.
 
     ``ven`` is a VocalErrorNet; ``st`` is ``stimuli.build_stimuli``'s output. The
     conduction delays are properties of the trained model and are applied inside its
-    own inference pass.
+    own inference pass. ``extra_rates`` maps a column index to ``(rate, label)``: a second
+    E population rate (Hz per ms bin, e.g. averaged over renditions) drawn on that
+    column's bottom row, with a legend (``shown_label`` names the column's own trace).
+    ``ven_before``: the same network before training; adds a first column with the
+    training song through it (``extra_rates`` indices count that column).
     """
+    extra_rates = extra_rates or {}
     os.makedirs(str(out_dir), exist_ok=True)
     T_song, sr = st["T_song"], st["sr"]
     cols: list[_Column] = []
+    if ven_before is not None:
+        sE, sI = ven_before.transform_all(st["hvc_on"], st["aud_correct"],
+                                          hvc_prelude=st.get("hvc_prelude"))
+        cols.append(_Column(title="Before training", sig=st["sig_train"],
+                            aud=st["aud_correct"], sE=sE, sI=sI))
     for title, sig_key, aud_key in COLUMNS:
+        if ven_before is not None and aud_key == "aud_correct":
+            title = "After training"
         sE, sI = ven.transform_all(st["hvc_on"], st[aud_key],
                                    hvc_prelude=st.get("hvc_prelude"))
         cols.append(_Column(title=title, sig=st[sig_key], aud=st[aud_key], sE=sE, sI=sI))
@@ -124,8 +138,10 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
     # One y-limit for every column, or the subtlety the row exists to show would be
     # rescaled away column by column.
     rate_ymax = 1.15 * max(
-        float(gaussian_filter1d(c["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0).max())
-        for c in cols)
+        [float(gaussian_filter1d(c["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0).max())
+         for c in cols]
+        + [float(gaussian_filter1d(np.asarray(r)[:T_song], 6.0).max())
+           for r, _ in extra_rates.values()])
 
     for ci, cd in enumerate(cols):
         ax_wav, ax_spec, ax_aud, ax_i, ax_e, ax_r = axes[:, ci]
@@ -190,7 +206,16 @@ def make_figure(ven, st, out_tag="", *, out_dir="outputs"):
         # Row 5: E population rate, every unit, Gaussian-smoothed.
         rate = gaussian_filter1d(cd["sE"][:, :T_song].mean(axis=0) * 1000.0, 6.0)
         ax_r.set_facecolor(BG["E"])
-        ax_r.plot(np.arange(T_song), rate, color=CLR["E"], lw=1.0)
+        ax_r.plot(np.arange(T_song), rate, color=CLR["E"], lw=1.0,
+                  label=shown_label if ci in extra_rates else None)
+        if ci in extra_rates:
+            r_x, lab = extra_rates[ci]
+            ax_r.plot(np.arange(T_song),
+                      gaussian_filter1d(np.asarray(r_x, dtype=float)[:T_song], 6.0),
+                      color="0.15", lw=1.0, ls="--", label=lab)
+            if ci == min(extra_rates):          # one legend, on the first such column
+                ax_r.legend(fontsize=6, frameon=False, loc="upper left", ncols=2,
+                            handlelength=1.6, borderaxespad=0.1)
         ax_r.set_xlim(0, T_song)
         ax_r.set_ylim(0, rate_ymax)
         ax_r.set_xlabel("Time (ms)", fontsize=9)

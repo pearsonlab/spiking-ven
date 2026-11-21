@@ -27,15 +27,26 @@ import numpy as np
 __all__ = ["causal_meansub", "infer", "learn", "min_phase", "prune_silent"]
 
 
-def causal_meansub(X, w):
+def causal_meansub(X, w, tau=None):
     """Subtract a causal running level from every frame.
 
     For each frame, the mean over the trailing ``w`` frames (including that frame) is taken
     per channel and then averaged across channels; that one number is subtracted from
     every channel. Without it the code is dominated by overall level and cannot tell
     forward from reversed song.
+
+    With ``tau`` (frames), the running mean is exponential instead -- ``m[t] = m[t-1] +
+    (x[t] - m[t-1]) / tau``, started at the first frame -- so a sound's contribution fades
+    smoothly rather than dropping out ``w`` frames later, which a boxcar does (the abrupt
+    exit rings: suppression after a loud sound, then an overshoot when it leaves).
     """
     C, T = X.shape
+    if tau is not None:
+        from scipy.signal import lfilter
+        a = 1.0 / float(tau)
+        means = lfilter([a], [1.0, -(1.0 - a)], X, axis=1,
+                        zi=(1.0 - a) * X[:, :1])[0]
+        return X - means.mean(axis=0, keepdims=True)
     cs = np.cumsum(np.concatenate([np.zeros((C, 1)), X], axis=1), axis=1)
     idx = np.arange(T)
     lo = np.maximum(idx - w + 1, 0)
@@ -51,7 +62,7 @@ def _past_windows(X, L):
     return win.transpose(1, 0, 2).reshape(T, C * L)
 
 
-def _roughness_grad(V):
+def _roughness_grad(V, axes=(1, 2)):
     """Gradient of 0.5 * ||D V||^2, D the first difference along channel and lag.
 
     This is the smoothness prior, not weight decay. A plain L2 penalty on the entries
@@ -60,10 +71,11 @@ def _roughness_grad(V):
     L1 soft-threshold for the same reason). Penalising *differences* changes entries
     relative to each other, so it survives the renormalisation.
 
-    Neumann (reflecting) boundaries, so the edges are not pulled toward zero.
+    Neumann (reflecting) boundaries, so the edges are not pulled toward zero. ``axes``
+    picks the directions penalised (1 = channel, 2 = lag).
     """
     g = np.zeros_like(V)
-    for axis in (1, 2):
+    for axis in axes:
         d = np.diff(V, axis=axis)
         g -= np.diff(d, axis=axis, prepend=0.0, append=0.0)
     return g
@@ -246,7 +258,11 @@ class CausalFilterEncoder:
 
         X = cochleagram(sig, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
                         lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
-        Xc = causal_meansub(X, self.L)
+        # The running level is taken over ``meansub_frames`` (default: the filter length
+        # L). A shorter window is a higher high-pass cutoff: the code forgets a loud sound
+        # sooner after it ends.
+        Xc = causal_meansub(X, getattr(self, "meansub_frames", None) or self.L,
+                            tau=getattr(self, "meansub_tau", None))
         acts = infer(Xc, self.V, self.lam, n_iter=n_ista)
 
         if upsample_to_ms:
@@ -264,6 +280,11 @@ class CausalFilterEncoder:
     @classmethod
     def load(cls, path):
         d = np.load(path, allow_pickle=False)
+        if "kind" in d and str(d["kind"]) == "sw":
+            # A Schneider & Woolley two-stage front end (spiking_ven.sw_encoder), which has
+            # the same interface; returned so every caller can load either kind.
+            from .sw_encoder import SWEncoder
+            return SWEncoder.load(path)
         cp = {k[3:]: (v.item() if v.ndim == 0 else v) for k, v in d.items()
               if k.startswith("cp_")}
         # Encoders saved before the per-filter bias was removed carry an all-zero

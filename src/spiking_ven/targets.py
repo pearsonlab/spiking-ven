@@ -30,6 +30,7 @@ class BiologicalTargets(TypedDict):
     response_latency_ms: tuple[float, float]
     response_duration_ms: tuple[float, float]
     reversed_min_ratio: float
+    singing_over_not_singing: tuple[float, float]
     aud_song_rate_hz: tuple[float, float]
 
 
@@ -79,6 +80,14 @@ BIOLOGICAL_TARGETS: BiologicalTargets = {
     "response_latency_ms": (23.0, 12.0),
     "response_duration_ms": (90.0, 43.0),
     "reversed_min_ratio": 1.0,  # direction only
+    #: "exhibited only small changes in average firing rate compared to non-singing
+    #: (Figure 7D, significant firing rate change in 15/37 neurons)"; only 4/37 were
+    #: modulated in time with the motif. Fig 7D's units lie along the diagonal of a log-log
+    #: plot (non-singing ~1.5-50 Hz, mostly 2-15 Hz) within about a factor of 2, read off
+    #: the panel. So singing does not suppress AIV: the song's auditory drive is cancelled
+    #: specifically, not by a blanket inhibition while singing. Compared as the E rate
+    #: while singing the trained song over the rate in silence without singing.
+    "singing_over_not_singing": (0.5, 2.0),
 
     # --- auditory input population ------------------------------------------------
     # Schneider & Woolley 2013, Neuron 79:141-152, DOI 10.1016/j.neuron.2013.04.038.

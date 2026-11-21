@@ -40,7 +40,7 @@ from brian2 import (
     nS,
 )
 
-__all__ = ["E_EQS", "I_EQS", "NMDA_EQS", "STDP_ON_POST", "build_network", "spike_events",
+__all__ = ["E_EQS", "I_EQS", "NMDA_EQS", "STDP_ON_POST", "STDP_ON_PRE", "build_network", "spike_events",
            "bin_spikes"]
 
 # ---------------------------------------------------------------------------
@@ -61,13 +61,21 @@ dg_ampa/dt = -g_ampa / tau_ampa : siemens
 dg_gaba/dt = -g_gaba / tau_gaba : siemens
 dI_adapt/dt = -I_adapt / tau_adapt : amp
 da_aud/dt = -a_aud / tau_stdp : 1
+dx_e/dt = -x_e / tau_stdp : 1
+dr_loc/dt = -r_loc / tau_loc : Hz
+dr_slow/dt = -r_slow / tau_slow : Hz
+alpha_e : 1
 g_nmda : siemens
 mg_block = 1 / (1 + Mg / (3.57*mM) * exp(-0.062 * v/mV)) : 1 (constant over dt)
 gate = int(a_aud > exp(-1)) : 1
 I_noise = sigma * randn() / sqrt(dt) : amp (constant over dt)
 """
 # ``a_aud`` counts recent auditory input spikes, each decaying with tau_stdp; ``gate``
-# is open while it exceeds 1/e, i.e. for tau_stdp after an isolated input spike.
+# is open while it exceeds 1/e, i.e. for tau_stdp after an isolated input spike. ``x_e``
+# is the cell's own spike trace and ``alpha_e`` its rate target (``2 r tau_stdp``), used
+# only by the optional rate-target rule (``VOGELS_ON_PRE``). ``r_loc`` is the cell's own
+# rate averaged over ``tau_loc`` (an exponential running mean), for the rule's local
+# target (``lam_loc``); ``r_slow`` the same over ``tau_slow``, its optional reference.
 # ``g_nmda`` is summed from the NMDA synapses (see ``build_network``).
 
 #: Inhibitory interneurons. ``x_stdp`` is the presynaptic STDP trace.
@@ -90,19 +98,84 @@ ds/dt = -s / tau_nmda_decay + alpha_nmda * x * (1 - s) : 1
 #: cell's audio gate is open, and never below zero. ``rho`` is 0 outside training.
 STDP_ON_POST = "w = clip(w + rho * gate_post * (x_stdp_pre - theta), 0*nS, inf*nS)"
 
+#: Optional presynaptic depression (after Vogels et al. 2011), at each I spike: the weight
+#: falls by ``rho_dep`` while the E cell's audio gate is open, so I activity that does not
+#: precede the E cell's spikes costs weight. ``rho_dep`` is 0 by default and outside
+#: training.
+STDP_ON_PRE = "g_gaba_post += w; w = clip(w - rho_dep * gate_post, 0*nS, inf*nS)"
+
+#: Rate-target inhibitory STDP (Vogels et al. 2011, Science 334:1569), an option for
+#: I_HVC -> E: at each I spike the weight moves by ``eta`` times (the E cell's spike trace
+#: minus its target ``alpha_e = 2 r_target tau_stdp``); at each E spike it grows by ``eta``
+#: times the I trace. Each E cell settles at its target rate; with a sparse, reproducible
+#: presynaptic basis, the learned inhibition follows the E cell's excess drive in time.
+#: The target is the constant ``alpha_e`` blended (weight ``lam_loc``) with a local one,
+#: ``2 tau_stdp r_loc``: the cell's own rate over the last ``tau_loc``. ``lam_loc = 0`` is
+#: the constant target of Vogels et al.; ``lam_loc = 1`` asks the rule to flatten the rate
+#: on timescales shorter than ``tau_loc`` only. With ``use_slow``, the local term is
+#: measured against the cell's rate over ``tau_slow`` instead of its target, so the target
+#: becomes ``alpha_e + lam_loc 2 tau_stdp (r_loc - r_slow)``: fast fluctuations are
+#: flattened while the mean stays anchored at ``alpha_e`` (a high-pass target).
+_REF = "(use_slow * 2 * tau_stdp * r_slow_post + (1 - use_slow) * alpha_e_post)"
+_TARGET = f"(alpha_e_post + lam_loc * (2 * tau_stdp * r_loc_post - {_REF}))"
+VOGELS_ON_PRE = f"g_gaba_post += w; w = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS)"
+#: ``post_gain`` scales the postsynaptic term (1 = Vogels et al.; 0 = the presynaptic term
+#: alone, whose fixed point is exactly the target rate while each I cell fires -- the post
+#: term adds potentiation in proportion to I/E correlation, which song-locked I_HVC
+#: firing makes positive, pulling the rate below target).
+VOGELS_ON_POST = "w = clip(w + post_gain * eta * x_stdp_pre, 0*nS, inf*nS)"
+#: The same, with both terms multiplied by the E cell's audio gate (learning only while
+#: auditory input drives the cell), for comparison.
+VOGELS_ON_PRE_GATED = ("g_gaba_post += w; "
+                       f"w = clip(w + eta * gate_post * (x_e_post - {_TARGET}), 0*nS, inf*nS)")
+VOGELS_ON_POST_GATED = "w = clip(w + post_gain * eta * gate_post * x_stdp_pre, 0*nS, inf*nS)"
+
+#: The same rule, also adding each weight change into the presynaptic I_HVC cell's
+#: ``credit`` -- the signal that trains that cell's HVC inputs (``HVC_ELIG_*``).
+VOGELS_ON_PRE_CREDIT = (
+    "g_gaba_post += w; "
+    f"w_new = clip(w + eta * (x_e_post - {_TARGET}), 0*nS, inf*nS); "
+    "credit_pre += w_new - w; w = w_new")
+#: At each E spike the I_HVC cell is also credited ``beta_maint`` times the synapse's
+#: weight: inhibition that is in use (strong, onto a cell that is firing) keeps crediting
+#: the HVC inputs that timed it, so learned timing survives once the Vogels change has
+#: settled to zero.
+VOGELS_ON_POST_CREDIT = (
+    "w_new = clip(w + post_gain * eta * x_stdp_pre, 0*nS, inf*nS); "
+    "credit_pre += w_new - w + beta_maint * w; w = w_new")
+
+#: Plastic HVC -> I_HVC synapses with an eligibility trace (pre-before-post): ``x_h`` is
+#: the synapse's HVC spike trace (``tau_hpre``); at each I_HVC spike the eligibility ``elig``
+#: grows by it, then decays with ``tau_elig``. Every ``dt_credit`` the weight moves by
+#: ``kappa`` times the eligibility times the cell's ``credit`` (the summed I_HVC -> E
+#: Vogels change since the last update): inputs that drove the cell's spikes at the times
+#: its outgoing inhibition was strengthened grow; when it was weakened, they shrink.
+#: Between renditions every cell's weights relax toward the uniform start and are rescaled
+#: to a fixed total (``VocalErrorNet``), so growth on some inputs is paid by the others.
+HVC_ELIG_MODEL = """
+w : siemens
+dx_h/dt = -x_h / tau_hpre : 1 (event-driven)
+delig/dt = -elig / tau_elig : 1 (event-driven)
+kappa : 1 (shared)
+"""
+HVC_ELIG_ON_PRE = "g_ampa_post += w; x_h += 1"
+HVC_ELIG_ON_POST = "elig += x_h"
+HVC_ELIG_UPDATE = ("w = clip(w + kappa * elig * exp(-(t - lastupdate) / tau_elig) * credit_post, "
+                   "0*nS, inf*nS)")
+
 
 # ---------------------------------------------------------------------------
 # Builders
 # ---------------------------------------------------------------------------
 
-def _connect(syn: Synapses, W: np.ndarray, *, dense: bool = False) -> None:
+def _connect(syn: Synapses, W: np.ndarray, *, mask: np.ndarray | None = None) -> None:
     """Connect ``syn`` from a ``(post, pre)`` weight matrix in nS and set ``syn.w``.
 
-    Only nonzero entries become synapses unless ``dense``, which wires every pair (for a
-    plastic matrix that starts at zero).
+    Only nonzero entries become synapses, unless ``mask`` (same shape, bool) says which
+    pairs are connected -- for a plastic matrix, whose weights may start at zero.
     """
     W = np.asarray(W, dtype=np.float64)
-    post, pre = np.nonzero(np.ones_like(W) if dense else W)
+    post, pre = np.nonzero(W if mask is None else np.asarray(mask, dtype=bool))
     if pre.size == 0:
         syn.active = False
         return
@@ -116,10 +189,11 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     ``ns`` is the namespace of Brian2 quantities (``VocalErrorNet.namespace()``):
     population-specific constants under ``"E"``, ``"I"``, the rest shared. ``weights``
-    holds the ``(post, pre)`` matrices ``A``, ``G``, ``B``, ``J_EI``, ``J_IE`` in nS.
+    holds the ``(post, pre)`` matrices ``A``, ``G``, ``B``, ``J_EI``, ``J_IE`` in nS, and
+    ``M_IE``, which I -> E pairs are connected (plastic synapses exist only there).
     Returns a dict of the Brian2 objects, with the network under ``"net"``.
     """
-    shared = {k: v for k, v in ns.items() if k not in ("E", "I")}
+    shared = {k: v for k, v in ns.items() if k not in ("E", "I", "IH")}
     n_e, n_i = weights["A"].shape[0], weights["B"].shape[0]
     reset_v = "v = V_reset"
 
@@ -128,7 +202,9 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
 
     # E and I are the paper's population names.
     E = NeuronGroup(n_e, E_EQS, threshold="v > V_th",
-                    reset=f"{reset_v}; I_adapt += beta", refractory="t_ref",
+                    reset=(f"{reset_v}; I_adapt += beta; x_e += 1; r_loc += 1/tau_loc; "
+                           "r_slow += 1/tau_slow"),
+                    refractory="t_ref",
                     method="exponential_euler", namespace={**shared, **ns["E"]},
                     dt=dt, name="E")
     I = NeuronGroup(n_i, I_EQS, threshold="v > V_th",  # noqa: E741
@@ -157,15 +233,63 @@ def build_network(ns: dict, weights: dict, *, n_aud: int, n_hvc: int,
     _connect(hvc_i, weights["B"])
     e_i = Synapses(E, I, "w : siemens", on_pre="g_ampa_post += w", dt=dt, name="e_i")
     _connect(e_i, weights["J_EI"])
-    i_e = Synapses(I, E, "w : siemens\nrho : siemens (shared)",
-                   on_pre="g_gaba_post += w", on_post=STDP_ON_POST,
+    i_e = Synapses(I, E, "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
+                   on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
                    namespace=shared, dt=dt, name="i_e")
-    _connect(i_e, weights["J_IE"], dense=True)
+    _connect(i_e, weights["J_IE"], mask=weights["M_IE"])
 
     mon_e = SpikeMonitor(E, name="mon_e")
     mon_i = SpikeMonitor(I, name="mon_i")
     objs: dict[str, Any] = dict(aud=aud, hvc=hvc, E=E, I=I, nmda=nmda, aud_e=aud_e, aud_nmda=aud_nmda,
                 nmda_e=nmda_e, hvc_i=hvc_i, e_i=e_i, i_e=i_e, mon_e=mon_e, mon_i=mon_i)
+
+    # Optional second inhibitory population, I_HVC ("IH"): driven only by HVC (no E input),
+    # a sparse temporal basis whose plastic synapses onto E learn the cancellation. Same
+    # membrane and STDP rule as I; its own baseline ``theta_h``.
+    if weights.get("B_H") is not None and weights["B_H"].shape[0] > 0:
+        hvc_plastic = bool(shared.get("hvc_plastic", False))
+        # With plastic HVC input, each I_HVC cell also has its own homeostatic tonic
+        # current ``I_h`` (set between renditions by ``VocalErrorNet``).
+        ih_eqs = (I_EQS.replace("+ I_tonic +", "+ I_tonic + I_h +")
+                  + "credit : siemens\nI_h : amp\n") if hvc_plastic else I_EQS
+        IH = NeuronGroup(weights["B_H"].shape[0], ih_eqs, threshold="v > V_th",
+                         reset=f"{reset_v}; x_stdp += 1", refractory="t_ref",
+                         method="exponential_euler", namespace={**shared, **ns["IH"]},
+                         dt=dt, name="IH")
+        IH.v = shared["E_L"]
+        if hvc_plastic:
+            hvc_ih = Synapses(hvc, IH, HVC_ELIG_MODEL, on_pre=HVC_ELIG_ON_PRE,
+                              on_post=HVC_ELIG_ON_POST, namespace=shared, delay=hvc_delay,
+                              dt=dt, name="hvc_ih")
+            _connect(hvc_ih, weights["B_H"], mask=weights["M_HH"])
+            # Weight update, then the credit is cleared (same slot, in that order).
+            hvc_ih.run_regularly(HVC_ELIG_UPDATE, dt=shared["dt_credit"], when="end",
+                                 order=0, name="hvc_ih_update")
+            IH.run_regularly("credit = 0*nS", dt=shared["dt_credit"], when="end", order=1,
+                             name="ih_credit_reset")
+        else:
+            hvc_ih = Synapses(hvc, IH, "w : siemens", on_pre="g_ampa_post += w",
+                              delay=hvc_delay, dt=dt, name="hvc_ih")
+            _connect(hvc_ih, weights["B_H"])
+        if shared.get("vogels_h", False):
+            gated = shared.get("vogels_gate", False)
+            if hvc_plastic:
+                on_pre, on_post = VOGELS_ON_PRE_CREDIT, VOGELS_ON_POST_CREDIT
+            elif gated:
+                on_pre, on_post = VOGELS_ON_PRE_GATED, VOGELS_ON_POST_GATED
+            else:
+                on_pre, on_post = VOGELS_ON_PRE, VOGELS_ON_POST
+            ih_e = Synapses(IH, E, "w : siemens\neta : siemens (shared)",
+                            on_pre=on_pre, on_post=on_post,
+                            namespace=shared, dt=dt, name="ih_e")
+        else:
+            ih_e = Synapses(IH, E,
+                            "w : siemens\nrho : siemens (shared)\nrho_dep : siemens (shared)",
+                            on_pre=STDP_ON_PRE, on_post=STDP_ON_POST,
+                            namespace={**shared, "theta": shared["theta_h"]}, dt=dt,
+                            name="ih_e")
+        _connect(ih_e, weights["J_HE"], mask=weights["M_HE"])
+        objs.update(IH=IH, hvc_ih=hvc_ih, ih_e=ih_e, mon_ih=SpikeMonitor(IH, name="mon_ih"))
     objs["net"] = Network(*objs.values())
     return objs
 

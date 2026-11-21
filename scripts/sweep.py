@@ -23,7 +23,45 @@ from pathlib import Path
 
 import numpy as np
 
-CACHE = Path("outputs/sweeps/stimuli_cache.pkl")
+#: The encoder the stimuli are built with; ``--encoder`` sets it (workers inherit it).
+ENCODER = os.environ.get("SWEEP_ENCODER", "outputs/causal_encoder.npz")
+#: Divisive normalisation of the auditory population (``--aud-norm``); none by default.
+NORM = float(os.environ["SWEEP_AUD_NORM"]) if os.environ.get("SWEEP_AUD_NORM") else None
+NORM_POW = (float(os.environ["SWEEP_AUD_NORM_POW"]) if os.environ.get("SWEEP_AUD_NORM_POW")
+            else None)
+#: Each training rendition scaled by its own rms (``--rms-per-rendition``).
+RMS_SELF = bool(os.environ.get("SWEEP_RMS_SELF"))
+
+
+def _cache_path() -> Path:
+    """The stimulus cache for the current encoder and auditory-normalisation settings."""
+    return Path("outputs/sweeps/" + ("stimuli_cache" if ENCODER == "outputs/causal_encoder.npz"
+                                     else f"stimuli_cache_{Path(ENCODER).stem}")
+                + ("" if NORM is None else f"_norm{NORM:g}")
+                + ("" if NORM_POW is None else f"_pow{NORM_POW:g}")
+                + ("_rmsself" if RMS_SELF else "") + ".pkl")
+
+
+CACHE = _cache_path()
+
+
+def configure(encoder: str | None = None, aud_norm: float | None = None,
+              aud_norm_power: float | None = None, rms_per_rendition: bool = False) -> None:
+    """Set the stimulus settings (and the environment, for worker processes)."""
+    global ENCODER, CACHE, NORM, NORM_POW, RMS_SELF
+    if encoder:
+        os.environ["SWEEP_ENCODER"] = encoder
+        ENCODER = encoder
+    if aud_norm is not None:
+        os.environ["SWEEP_AUD_NORM"] = str(aud_norm)
+        NORM = aud_norm
+    if aud_norm_power is not None:
+        os.environ["SWEEP_AUD_NORM_POW"] = str(aud_norm_power)
+        NORM_POW = aud_norm_power
+    if rms_per_rendition:
+        os.environ["SWEEP_RMS_SELF"] = "1"
+        RMS_SELF = True
+    CACHE = _cache_path()
 
 
 def _stimuli():
@@ -32,9 +70,10 @@ def _stimuli():
     from spiking_ven.causal_filters import CausalFilterEncoder
     from spiking_ven.metrics import daf_inputs
     from spiking_ven.stimuli import build_stimuli
-    enc = CausalFilterEncoder.load("outputs/causal_encoder.npz")
+    enc = CausalFilterEncoder.load(ENCODER)
     st = build_stimuli(enc, "outputs/motifs.npz", sr=16000, seed=42, n_hvc=600,
-                       n_ista=50, verbose=False)
+                       n_ista=50, norm_sigma=NORM, norm_power=NORM_POW,
+                       rms_per_rendition=RMS_SELF, verbose=False)
     st["daf_inputs"] = daf_inputs(enc, st, seed=42)
     st["n_channels"] = enc.n_channels
     CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +96,7 @@ def score(r: dict, m: dict) -> dict:
         "late": outside(r["late_over_peak"], -1.0, 0.15),
         "extra_spikes": outside(r["extra_spikes_responders"], 0.8, 1.0),
         "specificity": outside(m["reversed_over_trained"], 1.0, 10.0),
+        "singing_vs_not": outside(m["singing_over_not_singing"], 0.5, 2.0),
     }
     s["total"] = float(sum(s.values()))
     return s
@@ -74,11 +114,14 @@ def run_one(args) -> dict:
     st = _stimuli()
     t0 = time.time()
     ven = VocalErrorNet(n_aud=st["n_channels"], seed=seed, **overrides)
+    if ven.vogels_h:              # per-cell targets: each cell's untrained not-singing rate
+        ven.set_rate_targets(ven.n_hvc, ven.n_aud)
     traces = train(ven, st, n_rend, seed=seed, verbose=False)
     t_train = time.time() - t0
     m = rendition_rates(ven, hvc_on=st["hvc_on"], hvc_off=st["hvc_off"],
                         aud_trained=st["aud_correct"], aud_daf=st["aud_daf"],
-                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"])
+                        aud_reversed=st["aud_reversed"], hvc_prelude=st["hvc_prelude"],
+                        t_song=st["T_song"])
     r = daf_response(ven, None, st, seed=seed, inputs=st["daf_inputs"])
     c = song_contrast(ven, st)
     res = {"id": key, "overrides": overrides, "n_rend": n_rend, "seed": seed,
@@ -99,8 +142,17 @@ def main() -> None:
     p.add_argument("--configs", default=None, help="JSON list of override dicts")
     p.add_argument("--n-rend", type=int, default=600)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--aud-norm", type=float, default=None,
+                   help="divisive normalisation sigma for the auditory population")
+    p.add_argument("--rms-per-rendition", action="store_true",
+                   help="scale each training rendition by its own rms")
+    p.add_argument("--aud-norm-power", type=float, default=None,
+                   help="exponent of the normalisation, 1 + (sum/sigma)**n (default 1)")
+    p.add_argument("--encoder", default=None,
+                   help="encoder .npz (default outputs/causal_encoder.npz); its own cache")
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     a = p.parse_args()
+    configure(a.encoder, a.aud_norm, a.aud_norm_power, a.rms_per_rendition)
     if a.grid:
         g = json.loads(a.grid)
         configs = [dict(zip(g, vals)) for vals in itertools.product(*g.values())]
@@ -125,6 +177,7 @@ def main() -> None:
                   f"dur {r['duration_ms']:.1f} pk {r['peak_latency_ms']} "
                   f"late {r['late_over_peak']:.2f} xs {r['extra_spikes_responders']:.2f} "
                   f"rev/tr {res['rates']['reversed_over_trained']:.3f} "
+                  f"sing/not {res['rates']['singing_over_not_singing']:.2f} "
                   f"song-excess rev/tr {res['contrast']['excess_ratio']:.2f} "
                   f"(diff {res['contrast']['excess_diff_hz']:+.2f} Hz) "
                   f"({res['t_total_s']/60:.1f} min)", flush=True)

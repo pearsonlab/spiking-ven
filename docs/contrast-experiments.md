@@ -1221,3 +1221,24 @@ signed texture over the whole window (no localized STRFs) -- best reconstruction
 DAF response peaks after noise offset and lingers longest. For the window-reconstruction
 objective the penalties are what produce localized STRFs; for prediction, no penalties give
 compact kernels. Figures: outputs/strfs_tau40_80_final.png, outputs/strf_compactness_tau40_80.png.
+
+## Nagel & Doupe (2006) temporal-filter stats of the encoders
+
+`scripts/temporal_filter_stats.py`: temporal profile = STRF summed over channels (broadband
+carrier) or +-2 channels around the best channel; Pos/Neg, BMF and 50% width as defined by
+Nagel & Doupe (field L, awake): Pos/Neg 1.41 at 30 dB, 0.97 (balanced) at 63 dB; BMF 10-150 Hz.
+Broadband medians:
+
+| encoder | Pos/Neg | balanced (0.5-2) | BMF Hz | low-pass (BMF 0) | BMF in 10-150 | 50% width |
+|---|---|---|---|---|---|---|
+| baseline | 3.5 | 30% | 10 | 40% | 49% | 20 ms |
+| reg tau40 / tau80 | 11.6 / 5.9 | 13 / 17% | 0 / 0 | 64 / 58% | 28 / 32% | 14 / 16 ms |
+| noreg tau40 / tau80 | 1.9 / 1.9 | 48 / 44% | 25 / 25 | 18 / 19% | 77 / 77% | 16 / 17 ms |
+| pred 2 / 4 / 8 ms | 1.5 / 2.5 / 3.7 | 54 / 41 / 30% | 28 / 19 / 17 | 28 / 41 / 46% | 56 / 48 / 43% | 2 ms |
+| pred 16 / 32 ms | 1.6 / 1.1 | 57 / 44% | 23 / 22 | 17 / 27% | 82 / 73% | 2 ms |
+
+Regularized encoders (L1 blobs) are positive integrators, mostly low-pass -- unlike loud-song
+field L. The unregularized encoders are much closer: Pos/Neg 1.1-1.9, BMF in range for
+73-82% (pred 16/32 ms, noreg tau). Caveat: the prediction filters are dominated by the newest
+2 ms frame (50% width 2 ms), so their BMF is set by a near-impulse plus a faint tail and is
+noisy. Figure: outputs/temporal_filter_stats.png.

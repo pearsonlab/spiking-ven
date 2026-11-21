@@ -1171,3 +1171,21 @@ frames with slow horizontal spectral bands spanning tens of ms. Longer horizons 
 more compact. The penalties (L1 above all) are what collapse the solution onto the newest
 frame. Next: remove the init noise (zero/small init or small L2 decay), then titrate
 penalties up.
+
+### Zero-init, unregularized (`--init-scale 0 --init-bias 0.01`)
+
+| run | stopped (best) | held-out | STRF <=20 ms / mean lag | primary active | DAF raw peak / 10% tail after offset |
+|---|---|---|---|---|---|
+| baseline (`l1_2e-4_sm_1e-1_pu90`) | - | recon 82% | 51% / 25 ms | - | 47 ms / 29 ms |
+| noreg0_pred1 | ep 31 | 0.057 | 98% / 2 ms | 98% | 36 ms / 48 ms |
+| noreg0_pred2 | ep 33 | 0.100 | 97% / 3 ms | 99% | 37 ms / 37 ms |
+| noreg0_pred4 | ep 26 | 0.172 | 96% / 4 ms | 98% | 38 ms / 40 ms |
+
+Starting from zero removes the init noise and beats every earlier prediction run on held-out
+error. STRFs are compact and signed (spectral edges / harmonic combs in the last ~5-10 ms,
+faint tails to ~30 ms), not a one-frame copy; pred1 drifts toward the newest frame over
+training, pred4 keeps the most history. Primary units are on ~98% of the time (a nearly
+linear code). In the DAF time course the compact STRFs move the raw peak ~10 ms earlier
+but do NOT shorten the tail: a shoulder at 70-110 ms (20-60 ms after noise offset) remains,
+so the lingering response is set downstream of the STRFs (DoG / thresholding), not by STRF
+length. Figure: outputs/strf_compactness_noreg0.png.

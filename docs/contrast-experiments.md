@@ -1468,3 +1468,33 @@ striated textures. The 0.5 run (no noise) remains the best overall. With window
 reconstruction, pushing the mean rate below ~0.5 trades reconstruction for a few sharper
 units; temporal placement unchanged (mean lag 26-28 ms). Figure:
 outputs/strfs_tm8_win_sf_latest.png.
+
+(Correction, per user: reconstruction is not the objective -- a stronger constraint is
+expected to cost it. Those runs were resumed with `--patience 0` and ran to epoch ~95 without
+pathology; with patience 0 the trainer now returns the final weights.)
+
+### TM16 basis, lr 1e-3, plain first-order dual ascent (150 epochs, targets 0.5 / 0.25 / 0.1)
+
+`--tm-basis 2,64,16 --lr 1e-3 --al-plain --act-dual-lr 0.1 --act-update-every 20`
+(lambda += 0.1 x mean violation every 20 bouts, no quadratic term), unit-norm shape x gain,
+scale-free shape step, input noise SNR 10, output noise SNR 3, softplus held at beta 9,
+no early stopping.
+
+| target | final unit rate 10/50/90% | lambda median | held-out | STRF <=20 ms / mean lag |
+|---|---|---|---|---|
+| 0.5 | 0.48/0.50/0.51 | 1.2 | 0.108 | 31% / 30 ms |
+| 0.25 | 0.24/0.25/0.26 | 6.0 | 0.260 | 26% / 35 ms |
+| 0.1 | 0.105/0.115/0.12 | 15.7 | 0.539 | 23% / 39 ms |
+
+Smooth, monotone convergence with no overshoot or dead-unit collapse (0.5 on target by epoch
+~20, 0.25 by ~60, 0.1 by ~120). STRFs (absolute scale): 0.5 is the most S&W-like -- compact
+narrowband excitatory blobs, several at short latency, and biphasic onset units
+(suppression then excitation) at low and high frequencies; 0.25 has onset units and blobs
+but more multi-band striated units; 0.1 is mostly faint, striated units. Tighter targets
+shift STRF energy later (mean lag 30 -> 35 -> 39 ms). Unit-activity covariance
+(`scripts/plot_unit_cov.py`): blocks of r ~ 1 units that grow with tighter targets (12 / 28 /
+69 of 128 units with an r > 0.9 partner at epoch ~95); at 0.5 they are dead low-gain units
+sharing one shape (a side effect of the median-gain shape step), at 0.25 / 0.1 live
+near-duplicates -- nothing in the objective rewards diversity. Figures:
+outputs/strfs_tm16_win_plain_ep{21..141}.png, outputs/strfs_tm16_win_plain_final32.png,
+outputs/unitcov_tm16_win_plain_ep{101,121,141}.png, outputs/unitcov_tm16_win_plain_final.png.

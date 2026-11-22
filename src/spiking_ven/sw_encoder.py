@@ -718,7 +718,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             log(f"  stopping: held-out error has not improved by {min_delta} for "
                 f"{patience} epochs; best epoch {best[4] + 1} ({best[0]:.3f})")
             break
-    if val_cochs is not None and best[4] >= 0:
+    # Without early stopping (patience 0) the final weights are returned: held-out
+    # reconstruction is then only a diagnostic (e.g. constrained runs, where the goal is the
+    # STRF shape and a stronger constraint is expected to cost reconstruction).
+    if val_cochs is not None and best[4] >= 0 and patience > 0:
         _, V, b, D, _ = best
     return V, b, mu, (V.reshape(K, C * L).copy() if D is None else D)
 

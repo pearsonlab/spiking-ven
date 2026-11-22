@@ -1431,3 +1431,23 @@ then anneal x1.15/epoch to ReLU (beta 200).
 
 Proposed next: explicit per-unit gain floor + gentler constraint (mu cap 0.5, target annealed
 from 0.5 down).
+
+### Exact augmented Lagrangian + output noise, softplus held at 9 (stopped at epoch ~31)
+
+`--al-exact` (inner loop to plateau with lambda, mu fixed; lambda += mu c_bar; mu x4 if the
+violation fell < 75%, cap 10), input noise 0.316, output noise sqrt(0.1) x target, softplus
+held at beta 9 (no ReLU).
+
+| target | held-out (ep 6 / 16 / 31) | unit rate 10/50/90% at ep 31 | lambda median | rms violation by outer step |
+|---|---|---|---|---|
+| 0.25 | 0.134 / 0.136 / 0.281 | 0.19/0.30/0.33 | 3.8 -> 4.4 | 0.57, 0.50, 0.31, 0.16, 0.12, 0.11, 0.14 |
+| 0.1 | 0.134 / 0.153 / 0.417 | 0.007/0.22/0.28 | 7.3 -> 8.6 | 0.67, 0.60, 0.42, 0.27, 0.23, 0.18, 0.18 |
+
+The outer iteration is much better behaved (violation falls monotonically at first), but as
+mu hits its cap the multipliers keep growing and held-out error climbs; >= 10% of units sit
+at zero gain from epoch ~11. Diagnosis: (1) with a negative bias the softplus mean rate falls
+as the gain shrinks, so lowering the gain is the cheapest way for redundant units to cut rate;
+output noise at SNR 10 is too weak to stop it; (2) a trap in the gain/shape parametrisation:
+the shape update is scaled by the gain (dL/du = g dL/dV), so once a gain hits the clamp the
+shape freezes and the unit cannot recover. Next: scale-free shape update, plus a stronger
+gain floor (output noise SNR ~3 or an explicit minimum gain).

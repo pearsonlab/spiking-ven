@@ -119,6 +119,12 @@ def main() -> None:
                         "(--softplus-growth) until --softplus-beta-max, then ReLU")
     p.add_argument("--softplus-growth", type=float, default=1.25)
     p.add_argument("--softplus-beta-max", type=float, default=3000.0)
+    p.add_argument("--softplus-hold", type=float, default=None,
+                   help="ramp beta up to this value, hold until held-out error plateaus, then "
+                        "anneal slowly to the ReLU")
+    p.add_argument("--softplus-hold-patience", type=int, default=5)
+    p.add_argument("--softplus-anneal", type=float, default=1.15,
+                   help="per-epoch beta growth after the plateau")
     p.add_argument("--act-dual-lr", type=float, default=1e-3,
                    help="dual-ascent step for the activity multipliers (penalty mode)")
     p.add_argument("--act-beta", type=float, default=0.01,
@@ -201,7 +207,10 @@ def main() -> None:
                               act_mu_max=a.act_mu_max, softplus_beta0=a.softplus_beta0,
                               softplus_growth=a.softplus_growth,
                               softplus_beta_max=a.softplus_beta_max, act_warmup=a.act_warmup,
-                              unit_norm_strf=a.unit_norm_strf, input_scale=in_scale)
+                              unit_norm_strf=a.unit_norm_strf, input_scale=in_scale,
+                              softplus_hold=a.softplus_hold,
+                              softplus_hold_patience=a.softplus_hold_patience,
+                              softplus_anneal=a.softplus_anneal)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

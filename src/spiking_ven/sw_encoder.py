@@ -141,7 +141,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                act_mu_max: float = 2.0, softplus_beta0: float | None = None,
                softplus_growth: float = 1.25, softplus_beta_max: float = 3000.0,
                act_warmup: int = 3, unit_norm_strf: bool = False,
-               input_scale: float = 1.0):
+               input_scale: float = 1.0, softplus_hold: float | None = None,
+               softplus_hold_patience: int = 5, softplus_anneal: float = 1.15):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -249,7 +250,11 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``softplus_beta0``: train with r = softplus_beta(z) = log(1 + exp(beta z)) / beta instead
     of the ReLU, beta starting at ``softplus_beta0`` and multiplied by ``softplus_growth``
     each epoch; once it reaches ``softplus_beta_max`` the exact ReLU is used. Early stopping
-    waits for the ReLU (and, with an activity target, for the constraint)."""
+    waits for the ReLU (and, with an activity target, for the constraint).
+    ``softplus_hold``: three phases instead -- ramp beta up to ``softplus_hold``, hold it
+    there until the held-out error plateaus (no improvement by ``min_delta`` for
+    ``softplus_hold_patience`` epochs), then anneal slowly (x ``softplus_anneal`` per epoch)
+    to the ReLU."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -310,6 +315,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             if recon_tau_ms else np.ones(C * L))
 
     beta_now: list[float | None] = [None]                # softplus sharpness; None = ReLU
+    # softplus schedule state: [beta, phase (ramp/hold/anneal), best held-out at hold, stale]
+    sp: list[Any] = [float(softplus_beta0 or 0.0), "ramp", np.inf, 0]
     # Learned decoder offset (rate mode): absorbs the reconstruction of the code's mean, so
     # a positive mean-rate target does not fight the mean-subtracted reconstruction target.
     use_d0 = act_target is not None and act_mode == "rate"
@@ -458,12 +465,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             lam = np.array(resume["lam"], dtype=np.float64)
         if "mu_al" in resume:
             mu_al = [float(resume["mu_al"]), float(resume["viol_prev"])]
+        if "sp_beta" in resume:
+            sp[:] = [float(resume["sp_beta"]), str(resume["sp_phase"]),
+                     float(resume["sp_best"]), int(resume["sp_stale"])]
         log(f"  resuming after epoch {start} (best epoch {best[4] + 1}, {best[0]:.3f}; "
             f"{stale} stale)")
     for ep in range(start, n_epochs):
         if softplus_beta0 is not None:
-            bta = softplus_beta0 * softplus_growth ** ep
-            beta_now[0] = None if bta >= softplus_beta_max else bta
+            beta_now[0] = None if sp[0] >= softplus_beta_max else sp[0]
         al_on[0] = ep >= act_warmup
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         act_unit = np.zeros(K)
@@ -540,12 +549,31 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             else:
                 stale += 1
         stop = patience > 0 and stale >= patience
+        if softplus_beta0 is not None:                   # softplus schedule for next epoch
+            if softplus_hold is None:
+                sp[0] *= softplus_growth
+            elif sp[1] == "ramp":
+                sp[0] = min(sp[0] * softplus_growth, softplus_hold)
+                if sp[0] >= softplus_hold:
+                    sp[1] = "hold"
+            elif sp[1] == "hold":
+                if ve < sp[2] - min_delta:
+                    sp[2], sp[3] = ve, 0
+                else:
+                    sp[3] += 1
+                if sp[3] >= softplus_hold_patience:
+                    sp[1] = "anneal"
+                    log(f"  softplus plateau at beta {sp[0]:.3g} (held-out {sp[2]:.3f}); "
+                        f"annealing x{softplus_anneal}/epoch to ReLU")
+            else:
+                sp[0] *= softplus_anneal
         if checkpoint is not None:
             state = {"V": V, "b": b, "mu": mu, "epoch": ep + 1, "val_error": ve,
                      "stale": stale, "stopped": stop, "best_val": best[0],
                      "best_V": best[1], "best_b": best[2], "best_epoch": best[4],
                      "rng_state": json.dumps(rng.bit_generator.state), "lam": lam,
-                     "mu_al": mu_al[0], "viol_prev": mu_al[1]}
+                     "mu_al": mu_al[0], "viol_prev": mu_al[1], "sp_beta": sp[0],
+                     "sp_phase": sp[1], "sp_best": sp[2], "sp_stale": sp[3]}
             if D is not None:
                 state |= {"D": D, "best_D": best[3]}
             checkpoint(state)

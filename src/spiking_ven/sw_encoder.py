@@ -404,7 +404,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             alive |= (S > 0).any(axis=0)
             act_unit += (S > 0).mean(axis=0)
         ve = val_error(V, b, D) if val_cochs is not None else np.nan
-        if val_cochs is not None:
+        # With an activity target, tightening the constraint raises the reconstruction error
+        # at first; only start early stopping once >= 90% of units are within +-50% of it.
+        f_unit = act_unit / len(cochs)
+        act_ok = (act_target is None
+                  or float(np.mean(np.abs(f_unit - act_target) <= 0.5 * act_target)) >= 0.9)
+        if val_cochs is not None and act_ok:
             if ve < best[0] - min_delta:
                 best, stale = (ve, V.copy(), b.copy(), None if D is None else D.copy(), ep), 0
             else:
@@ -427,7 +432,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 + (f"  unit active 10/50/90% {np.percentile(act_unit / len(cochs), 10):.0%}/"
                    f"{np.median(act_unit / len(cochs)):.0%}/"
                    f"{np.percentile(act_unit / len(cochs), 90):.0%} "
-                   f"(target {act_target:.0%}), bias med {np.median(b):.3g}"
+                   f"(target {act_target:.0%}{'' if act_ok else ', not yet met'}), "
+                   f"bias med {np.median(b):.3g}"
                    + (f", lambda 10/50/90% {np.percentile(lam, 10):.3g}/"
                       f"{np.median(lam):.3g}/{np.percentile(lam, 90):.3g}" if penalty else "")
                    if act_target is not None else ""))

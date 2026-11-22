@@ -148,7 +148,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                al_inner_max: int = 8, al_inner_tol: float = 0.01,
                al_mu_growth: float = 4.0, scale_free_shape: bool = False,
                al_plain: bool = False, restart_dead: float = 0.0,
-               decorr: float = 0.0):
+               decorr: float = 0.0, init_data: bool = False):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -176,7 +176,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     stops once the held-out error has not improved by ``min_delta`` for ``patience``
     epochs, and the best epoch's weights are returned. ``smooth_axes`` picks the
     directions the roughness penalty acts along: (1, 2) channel and lag, (1,) channel only
-    (smoothing along lag favours long horizontal bands). ``recon_tau_ms`` weights each
+    (smoothing along lag favours long horizontal bands). ``init_data`` (with
+    ``unit_norm_strf``): start each shape from a random training window (projected onto the
+    basis) instead of white noise, so no initial structure sits in directions the data never
+    drives (with no penalty, such noise never decays). ``recon_tau_ms`` weights each
     lag's reconstruction error by ``exp(-lag / recon_tau_ms)`` (1 at the newest frame):
     the code is then asked to describe the recent past, so STRF energy at long lags
     survives only where it helps; reported errors are weighted the same way.
@@ -332,7 +335,15 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V *= init_scale
     V = to_span(V)
     if unit_norm_strf:                    # unit-norm shapes (random, in span), small gains
-        U0 = to_span(rng.standard_normal((K, C, L)))
+        if init_data:                     # ... or random training windows (no noise)
+            picks = [(int(rng.integers(len(cochs))), 0) for _ in range(K)]
+            U0 = np.empty((K, C, L))
+            for k, (i, _) in enumerate(picks):
+                Pi = (_past_windows(cochs[i], L) - mu) / input_scale
+                U0[k] = Pi[int(rng.integers(len(Pi)))].reshape(C, L)
+            U0 = to_span(U0)
+        else:
+            U0 = to_span(rng.standard_normal((K, C, L)))
         V = 0.01 * U0 / np.linalg.norm(U0.reshape(K, -1), axis=1)[:, None, None]
     b = np.full(K, float(init_bias))
     if init_scale == 0 and init_bias <= 0:

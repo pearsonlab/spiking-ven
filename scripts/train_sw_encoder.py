@@ -242,13 +242,21 @@ def main() -> None:
         # The decoder predicts future frames, not the window: nothing to reconstruct with.
         D, d0 = None, None
 
+    # The trained primary nonlinearity: a softplus kept to the end (no anneal) is the
+    # encoder's nonlinearity too; otherwise ReLU.
+    beta = (a.softplus_hold if a.softplus_beta0 is not None and a.softplus_hold is not None
+            and a.softplus_anneal <= 1.0 else None)
+
+    def nl(Z):
+        return np.maximum(Z, 0.0) if beta is None else np.logaddexp(0.0, beta * Z) / beta
+
     # Units that never activate on the corpus are dropped (silent channels).
-    R = np.concatenate([np.maximum(W @ ((unfold(X, a.l_frames) - mu) / scale) + b, 0.0)
+    R = np.concatenate([nl(W @ ((unfold(X, a.l_frames) - mu) / scale) + b)
                         for X in cochs], axis=1)
     keep = np.flatnonzero((R > 0).any(axis=1))
     gain = PRIMARY_RATE_HZ / float(R[keep].mean())
     enc = SWEncoder(W, b, scale, cp, primary_gain=gain, keep=keep, D=D, d0=d0, mu=mu,
-                    primary_noise=a.primary_spikes)
+                    primary_noise=a.primary_spikes, primary_beta=beta)
     print(f"kept {keep.size}/{a.k} units; primary gain {gain:.2f} Hz/unit; "
           f"active fraction {(R[keep] > 0).mean():.1%}")
 

@@ -758,8 +758,10 @@ class SWEncoder:
 
     def __init__(self, W, b, scale, coch_params, *, primary_gain, dog=None,
                  threshold=0.0, keep=None, D=None, d0=None, mu=None,
-                 primary_noise=False):
+                 primary_noise=False, primary_beta=None):
         self.W = np.asarray(W, dtype=np.float64)
+        #: Primary nonlinearity: None = ReLU, else softplus(beta z) / beta (as trained).
+        self.primary_beta = None if primary_beta is None else float(primary_beta)
         #: Mean window subtracted before the STRFs (the autoencoder's centring).
         self.mu = (np.zeros((self.W.shape[1], 1)) if mu is None
                    else np.asarray(mu, dtype=np.float64).reshape(-1, 1))
@@ -803,16 +805,21 @@ class SWEncoder:
         return cochleagram(sig, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
                            lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
 
+    def _nl(self, Z):
+        if self.primary_beta is None:
+            return np.maximum(Z, 0.0)
+        return np.logaddexp(0.0, self.primary_beta * Z) / self.primary_beta
+
     def primary_rate(self, X) -> np.ndarray:
         """Primary AC rates (Hz) per frame, ``(n_channels, n_frames)``."""
-        R = np.maximum(self.W @ ((unfold(X, self.L) - self.mu) / self.scale) + self.b, 0.0)
+        R = self._nl(self.W @ ((unfold(X, self.L) - self.mu) / self.scale) + self.b)
         return R[self.keep] * self.primary_gain
 
     def reconstruct(self, X) -> np.ndarray:
         """The decoder's reconstruction of each frame ``t-1`` from the code at ``t``
         (the newest frame of the past window), in cochleagram units: ``(C, T)``."""
         assert self.D is not None and self.d0 is not None, "no decoder saved"
-        R = np.maximum(self.W @ ((unfold(X, self.L) - self.mu) / self.scale) + self.b, 0.0)
+        R = self._nl(self.W @ ((unfold(X, self.L) - self.mu) / self.scale) + self.b)
         Xw = (self.D @ R + self.d0) * self.scale + self.mu   # (C*L, T), channel-major
         C = int(self.coch_params["n_channels"])
         return Xw.reshape(C, self.L, -1)[:, -1, :]
@@ -876,6 +883,8 @@ class SWEncoder:
             **{f"cp_{k}": v for k, v in self.coch_params.items()}}
         if self.D is not None:
             arrays.update(D=self.D, d0=self.d0)
+        if self.primary_beta is not None:
+            arrays["primary_beta"] = self.primary_beta
         np.savez(path, **arrays)
 
     @classmethod
@@ -888,4 +897,5 @@ class SWEncoder:
                    dog=dog, threshold=d["threshold"], keep=d["keep"],
                    D=d["D"] if "D" in d else None, d0=d["d0"] if "d0" in d else None,
                    mu=d["mu"] if "mu" in d else None,
-                   primary_noise=bool(d["primary_noise"]) if "primary_noise" in d else True)
+                   primary_noise=bool(d["primary_noise"]) if "primary_noise" in d else True,
+                   primary_beta=float(d["primary_beta"]) if "primary_beta" in d else None)

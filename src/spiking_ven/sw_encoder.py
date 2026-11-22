@@ -146,7 +146,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                input_noise: float = 0.0, act_update_every: int = 0,
                output_noise: float = 0.0, al_exact: bool = False, al_inner_min: int = 2,
                al_inner_max: int = 8, al_inner_tol: float = 0.01,
-               al_mu_growth: float = 4.0):
+               al_mu_growth: float = 4.0, scale_free_shape: bool = False):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -284,7 +284,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     last inner epoch), and mu <- min(mu * ``al_mu_growth``, ``act_mu_max``) if |c_bar| fell
     by less than 75%. Early stopping is counted per outer iteration. ``softplus_anneal``
     <= 1 with ``softplus_hold`` keeps the softplus indefinitely (no ReLU), and early
-    stopping is then allowed on the softplus."""
+    stopping is then allowed on the softplus.
+
+    ``scale_free_shape`` (with ``unit_norm_strf``): the shape step uses the population median
+    gain instead of each unit's own gain (u += lr * median(g) * dL/dV), so a unit whose gain
+    has collapsed can still re-tune its shape and recover (with the exact gradient
+    g_k * dL/dV_k the shape freezes once g_k reaches its floor)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -442,7 +447,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         g = np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
         u = V / np.maximum(g, 1e-12)
         g_new = np.maximum(g + lr * (Gv * u).sum(axis=(1, 2), keepdims=True) / n, 1e-6)
-        u = penalties(u + lr * g * Gv / n)
+        g_shape = np.median(g) if scale_free_shape else g
+        u = penalties(u + lr * g_shape * Gv / n)
         u /= np.maximum(np.linalg.norm(u.reshape(K, -1), axis=1), 1e-12)[:, None, None]
         return g_new * u
     lam = np.zeros(K)

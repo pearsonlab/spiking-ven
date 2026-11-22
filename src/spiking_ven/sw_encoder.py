@@ -128,7 +128,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                l2_V: float = 0.0, basis: np.ndarray | None = None,
                act_target: float | None = None, act_lr: float = 0.1,
                act_beta: float = 0.01, act_mode: str = "threshold",
-               act_dual_lr: float = 1e-3):
+               act_dual_lr: float = 1e-3, act_mu: float = 0.2, act_mu_growth: float = 2.0,
+               act_mu_max: float = 2.0, softplus_beta0: float | None = None,
+               softplus_growth: float = 1.25, softplus_beta_max: float = 3000.0,
+               act_warmup: int = 3, unit_norm_strf: bool = False):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -204,7 +207,35 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``+ sum_k lambda_k sum_t r_k(t)`` with per-unit multipliers updated by dual ascent
     ``lambda_k += act_dual_lr * (fraction of frames unit k was active - rho)`` after every
     bout (an equality constraint: lambda may go negative). The bias is learned by gradient
-    (including the cost); a unit silent for a whole bout gets a small bias nudge."""
+    (including the cost); a unit silent for a whole bout gets a small bias nudge.
+
+    ``act_mode="auglag"``: augmented Lagrangian (method of multipliers) on the per-unit
+    constraint c_k = (fraction of frames active) - rho, measured exactly; its gradient uses
+    the smooth indicator sigmoid(z / h_k), h_k = act_beta * std_t(z_k) (scale-free; never
+    vanishes, so silent units are pushed back on). Each frame's gradient on z_k is
+    -(lambda_k + mu c_k) d sigmoid / dz, which flows into the STRFs as well as the bias;
+    lambda_k += mu * (epoch-mean c_k) after every epoch, and mu is
+    multiplied by ``act_mu_growth`` (up to ``act_mu_max``) whenever the constraint violation
+    fails to shrink by a quarter while still above 10% of the target (rms per unit). The constraint switches on after ``act_warmup`` epochs
+    (zero-init STRFs first need some structure), and its gradient is preconditioned by
+    h_k^2 so the step follows each unit's own input scale.
+
+    ``act_mode="rate"``: the same augmented Lagrangian on each unit's MEAN NONLINEAR OUTPUT,
+    c_k = mean_t r_k(t) - act_target (differentiable; gradient -(lambda_k + mu c_k) dr/dz).
+    Use with ``unit_norm_strf``: the decoder rows stay unit-norm, so shrinking a unit's gain
+    costs reconstruction, which pins the rate scale; the constraint only sets the mean. A
+    learned decoder offset absorbs the reconstruction of the code's mean (otherwise a
+    positive mean rate fights the mean-subtracted target and silences the units). The
+    offset is not saved with the encoder (it only matters for training).
+
+    ``unit_norm_strf``: each STRF is a unit-norm shape times a learned per-unit gain
+    (V_k = g_k u_k), updated separately; penalties act on the shape only (L2 is ignored).
+    Starts from random unit-norm shapes with gain 0.01.
+
+    ``softplus_beta0``: train with r = softplus_beta(z) = log(1 + exp(beta z)) / beta instead
+    of the ReLU, beta starting at ``softplus_beta0`` and multiplied by ``softplus_growth``
+    each epoch; once it reaches ``softplus_beta_max`` the exact ReLU is used. Early stopping
+    waits for the ReLU (and, with an activity target, for the constraint)."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -229,6 +260,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     V *= init_scale
     V = to_span(V)
+    if unit_norm_strf:                    # unit-norm shapes (random, in span), small gains
+        U0 = to_span(rng.standard_normal((K, C, L)))
+        V = 0.01 * U0 / np.linalg.norm(U0.reshape(K, -1), axis=1)[:, None, None]
     b = np.full(K, float(init_bias))
     if init_scale == 0 and init_bias <= 0:
         raise ValueError("zero-init STRFs need init_bias > 0 (otherwise every ReLU is dead)")
@@ -261,17 +295,33 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     wcol = (np.tile(np.exp(-(lag_ms - frame_ms / 2) / recon_tau_ms), C)
             if recon_tau_ms else np.ones(C * L))
 
+    beta_now: list[float | None] = [None]                # softplus sharpness; None = ReLU
+    # Learned decoder offset (rate mode): absorbs the reconstruction of the code's mean, so
+    # a positive mean-rate target does not fight the mean-subtracted reconstruction target.
+    use_d0 = act_target is not None and act_mode == "rate"
+    dec0: list[Any] = [0.0]
+
+    def nl(Z):
+        """(rate, d rate / dz, soft 'active' indicator) for the current nonlinearity."""
+        bta = beta_now[0]
+        if bta is None:
+            on = (Z > 0).astype(np.float64)
+            return np.maximum(Z, 0.0), on, on
+        u = bta * Z
+        sg = 0.5 * (1.0 + np.tanh(0.5 * u))                # sigmoid(beta z), overflow-safe
+        return np.logaddexp(0.0, u) / bta, sg, sg
+
     def conv_pass(X, P, V, b, D):
         """Convolutional reconstruction of bout X: (Z, S, F, Y, E) with F the future-code
         windows (T, K*M), Y the centred frames (T, C) and E = Y - F @ D (T, C)."""
         T = X.shape[1]
         Z = P @ V.reshape(K, C * L).T + b
-        S = np.maximum(Z, 0.0)
+        S = nl(Z)[0]
         Sp = np.concatenate([S, np.zeros((M, K))], axis=0)
         F = np.stack([Sp[m:m + T] for m in range(1, M + 1)], axis=2).reshape(T, K * M)
         D3 = D.reshape(K, M, C)
         Y = (X - mu_y[:, None]).T
-        E = Y - F @ D3.reshape(K * M, C)
+        E = Y - F @ D3.reshape(K * M, C) - dec0[0]
         return Z, S, F, Y, E
 
     def val_error(V, b, D):
@@ -288,7 +338,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         for X in val_cochs or []:
             P = _past_windows(X, L) - mu
             Y = target(X, P)
-            R = Y - np.maximum(P @ W.T + b, 0.0) @ Dk
+            R = Y - nl(P @ W.T + b)[0] @ Dk - dec0[0]
             w = 1.0 if predict_frames else wcol
             num += float((w * R ** 2).sum())
             den += float((w * Y ** 2).sum())
@@ -305,22 +355,76 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
 
     gZ_input: list[np.ndarray] = [np.zeros(0)]
     penalty = act_target is not None and act_mode == "penalty"
-    if act_target is not None and act_mode not in ("threshold", "penalty"):
-        raise ValueError(f"act_mode must be 'threshold' or 'penalty', not {act_mode!r}")
-    lam = np.zeros(K)
+    rate_mode = act_target is not None and act_mode == "rate"
+    auglag = act_target is not None and act_mode in ("auglag", "rate")
+    if act_target is not None and act_mode not in ("threshold", "penalty", "auglag", "rate"):
+        raise ValueError(f"act_mode must be 'threshold', 'penalty', 'auglag' or 'rate', "
+                         f"not {act_mode!r}")
 
-    def cost_grad(Z):
-        """-d/dZ of the activity cost sum_k lam_k sum_t relu(z) (zero unless penalty mode)."""
-        return -lam * (Z > 0) if penalty else 0.0
+    def norm_rows(D):
+        """Unit-norm decoder rows."""
+        return D / np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
+
+    def penalties(V):
+        """Smoothing / min-phase / L2 / L1 steps on the STRFs, then back onto the basis."""
+        if smooth_V > 0:
+            V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
+        if mp_strength > 0:
+            V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
+        if l2_V > 0 and not unit_norm_strf:
+            V = V * (1.0 - reg_lr * l2_V)
+        if l1_V > 0:
+            V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
+        return to_span(V)
+
+    def strf_step(V, Gv, n):
+        """Gradient step on the STRFs (Gv = -dLoss/dV), then the penalties. With
+        ``unit_norm_strf``, V_k = g_k * u_k with |u_k| = 1: the gain g_k and the shape u_k
+        are updated separately (dL/dg_k = <dL/dV_k, u_k>, dL/du_k = g_k dL/dV_k) and the
+        penalties act on the shape only."""
+        if not unit_norm_strf:
+            return penalties(V + lr * Gv / n)
+        g = np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
+        u = V / np.maximum(g, 1e-12)
+        g_new = np.maximum(g + lr * (Gv * u).sum(axis=(1, 2), keepdims=True) / n, 1e-6)
+        u = penalties(u + lr * g * Gv / n)
+        u /= np.maximum(np.linalg.norm(u.reshape(K, -1), axis=1), 1e-12)[:, None, None]
+        return g_new * u
+    lam = np.zeros(K)
+    mu_al = [float(act_mu), np.inf]                      # [mu, previous violation norm]
+
+    al_on = [False]                                      # constraint active (after warm-up)
+
+    def soft_active(Z):
+        """Smooth 'active' indicator sigmoid(z / h_k), h_k = act_beta * std_t(z_k): scale-free,
+        and its gradient never vanishes (silent units can be pushed back on)."""
+        h = act_beta * Z.std(axis=0) + 1e-12
+        sg = 0.5 * (1.0 + np.tanh(0.5 * Z / h))
+        return sg, sg * (1.0 - sg) * h          # gradient preconditioned by h^2 (scale-free)
+
+    def cost_grad(Z, dS, on):
+        """-d/dZ of the activity cost (penalty / augmented-Lagrangian modes; else 0)."""
+        if penalty:
+            return -lam * (Z > 0)
+        if auglag and al_on[0]:
+            assert act_target is not None
+            if rate_mode:                                # mean rate per unit = target
+                c = nl(Z)[0].mean(axis=0) - act_target
+                return -(lam + mu_al[0] * c) * dS
+            _, dsg = soft_active(Z)
+            c = (Z > 0).mean(axis=0) - act_target        # this bout's (exact) violation
+            return -(lam + mu_al[0] * c) * dsg
+        return 0.0
 
     def bias_step(b, gZ, S, n):
         """Gradient step on b; with act_target, the activity constraint."""
         nonlocal lam
         if act_target is None:
             return b + lr * gZ.sum(axis=0) / n
-        if penalty:
-            frac = (S > 0).mean(axis=0)
-            lam = lam + act_dual_lr * (frac - act_target)
+        if penalty or auglag:
+            frac = (gZ_input[0] + b > 0).mean(axis=0)
+            if penalty:
+                lam = lam + act_dual_lr * (frac - act_target)
             return b + lr * gZ.sum(axis=0) / n + 1e-3 * (frac == 0)
         U = gZ_input[0]                                   # V x (pre-bias), set by caller
         q = np.quantile(U, 1.0 - act_target, axis=0)
@@ -337,11 +441,18 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         rng.bit_generator.state = json.loads(str(resume["rng_state"]))
         if "lam" in resume:
             lam = np.array(resume["lam"], dtype=np.float64)
+        if "mu_al" in resume:
+            mu_al = [float(resume["mu_al"]), float(resume["viol_prev"])]
         log(f"  resuming after epoch {start} (best epoch {best[4] + 1}, {best[0]:.3f}; "
             f"{stale} stale)")
     for ep in range(start, n_epochs):
+        if softplus_beta0 is not None:
+            bta = softplus_beta0 * softplus_growth ** ep
+            beta_now[0] = None if bta >= softplus_beta_max else bta
+        al_on[0] = ep >= act_warmup
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         act_unit = np.zeros(K)
+        soft_unit = np.zeros(K)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
             P = _past_windows(X, L) - mu                       # (T, C*L)
@@ -353,63 +464,62 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 # -dLoss/dr_k(t) = sum_m D_k(m) . e_{t-m} - code_l1 (residual over the past)
                 Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
                 Ew = np.stack([Ep[M - m:M - m + T] for m in range(1, M + 1)], axis=1)
-                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * (Z > 0) + cost_grad(Z)
-                D = D + lr * (F.T @ E).reshape(K, M * C) / n
-                D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
-                V = V + lr * step((gZ.T @ P).reshape(K, C, L)) / n
+                _, dS, on = nl(Z)
+                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * dS + cost_grad(Z, dS, on)
+                soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
+                              if auglag else on.mean(axis=0))
+                D = norm_rows(D + lr * (F.T @ E).reshape(K, M * C) / n)
+                if use_d0:
+                    dec0[0] = dec0[0] + lr * E.mean(axis=0)
+                V = strf_step(V, step((gZ.T @ P).reshape(K, C, L)), n)
                 b = bias_step(b, gZ, S, n)
-                if smooth_V > 0:
-                    V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
-                if mp_strength > 0:
-                    V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
-                if l2_V > 0:
-                    V = V * (1.0 - reg_lr * l2_V)
-                if l1_V > 0:
-                    V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
-                V = to_span(V)
                 err += float((E ** 2).sum()) / max(float((Y ** 2).sum()), 1e-12)
-                act += float(np.mean(S > 0))
-                alive |= (S > 0).any(axis=0)
-                act_unit += (S > 0).mean(axis=0)
+                act += float(np.mean(Z > 0))
+                alive |= (Z > 0).any(axis=0)
+                act_unit += (Z > 0).mean(axis=0)
                 continue
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
             gZ_input[0] = Z - b
-            S = np.maximum(Z, 0.0)                             # (T, K)
+            S, dS, on = nl(Z)                                  # (T, K)
+            soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
+                          if auglag else on.mean(axis=0))
             Dk = W if D is None else D
             Y = target(X, P)
-            R = Y - S @ Dk                                     # residual
+            R = Y - S @ Dk - dec0[0]                           # residual
+            if use_d0:
+                dec0[0] = dec0[0] + lr * R.mean(axis=0)
             Rw = R if predict_frames else R * wcol             # lag-weighted residual
-            gZ = (Rw @ Dk.T) * (Z > 0) + cost_grad(Z)         # -dLoss/dZ
+            gZ = (Rw @ Dk.T) * dS + cost_grad(Z, dS, on)      # -dLoss/dZ
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             if D is None:
                 G = G + S.T @ Rw                               # tied: decoder role too
             else:
-                D = D + lr * (S.T @ Rw) / n
-                D /= np.maximum(np.linalg.norm(D, axis=1), 1e-9)[:, None]
-            V = V + lr * step(G.reshape(K, C, L)) / n
+                D = norm_rows(D + lr * (S.T @ Rw) / n)
+            V = strf_step(V, step(G.reshape(K, C, L)), n)
             b = bias_step(b, gZ, S, n)
-            if smooth_V > 0:
-                V = V - reg_lr * smooth_V * _roughness_grad(V, smooth_axes)
-            if mp_strength > 0:
-                V = (1.0 - mp_strength) * V + mp_strength * min_phase(V)
-            if l2_V > 0:
-                V = V * (1.0 - reg_lr * l2_V)
-            if l1_V > 0:
-                V = np.sign(V) * np.maximum(np.abs(V) - reg_lr * l1_V, 0.0)
-            V = to_span(V)
             w = 1.0 if predict_frames else wcol
             err += float(np.mean(w * R ** 2)) / float(np.mean(w * Y ** 2))
-            act += float(np.mean(S > 0))
-            alive |= (S > 0).any(axis=0)
-            act_unit += (S > 0).mean(axis=0)
+            act += float(np.mean(Z > 0))
+            alive |= (Z > 0).any(axis=0)
+            act_unit += (Z > 0).mean(axis=0)
+        if auglag and al_on[0]:
+            assert act_target is not None
+            cbar = soft_unit / len(cochs) - act_target   # epoch-mean violation per unit
+            lam = lam + mu_al[0] * cbar
+            viol = float(np.linalg.norm(cbar))
+            # grow mu only while the violation is still large (rms > 10% of the target);
+            # growing it on the residual oscillation amplifies the oscillation
+            if viol > 0.75 * mu_al[1] and viol / np.sqrt(K) > 0.1 * act_target:
+                mu_al[0] = min(mu_al[0] * act_mu_growth, act_mu_max)
+            mu_al[1] = viol
         ve = val_error(V, b, D) if val_cochs is not None else np.nan
         # With an activity target, tightening the constraint raises the reconstruction error
         # at first; only start early stopping once >= 90% of units are within +-50% of it.
-        f_unit = act_unit / len(cochs)
+        f_unit = soft_unit / len(cochs) if rate_mode else act_unit / len(cochs)
         act_ok = (act_target is None
                   or float(np.mean(np.abs(f_unit - act_target) <= 0.5 * act_target)) >= 0.9)
-        if val_cochs is not None and act_ok:
+        if val_cochs is not None and act_ok and beta_now[0] is None:
             if ve < best[0] - min_delta:
                 best, stale = (ve, V.copy(), b.copy(), None if D is None else D.copy(), ep), 0
             else:
@@ -419,24 +529,38 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             state = {"V": V, "b": b, "mu": mu, "epoch": ep + 1, "val_error": ve,
                      "stale": stale, "stopped": stop, "best_val": best[0],
                      "best_V": best[1], "best_b": best[2], "best_epoch": best[4],
-                     "rng_state": json.dumps(rng.bit_generator.state), "lam": lam}
+                     "rng_state": json.dumps(rng.bit_generator.state), "lam": lam,
+                     "mu_al": mu_al[0], "viol_prev": mu_al[1]}
             if D is not None:
                 state |= {"D": D, "best_D": best[3]}
             checkpoint(state)
         if ep % log_every == 0 or ep == n_epochs - 1 or stop:
             near, mlag = compactness(V)
-            log(f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance train "
-                f"{err / len(cochs):.3f} held-out {ve:.3f}  active {act / len(cochs):.1%}  "
-                f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
-                f"STRF energy <=20 ms {near:.0%}, mean lag {mlag:.0f} ms"
-                + (f"  unit active 10/50/90% {np.percentile(act_unit / len(cochs), 10):.0%}/"
-                   f"{np.median(act_unit / len(cochs)):.0%}/"
-                   f"{np.percentile(act_unit / len(cochs), 90):.0%} "
-                   f"(target {act_target:.0%}{'' if act_ok else ', not yet met'}), "
-                   f"bias med {np.median(b):.3g}"
-                   + (f", lambda 10/50/90% {np.percentile(lam, 10):.3g}/"
-                      f"{np.median(lam):.3g}/{np.percentile(lam, 90):.3g}" if penalty else "")
-                   if act_target is not None else ""))
+            msg = (f"  epoch {ep + 1:3d}/{n_epochs}  unexplained variance train "
+                   f"{err / len(cochs):.3f} held-out {ve:.3f}  active {act / len(cochs):.1%}  "
+                   f"units alive {alive.sum()}/{K}  zeros {float(np.mean(V == 0)):.0%}  "
+                   f"STRF energy <=20 ms {near:.0%}, mean lag {mlag:.0f} ms")
+            if beta_now[0] is not None:
+                msg += f"  softplus beta {beta_now[0]:.3g}"
+            elif softplus_beta0 is not None:
+                msg += "  ReLU"
+            if act_target is not None:
+                pct = np.percentile(f_unit, [10, 50, 90])
+                met = "" if act_ok else ", not yet met"
+                if rate_mode:
+                    gain = float(np.linalg.norm(D, axis=1).mean()) if D is not None else 1.0
+                    msg += (f"  unit mean rate 10/50/90% {pct[0]:.3g}/{pct[1]:.3g}/{pct[2]:.3g}"
+                            f" (target {act_target:g}{met}), decoder gain {gain:.3g}")
+                else:
+                    msg += (f"  unit active 10/50/90% {pct[0]:.0%}/{pct[1]:.0%}/{pct[2]:.0%}"
+                            f" (target {act_target:.0%}{met})")
+                msg += f", bias med {np.median(b):.3g}"
+                if penalty or auglag:
+                    lp = np.percentile(lam, [10, 50, 90])
+                    msg += f", lambda 10/50/90% {lp[0]:.3g}/{lp[1]:.3g}/{lp[2]:.3g}"
+                if auglag:
+                    msg += f", mu {mu_al[0]:.3g}"
+            log(msg)
         if stop:
             log(f"  stopping: held-out error has not improved by {min_delta} for "
                 f"{patience} epochs; best epoch {best[4] + 1} ({best[0]:.3f})")

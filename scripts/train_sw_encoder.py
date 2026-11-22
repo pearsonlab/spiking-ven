@@ -97,14 +97,31 @@ def main() -> None:
     p.add_argument("--act-lr", type=float, default=0.1,
                    help="running-average rate of each unit's threshold toward the "
                         "(1 - target) quantile of its input, per bout")
-    p.add_argument("--act-mode", choices=("threshold", "penalty"), default="threshold",
+    p.add_argument("--act-mode", choices=("threshold", "penalty", "auglag", "rate"),
+                   default="threshold",
                    help="threshold: each unit's threshold tracks a quantile (no effect on STRF "
                         "shape); penalty: activity cost in the objective with per-unit "
-                        "multipliers (dual ascent), which also reshapes the STRFs")
+                        "multipliers (dual ascent), which also reshapes the STRFs; auglag: "
+                        "augmented Lagrangian (multipliers + quadratic term, growing mu) on the "
+                        "fraction active; rate: same on each unit's mean output (target = "
+                        "--act-target in rate units, e.g. 1)")
+    p.add_argument("--act-mu", type=float, default=0.2, help="initial augmented-Lagrangian mu")
+    p.add_argument("--unit-norm-strf", action="store_true",
+                   help="each STRF = unit-norm shape x learned per-unit gain (decoder rows stay "
+                        "unit-norm); penalties act on the shape only")
+    p.add_argument("--act-warmup", type=int, default=3,
+                   help="auglag: unconstrained epochs before the constraint switches on")
+    p.add_argument("--act-mu-max", type=float, default=2.0)
+    p.add_argument("--softplus-beta0", type=float, default=None,
+                   help="start with softplus(beta z)/beta at this beta, sharpened each epoch "
+                        "(--softplus-growth) until --softplus-beta-max, then ReLU")
+    p.add_argument("--softplus-growth", type=float, default=1.25)
+    p.add_argument("--softplus-beta-max", type=float, default=3000.0)
     p.add_argument("--act-dual-lr", type=float, default=1e-3,
                    help="dual-ascent step for the activity multipliers (penalty mode)")
     p.add_argument("--act-beta", type=float, default=0.01,
-                   help="sigmoid width of the active-frame surrogate")
+                   help="auglag: width of the smooth active-frame indicator, as a multiple of "
+                        "each unit's input std (try ~0.3)")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -171,7 +188,11 @@ def main() -> None:
                               conv_frames=a.conv_frames, code_l1=a.code_l1, l2_V=a.l2,
                               basis=basis, act_target=a.act_target, act_lr=a.act_lr,
                               act_beta=a.act_beta, act_mode=a.act_mode,
-                              act_dual_lr=a.act_dual_lr)
+                              act_dual_lr=a.act_dual_lr, act_mu=a.act_mu,
+                              act_mu_max=a.act_mu_max, softplus_beta0=a.softplus_beta0,
+                              softplus_growth=a.softplus_growth,
+                              softplus_beta_max=a.softplus_beta_max, act_warmup=a.act_warmup,
+                              unit_norm_strf=a.unit_norm_strf)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

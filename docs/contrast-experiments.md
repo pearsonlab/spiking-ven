@@ -1393,3 +1393,20 @@ penalty, directions the data never drives keep their initial noise -- the same p
 the random-init prediction runs). Input-window statistics (training bouts): per-element
 std 0.053, channel variance range 68x, top PC 44% of variance (top 10: 79%). Figure:
 outputs/strfs_tm8_win_rate.png.
+
+### Global input normalisation (`--normalize-input`: windows / 0.0532)
+
+A random unit-norm STRF's output then has variance ~1. The old lr (0.1) diverged on the
+~19x larger inputs (held-out 1.13 after epoch 1); a 4-epoch probe on 60 bouts gave lr 3e-3
+as best (1e-2 diverges; 1e-3, 3e-4 slower). Softplus starts at beta 1 (same relative
+softness).
+
+| mean-rate target | best epoch | held-out | units active | unit rate 10/50/90% | lambda median | look |
+|---|---|---|---|---|---|---|
+| 1 | 41 | 0.080 | 55% | 0.99/1.01/1.02 | 0.10 (barely binding) | mixed: localized blobs and bands, some broad diffuse units |
+| 0.5 | 38 | 0.132 | 36% | 0.49/0.50/0.52 | 0.82 | several single compact narrowband excitatory blobs on clean backgrounds, a few at short latency in high channels; one broadband onset-like unit (excitatory column preceded by suppression); still some banded/striated units; most blobs 10-40 ms back |
+
+Normalising removes the striations of the raw-input runs, and a binding rate constraint
+(0.5) produces S&W-like compact subfields in many units -- the first objective to do so
+without smoothing or L1. Temporal placement is still set by the window objective (mean lag
+~25 ms). Next: tighter target (0.25). Figure: outputs/strfs_tm8_win_norm_rate.png.

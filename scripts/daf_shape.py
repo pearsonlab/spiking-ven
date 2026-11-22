@@ -19,6 +19,7 @@ the figure for the same model and stimuli takes seconds.
 from __future__ import annotations
 
 import argparse
+import json
 import pickle
 
 import matplotlib
@@ -144,6 +145,34 @@ def main() -> None:
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(a.out, dpi=150)
     print("wrote", a.out)
+    summary = {"label": a.label, "model": a.model, "encoder": a.encoder,
+               "fixed": summarize(res_f, burst_ms), "random": summarize(res_r, burst_ms)}
+    out_json = a.out.rsplit(".", 1)[0] + ".json"
+    with open(out_json, "w") as fh:
+        json.dump(summary, fh, indent=1)
+    for k in ("fixed", "random"):
+        s = summary[k]
+        print(f"{k}: responders {s['n_responders']}, first peak {s['first_peak_hz']:+.1f} Hz at "
+              f"{s['first_peak_ms']} ms, max {s['max_hz']:+.1f} Hz at {s['max_ms']} ms, dip "
+              f"{s['dip_hz']:+.1f} Hz at {s['dip_ms']} ms, tail 50-150 ms after offset "
+              f"{s['tail_frac']:.2f} of max")
+
+
+def summarize(res, burst_ms) -> dict:
+    """Responder-mean time-course numbers (same smoothing and peak rules as the figure)."""
+    t, r = res[0], res[1]
+    if not len(r):
+        return {"n_responders": 0, "first_peak_hz": 0.0, "first_peak_ms": 0, "max_hz": 0.0,
+                "max_ms": 0, "dip_hz": 0.0, "dip_ms": 0, "tail_frac": 0.0}
+    m = gaussian_filter1d(r.mean(0), SMOOTH)
+    k = first_peak(m[PRE:], smooth=0) + PRE
+    g = int(np.argmax(m[PRE:])) + PRE
+    j = int(np.argmin(m[PRE + burst_ms:])) + PRE + burst_ms
+    tail = m[(t >= burst_ms + 50) & (t < burst_ms + 150)]
+    return {"n_responders": int(len(r)), "first_peak_hz": float(m[k]), "first_peak_ms": int(t[k]),
+            "max_hz": float(m[g]), "max_ms": int(t[g]), "dip_hz": float(m[j]),
+            "dip_ms": int(t[j]),
+            "tail_frac": float(tail.mean() / m[g]) if tail.size and m[g] > 0 else 0.0}
 
 
 if __name__ == "__main__":

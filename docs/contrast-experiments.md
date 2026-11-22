@@ -1410,3 +1410,24 @@ Normalising removes the striations of the raw-input runs, and a binding rate con
 (0.5) produces S&W-like compact subfields in many units -- the first objective to do so
 without smoothing or L1. Temporal placement is still set by the window objective (mean lag
 ~25 ms). Next: tighter target (0.25). Figure: outputs/strfs_tm8_win_norm_rate.png.
+
+### Tighter targets (0.25, 0.1): units collapse (all stopped, outputs in `invalid/`)
+
+Softplus schedule: ramp to beta 9, hold until the constraint is met and held-out plateaus,
+then anneal x1.15/epoch to ReLU (beta 200).
+
+1. First attempt: plateau declared at epoch ~17 while the constraint was still unmet
+   (held-out flat only because the tightening constraint pushed it up) -> plateau now gated
+   on the constraint.
+2. Gated rerun: rates split -- 10th-percentile units near silent (rate 0.004-0.02) while the
+   median stayed above target; held-out rose to 0.3-0.49 by epoch 40-50. Per-unit gains
+   collapsed to 0 in >= 10% of units; multipliers overshot (lambda ~3-6 for most units,
+   including those below target) and unwind only ~0.2/epoch.
+3. Input noise before the nonlinearity (std sqrt(0.1) = SNR 10 at gain 1) + multiplier
+   updates every 20 bouts: same collapse by epoch 11 (>= 10% of units at gain 0, lambda
+   2.5-5). Noise only penalises shrinking the gain of active units; a silent / flat unit
+   pays neither noise nor rate cost, so with large multipliers killing units is the cheapest
+   way to cut rate, and dead units cannot be revived.
+
+Proposed next: explicit per-unit gain floor + gentler constraint (mu cap 0.5, target annealed
+from 0.5 down).

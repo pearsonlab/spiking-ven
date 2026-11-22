@@ -19,9 +19,9 @@
     "aud_norm_power": 1.0,
     "rms_per_rendition": true
   },
-  "stimulus_note": "2026-11-22: linear divisive normalisation (sigma 0.05, power 1) replaces the squared one (sigma 0.3, power 2), which is non-monotone and splits the DAF response into two humps (docs/contrast-experiments.md, 'DAF shape'). trained_model and results below are from the squared-normalisation network until the linear-normalisation baseline is retrained.",
+  "stimulus_note": "2026-11-22: linear divisive normalisation (sigma 0.05, power 1) replaces the squared one (sigma 0.3, power 2), which is non-monotone and splits the DAF response into two humps (docs/contrast-experiments.md, 'DAF shape'). trained_model is the linear-normalisation network (retrained 2026-11-22, monitor_hvc_plastic, 150 renditions); the cancellation results below are still from the squared-normalisation network (outputs/sweeps/rK_monitor/nih300.npz) and have not been re-measured.",
   "training": {"n_rend": 150, "seed": 42},
-  "trained_model": "outputs/sweeps/rK_monitor/nih300.npz",
+  "trained_model": "outputs/sweeps/daf_by_encoder_norm0.05_pow1/0_baseline.npz",
   "results": {
     "flatness_template": 0.52,
     "flatness_over_renditions": 0.53,

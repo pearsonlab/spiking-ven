@@ -135,3 +135,46 @@ Responder-mean change from pre-onset rate; tail = mean 50-150 ms after noise off
 Raw encoder DAF (no network, `strf_compactness.py`): peak / fall to 10% after offset --
 baseline 47 / 29 ms, A 40 / 23, B 39 / 21, D 81 / 74, E 79 / 75, G 43 / 70, R1 95 / 77,
 R4 74 / 74 ms.
+
+
+## 2026-11-22: rerun with linear divisive normalisation (now the baseline: sigma 0.05, power 1)
+
+Same 11 encoders, same network settings, linear instead of squared normalisation
+(`outputs/sweeps/daf_by_encoder_norm0.05_pow1/`, figures `outputs/daf_linear_2026-11-22/`).
+
+| encoder | norm | fixed: resp | first peak | max | dip | tail | random: resp | first peak | max | tail |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0_baseline | lin | 416 | +30 @ 24 | +30 @ 24 | -2.8 @ 188 | 0.06 | 324 | +12 @ 24 | +18 @ 74 | -0.02 |
+| 0_baseline | sq | 444 | +32 @ 23 | +32 @ 23 | -2.6 @ 106 | 0.05 | 258 | +10 @ 20 | +24 @ 83 | -0.00 |
+| A_conv32_nopen | lin | 441 | +22 @ 24 | +22 @ 24 | -2.0 @ 266 | 0.18 | 372 | +11 @ 25 | +13 @ 68 | 0.28 |
+| A_conv32_nopen | sq | 482 | +7 @ 5 | +25 @ 22 | -2.1 @ 332 | 0.20 | 369 | +8 @ 19 | +18 @ 75 | 0.33 |
+| B_conv16_L2 | lin | 442 | +9 @ 6 | +25 @ 24 | -2.5 @ 263 | 0.12 | 380 | +11 @ 25 | +12 @ 59 | 0.26 |
+| B_conv16_L2 | sq | 460 | +26 @ 22 | +26 @ 22 | -3.0 @ 260 | 0.16 | 348 | +10 @ 20 | +20 @ 73 | 0.21 |
+| C_tm8_conv16_L2 | lin | 423 | +9 @ 5 | +23 @ 24 | -3.1 @ 260 | 0.15 | 380 | +11 @ 26 | +13 @ 64 | 0.23 |
+| C_tm8_conv16_L2 | sq | 433 | +29 @ 22 | +29 @ 22 | -3.3 @ 261 | 0.11 | 375 | +9 @ 20 | +20 @ 73 | 0.21 |
+| D_tm8_win_rate0.5 | lin | 273 | +13 @ 45 | +13 @ 45 | -0.7 @ 208 | 0.22 | 179 | +8 @ 30 | +8 @ 70 | 0.17 |
+| D_tm8_win_rate0.5 | sq | 191 | +14 @ 7 | +14 @ 7 | -1.0 @ 225 | 0.29 | 72 | +2 @ 6 | +6 @ 133 | 0.66 |
+| E_tm16_win_rate0.5 | lin | 266 | +8 @ 29 | +10 @ 56 | -0.0 @ 196 | 0.30 | 197 | +7 @ 35 | +8 @ 55 | 0.21 |
+| E_tm16_win_rate0.5 | sq | 186 | +11 @ 9 | +11 @ 9 | +0.3 @ 195 | 0.31 | 86 | +1 @ 15 | +5 @ 122 | 0.48 |
+| F_tm16_win_rate0.25 | lin | 265 | +8 @ 38 | +10 @ 52 | +0.7 @ 199 | 0.41 | 190 | +7 @ 32 | +9 @ 69 | 0.17 |
+| F_tm16_win_rate0.25 | sq | 164 | +10 @ 10 | +10 @ 10 | +0.3 @ 220 | 0.46 | 77 | +2 @ 18 | +6 @ 83 | 0.39 |
+| G_tm16_win_rate0.1 | lin | 282 | +10 @ 34 | +10 @ 59 | +0.5 @ 211 | 0.31 | 230 | +6 @ 29 | +6 @ 29 | 0.27 |
+| G_tm16_win_rate0.1 | sq | 183 | +7 @ 9 | +8 @ 266 | +0.2 @ 380 | 0.47 | 104 | +3 @ 15 | +5 @ 78 | 0.51 |
+| H_R1_win_restart_decorr | lin | 270 | +5 @ 8 | +10 @ 36 | +0.3 @ 180 | 0.25 | 202 | +9 @ 59 | +9 @ 59 | 0.18 |
+| H_R1_win_restart_decorr | sq | 147 | +11 @ 9 | +11 @ 9 | -0.6 @ 218 | 0.35 | 91 | +2 @ 22 | +4 @ 54 | 0.52 |
+| I_R4_win_datainit | lin | 279 | +12 @ 42 | +12 @ 42 | -0.3 @ 206 | 0.28 | 206 | +8 @ 47 | +9 @ 74 | 0.18 |
+| I_R4_win_datainit | sq | 168 | +12 @ 10 | +12 @ 10 | -1.6 @ 210 | 0.38 | 71 | +2 @ 20 | +6 @ 52 | 0.51 |
+| J_R5_conv16_datainit | lin | 350 | +16 @ 30 | +16 @ 30 | -2.8 @ 190 | 0.16 | 270 | +7 @ 35 | +10 @ 76 | 0.10 |
+| J_R5_conv16_datainit | sq | 245 | +11 @ 24 | +14 @ 119 | -1.3 @ 185 | 0.29 | 99 | +13 @ 114 | +13 @ 114 | 0.27 |
+
+- Linear normalisation removes the separate second hump: the baseline's random-onset
+  response is one hump rising from ~15 ms to +18 Hz at 74 ms, then a sharp drop at ~95 ms
+  (no rebound, small undershoot). Fixed onset: +30 Hz at 24 ms with a shoulder to ~80 ms.
+- Short-STRF conv encoders (A-C): earlier and flatter (plateau ~20-75 ms, max +12-13 Hz at
+  59-68 ms) but a slow tail to ~180 ms (tail 0.23-0.28 of max vs -0.02 for the baseline);
+  not cleanly better than the baseline.
+- Rate-constrained window encoders (D-I) improve a lot under linear normalisation (180-230
+  responders vs 70-100 with squared) and peak at 30-60 ms, inside the paper's 35-75 ms
+  window, but weakly (+6-10 Hz vs ~20 Hz).
+- Baseline config now points at the linear-normalisation baseline network; its cancellation
+  results have not been re-measured.

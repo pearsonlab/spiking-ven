@@ -146,7 +146,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                input_noise: float = 0.0, act_update_every: int = 0,
                output_noise: float = 0.0, al_exact: bool = False, al_inner_min: int = 2,
                al_inner_max: int = 8, al_inner_tol: float = 0.01,
-               al_mu_growth: float = 4.0, scale_free_shape: bool = False):
+               al_mu_growth: float = 4.0, scale_free_shape: bool = False,
+               al_plain: bool = False):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -289,7 +290,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``scale_free_shape`` (with ``unit_norm_strf``): the shape step uses the population median
     gain instead of each unit's own gain (u += lr * median(g) * dL/dV), so a unit whose gain
     has collapsed can still re-tune its shape and recover (with the exact gradient
-    g_k * dL/dV_k the shape freezes once g_k reaches its floor)."""
+    g_k * dL/dV_k the shape freezes once g_k reaches its floor).
+
+    ``al_plain`` (rate mode): plain first-order dual ascent instead of the augmented
+    Lagrangian -- the constraint gradient is -lambda_k dr/dz (no quadratic term), and every
+    ``act_update_every`` bouts lambda_k += ``act_dual_lr`` * (mean rate over those bouts -
+    target). No mu, no per-epoch multiplier update."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -473,6 +479,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             return -lam * (Z > 0)
         if auglag and al_on[0]:
             assert act_target is not None
+            if rate_mode and al_plain:                   # first-order: lambda only
+                return -lam * dS
             if rate_mode and al_exact:                   # running full-data violation
                 return -(lam + mu_al[0] * al_st["c_est"]) * dS
             if rate_mode:                                # mean rate per unit = target
@@ -550,7 +558,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                                            - act_target)
                     c_acc[1] += 1
                     if c_acc[1] >= act_update_every:
-                        lam = lam + mu_al[0] * c_acc[0] / len(cochs)
+                        lam = lam + (act_dual_lr * c_acc[0] / c_acc[1] if al_plain
+                                     else mu_al[0] * c_acc[0] / len(cochs))
                         c_acc[0], c_acc[1] = np.zeros(K), 0
                 D = norm_rows(D + lr * (F.T @ E).reshape(K, M * C) / n)
                 if use_d0:
@@ -579,7 +588,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                                        - act_target)
                 c_acc[1] += 1
                 if c_acc[1] >= act_update_every:
-                    lam = lam + mu_al[0] * c_acc[0] / len(cochs)
+                    lam = lam + (act_dual_lr * c_acc[0] / c_acc[1] if al_plain
+                                 else mu_al[0] * c_acc[0] / len(cochs))
                     c_acc[0], c_acc[1] = np.zeros(K), 0
             Dk = W if D is None else D
             Y = target(X, P)
@@ -625,6 +635,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                     f"{np.median(lam):.3g}, mu {mu_al[0]:.3g}{' (grown)' if grew else ''}")
                 al_st.update(inner=0, best=np.inf, stale=0)
                 outer_done = True
+        elif auglag and al_on[0] and al_plain:
+            pass                                         # lambda updated every N bouts
         elif auglag and al_on[0]:
             assert act_target is not None
             cbar = soft_unit / len(cochs) - act_target   # epoch-mean violation per unit

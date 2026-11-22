@@ -133,6 +133,9 @@ def main() -> None:
                    help="faithful augmented Lagrangian: inner loop to plateau with lambda, mu "
                         "fixed, then lambda += mu * c, mu grown if the violation fell < 75%%")
     p.add_argument("--al-inner-max", type=int, default=8)
+    p.add_argument("--al-plain", action="store_true",
+                   help="rate mode: plain first-order dual ascent (lambda += act-dual-lr * "
+                        "violation every --act-update-every bouts; no quadratic term)")
     p.add_argument("--scale-free-shape", action="store_true",
                    help="unit-norm STRFs: shape step uses the median gain, not each unit's own "
                         "(a collapsed unit can recover)")
@@ -230,7 +233,7 @@ def main() -> None:
                               act_update_every=a.act_update_every,
                               output_noise=a.output_noise, al_exact=a.al_exact,
                               al_inner_max=a.al_inner_max, al_mu_growth=a.al_mu_growth,
-                              scale_free_shape=a.scale_free_shape)
+                              scale_free_shape=a.scale_free_shape, al_plain=a.al_plain)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

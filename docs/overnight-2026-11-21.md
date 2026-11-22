@@ -1,5 +1,37 @@
 # Overnight 2026-11-21: STRF fixes, conv decoder, DAF across encoders
 
+## Morning summary
+
+- **DAF shape is set downstream of the encoder.** All 11 encoders through the same baseline
+  network: the random-onset two-hump response (early peak ~20 ms, larger one ~73-83 ms)
+  appears with every encoder that drives the network well (baseline, conv A/B/C). Consistent
+  with the earlier diagnosis that the second hump is the squared auditory normalisation.
+  No STRF change tested fixes it.
+- **Conv-decoder encoders from yesterday (A, B, C) are the best DAF drivers**: responders
+  433-482 (baseline 444), fixed-onset peak +25-29 Hz at ~22 ms (baseline +32 at 23), raw
+  encoder DAF peak ~40 ms with a 21-23 ms tail (baseline 47 / 29 ms). But longer network
+  tails (0.11-0.20 of max vs 0.05).
+- **Rate-constrained window encoders (D-I) are poor DAF drivers**: ~150-190 responders,
+  +7-14 Hz, a sharp onset transient at 7-10 ms, then a flat plateau; random onsets only
+  ~+5 Hz lasting ~35-125 ms. Raw encoder DAF peaks late (74-95 ms) and lingers ~75 ms after
+  noise offset. Tighter targets (0.25, 0.1) are weaker still. Caveat: network and
+  normalisation are tuned for the baseline encoder, not retuned per encoder.
+- **Dead-unit restart and decorrelation (R1)**: no dead units arose, so restart never fired;
+  decorr w=1 did not decorrelate (mean |corr| 0.12 -> 0.18) and w >= 10 destabilises. DAF
+  unchanged vs the reference. **Recommend reverting both** (`0c43cef`, `7e06878`) unless you
+  want to keep them as options.
+- **Data init (`--init-data`)** cleans the window STRFs (no white-noise striations) but does
+  not change DAF. Worth keeping.
+- **Conv decoder + current setup (unit-norm shape x gain, rate target, noise) does not work**:
+  R2/R3 (noise init) stay speckle; R5-R8 (data init, lr 1e-3/3e-3, with/without output noise)
+  are weak/diffuse, and R7 degrades with more training (66% <=20 ms at epoch 100 -> 30% at
+  300). Short conv STRFs so far only came from the free-norm, zero-init, L2 setup.
+- **Softplus-at-inference fix** (`6171c46`): needed for correctness; keep.
+- **Redundancy** (r > 0.9 partners): baseline 111/126 (!), conv A-C 12-13, window rate-0.5
+  8-13, rate 0.25 36, rate 0.1 74.
+- Figures: `outputs/overnight_2026-11-21/` (daf_*.png/json per encoder, ovn_encoder_daf_raw.png,
+  STRF comparisons ovn_strfs_*.png, covariance ovn_unitcov_R1.png).
+
 Branch `ac-tm-basis`. Every new idea is a separate flag (off by default) in its own commit,
 so each can be reverted independently (`git revert <sha>`).
 
@@ -57,6 +89,49 @@ All: TM16 basis (2-64 ms), normalised input, lr 1e-3, rate target 0.5 (plain dua
 step 0.1 every 20 bouts), input noise SNR 10, output noise SNR 3, unit-norm shape x gain with
 the median-gain shape step, softplus beta 9, no early stopping.
 
+| R7 | conv 16 ms | data | - / - | lr 3e-3; best conv at epoch 100 (66% <=20 ms), degraded by 300 |
+| R8 | conv 16 ms | data | - / - | no output noise; like R5 |
+
 ## Results
 
-(filled in below as runs finish)
+Encoders (A-C from 2026-11-21 daytime: A conv 32 ms no penalty, B conv 16 ms + L2,
+C TM8 conv 16 ms + L2; D TM8 window rate 0.5; E-G TM16 window rate 0.5 / 0.25 / 0.1;
+H = R1; I = R4; J = R5).
+
+### STRF / population statistics (held-out bouts, `scripts/encoder_stats.py`)
+
+| encoder | STRF <=20 ms | mean lag | dead units | units with r>0.9 partner | mean abs corr |
+|---|---|---|---|---|---|
+| baseline | 51% | 25 ms | 7/126 | 111/126 | 0.54 |
+| A_conv32_nopen | 66% | 16 ms | 1/128 | 12/128 | 0.40 |
+| B_conv16_L2 | 96% | 9 ms | 0/127 | 13/127 | 0.39 |
+| C_tm8_conv16_L2 | 96% | 9 ms | 0/127 | 13/127 | 0.39 |
+| D_tm8_win_rate0.5 | 42% | 26 ms | 0/127 | 8/127 | 0.18 |
+| E_tm16_win_rate0.5 | 31% | 30 ms | 9/128 | 11/128 | 0.12 |
+| F_tm16_win_rate0.25 | 26% | 35 ms | 8/128 | 36/128 | 0.11 |
+| G_tm16_win_rate0.1 | 23% | 39 ms | 4/128 | 74/128 | 0.11 |
+| H_R1_restart_decorr | 40% | 28 ms | 0/128 | 19/128 | 0.18 |
+| I_R4_win_datainit | 34% | 26 ms | 3/128 | 13/128 | 0.13 |
+| J_R5_conv16_datainit | 49% | 25 ms | 35/128 | 85/128 | 0.49 |
+
+### Network DAF (baseline V2 network per encoder, `scripts/run_daf_for_encoder.sh`)
+
+Responder-mean change from pre-onset rate; tail = mean 50-150 ms after noise offset / max.
+
+| encoder | fixed: resp | first peak | max | dip | tail | random: resp | first peak | max | tail |
+|---|---|---|---|---|---|---|---|---|---|
+| 0_baseline | 444 | +32 Hz @ 23 | +32 @ 23 | -2.6 @ 106 | 0.05 | 258 | +10 @ 20 | +24 @ 83 | -0.00 |
+| A_conv32_nopen | 482 | +7 Hz @ 5 | +25 @ 22 | -2.1 @ 332 | 0.20 | 369 | +8 @ 19 | +18 @ 75 | 0.33 |
+| B_conv16_L2 | 460 | +26 Hz @ 22 | +26 @ 22 | -3.0 @ 260 | 0.16 | 348 | +10 @ 20 | +20 @ 73 | 0.21 |
+| C_tm8_conv16_L2 | 433 | +29 Hz @ 22 | +29 @ 22 | -3.3 @ 261 | 0.11 | 375 | +9 @ 20 | +20 @ 73 | 0.21 |
+| D_tm8_win_rate0.5 | 191 | +14 Hz @ 7 | +14 @ 7 | -1.0 @ 225 | 0.29 | 72 | +2 @ 6 | +6 @ 133 | 0.66 |
+| E_tm16_win_rate0.5 | 186 | +11 Hz @ 9 | +11 @ 9 | +0.3 @ 195 | 0.31 | 86 | +1 @ 15 | +5 @ 122 | 0.48 |
+| F_tm16_win_rate0.25 | 164 | +10 Hz @ 10 | +10 @ 10 | +0.3 @ 220 | 0.46 | 77 | +2 @ 18 | +6 @ 83 | 0.39 |
+| G_tm16_win_rate0.1 | 183 | +7 Hz @ 9 | +8 @ 266 | +0.2 @ 380 | 0.47 | 104 | +3 @ 15 | +5 @ 78 | 0.51 |
+| H_R1_win_restart_decorr | 147 | +11 Hz @ 9 | +11 @ 9 | -0.6 @ 218 | 0.35 | 91 | +2 @ 22 | +4 @ 54 | 0.52 |
+| I_R4_win_datainit | 168 | +12 Hz @ 10 | +12 @ 10 | -1.6 @ 210 | 0.38 | 71 | +2 @ 20 | +6 @ 52 | 0.51 |
+| J_R5_conv16_datainit | 245 | +11 Hz @ 24 | +14 @ 119 | -1.3 @ 185 | 0.29 | 99 | +13 @ 114 | +13 @ 114 | 0.27 |
+
+Raw encoder DAF (no network, `strf_compactness.py`): peak / fall to 10% after offset --
+baseline 47 / 29 ms, A 40 / 23, B 39 / 21, D 81 / 74, E 79 / 75, G 43 / 70, R1 95 / 77,
+R4 74 / 74 ms.

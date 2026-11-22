@@ -90,6 +90,15 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
     return W, b, D, d0, mu, scale
 
 
+def window_scale(cochs, L: int) -> float:
+    """RMS per-element std of the centred strictly-past windows of a corpus (a global input
+    normalisation: dividing by it gives a random unit-norm STRF output variance ~1)."""
+    from .causal_filters import _past_windows
+
+    P = np.concatenate([_past_windows(X, L) for X in cochs], axis=0)
+    return float(np.sqrt(np.mean(P.var(axis=0))))
+
+
 def tm_basis(taus_ms, L: int, frame_ms: float = 2.0) -> np.ndarray:
     """Discrete-time Takenaka-Malmquist basis on the strictly-past window, (nb, L).
 
@@ -131,7 +140,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                act_dual_lr: float = 1e-3, act_mu: float = 0.2, act_mu_growth: float = 2.0,
                act_mu_max: float = 2.0, softplus_beta0: float | None = None,
                softplus_growth: float = 1.25, softplus_beta_max: float = 3000.0,
-               act_warmup: int = 3, unit_norm_strf: bool = False):
+               act_warmup: int = 3, unit_norm_strf: bool = False,
+               input_scale: float = 1.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -232,6 +242,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     (V_k = g_k u_k), updated separately; penalties act on the shape only (L2 is ignored).
     Starts from random unit-norm shapes with gain 0.01.
 
+    ``input_scale``: centred windows (and reconstruction targets) are divided by this global
+    scalar, e.g. the rms per-element std of the corpus windows (``window_scale``), so that a
+    random unit-norm STRF's output has variance ~1. Save it as the encoder's ``scale``.
+
     ``softplus_beta0``: train with r = softplus_beta(z) = log(1 + exp(beta z)) / beta instead
     of the ReLU, beta starting at ``softplus_beta0`` and multiplied by ``softplus_growth``
     each epoch; once it reaches ``softplus_beta_max`` the exact ReLU is used. Early stopping
@@ -286,7 +300,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         """What the code must reproduce: the window, or the next h frames (T, C*h)."""
         if not h:
             return P
-        Xc = X - mu_y[:, None]
+        Xc = (X - mu_y[:, None]) / input_scale
         Xp = np.concatenate([Xc, np.zeros((C, h - 1))], axis=1)
         return np.concatenate([Xp[:, j:j + X.shape[1]].T for j in range(h)], axis=1)
     lag_ms = (L - 1 - np.arange(L)) * frame_ms + frame_ms / 2     # oldest column first
@@ -320,7 +334,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         Sp = np.concatenate([S, np.zeros((M, K))], axis=0)
         F = np.stack([Sp[m:m + T] for m in range(1, M + 1)], axis=2).reshape(T, K * M)
         D3 = D.reshape(K, M, C)
-        Y = (X - mu_y[:, None]).T
+        Y = (X - mu_y[:, None]).T / input_scale
         E = Y - F @ D3.reshape(K * M, C) - dec0[0]
         return Z, S, F, Y, E
 
@@ -328,7 +342,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         if M:
             num = den = 0.0
             for X in val_cochs or []:
-                _, _, _, Y, E = conv_pass(X, _past_windows(X, L) - mu, V, b, D)
+                _, _, _, Y, E = conv_pass(X, (_past_windows(X, L) - mu) / input_scale, V, b,
+                                          D)
                 num += float((E ** 2).sum())
                 den += float((Y ** 2).sum())
             return num / max(den, 1e-12)
@@ -336,7 +351,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         Dk = W if D is None else D
         num = den = 0.0
         for X in val_cochs or []:
-            P = _past_windows(X, L) - mu
+            P = (_past_windows(X, L) - mu) / input_scale
             Y = target(X, P)
             R = Y - nl(P @ W.T + b)[0] @ Dk - dec0[0]
             w = 1.0 if predict_frames else wcol
@@ -455,7 +470,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         soft_unit = np.zeros(K)
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
-            P = _past_windows(X, L) - mu                       # (T, C*L)
+            P = (_past_windows(X, L) - mu) / input_scale       # (T, C*L)
             n = max(T, 1)
             if M:
                 assert D is not None                   # conv decoder is always untied

@@ -26,7 +26,9 @@ from spiking_ven.constants import (
     CAUSAL_MP_STRENGTH, CAUSAL_N_COCH_CH, CAUSAL_RMS_REF, CAUSAL_SMOOTH,
 )
 from spiking_ven.corpus import load_corpus
-from spiking_ven.sw_encoder import PRIMARY_RATE_HZ, SWEncoder, learn_relu, tm_basis, unfold
+from spiking_ven.sw_encoder import (
+    PRIMARY_RATE_HZ, SWEncoder, learn_relu, tm_basis, unfold, window_scale,
+)
 
 
 def main() -> None:
@@ -122,6 +124,9 @@ def main() -> None:
     p.add_argument("--act-beta", type=float, default=0.01,
                    help="auglag: width of the smooth active-frame indicator, as a multiple of "
                         "each unit's input std (try ~0.3)")
+    p.add_argument("--normalize-input", action="store_true",
+                   help="divide centred windows by the corpus rms per-element std (global "
+                        "scalar), so a random unit-norm STRF's output has variance ~1")
     p.add_argument("--log-every", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
@@ -176,6 +181,10 @@ def main() -> None:
         basis = tm_basis(taus, a.l_frames, 1000.0 / cp["frame_rate"])
         print("TM basis time constants (ms):", np.round(taus, 2).tolist())
 
+    in_scale = window_scale(train, a.l_frames) if a.normalize_input else 1.0
+    if a.normalize_input:
+        print(f"input normalisation: windows / {in_scale:.4g}")
+
     V, b, mu, Dk = learn_relu(train, K=a.k, L=a.l_frames, n_epochs=a.epochs, lr=a.lr,
                               reg_lr=a.reg_lr, seed=a.seed, mp_strength=a.mp_strength,
                               l1_V=a.l1, smooth_V=a.smooth, tied=a.tied, val_cochs=val,
@@ -192,11 +201,11 @@ def main() -> None:
                               act_mu_max=a.act_mu_max, softplus_beta0=a.softplus_beta0,
                               softplus_growth=a.softplus_growth,
                               softplus_beta_max=a.softplus_beta_max, act_warmup=a.act_warmup,
-                              unit_norm_strf=a.unit_norm_strf)
+                              unit_norm_strf=a.unit_norm_strf, input_scale=in_scale)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)
-    D, d0, scale = Dk.T.copy(), np.zeros_like(mu), 1.0
+    D, d0, scale = Dk.T.copy(), np.zeros_like(mu), in_scale
     if a.predict_frames or a.conv_frames:
         # The decoder predicts future frames, not the window: nothing to reconstruct with.
         D, d0 = None, None

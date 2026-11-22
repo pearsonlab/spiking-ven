@@ -147,7 +147,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                output_noise: float = 0.0, al_exact: bool = False, al_inner_min: int = 2,
                al_inner_max: int = 8, al_inner_tol: float = 0.01,
                al_mu_growth: float = 4.0, scale_free_shape: bool = False,
-               al_plain: bool = False):
+               al_plain: bool = False, restart_dead: float = 0.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -295,7 +295,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``al_plain`` (rate mode): plain first-order dual ascent instead of the augmented
     Lagrangian -- the constraint gradient is -lambda_k dr/dz (no quadratic term), and every
     ``act_update_every`` bouts lambda_k += ``act_dual_lr`` * (mean rate over those bouts -
-    target). No mu, no per-epoch multiplier update."""
+    target). No mu, no per-epoch multiplier update.
+
+    ``restart_dead`` = f > 0 (with ``unit_norm_strf``): after every epoch, units whose
+    activity std over the epoch is below f x the median unit's are re-seeded: shape from a
+    random training window (projected onto the basis, unit norm), gain = median gain, bias 0,
+    lambda 0, fresh random unit-norm decoder row."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -533,6 +538,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         act_unit = np.zeros(K)
         soft_unit = np.zeros(K)
+        s1, s2, nfr = np.zeros(K), np.zeros(K), 0       # per-unit activity moments
         c_acc: list[Any] = [np.zeros(K), 0]              # violations since last lambda update
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
@@ -570,6 +576,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 act += float(np.mean(Z > 0))
                 alive |= (Z > 0).any(axis=0)
                 act_unit += (Z > 0).mean(axis=0)
+                s1, s2, nfr = s1 + S.sum(axis=0), s2 + (S ** 2).sum(axis=0), nfr + T
                 continue
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
@@ -611,6 +618,25 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             act += float(np.mean(Z > 0))
             alive |= (Z > 0).any(axis=0)
             act_unit += (Z > 0).mean(axis=0)
+            s1, s2, nfr = s1 + S.sum(axis=0), s2 + (S ** 2).sum(axis=0), nfr + T
+        if restart_dead > 0 and unit_norm_strf and nfr > 0:
+            sd = np.sqrt(np.maximum(s2 / nfr - (s1 / nfr) ** 2, 0.0))
+            dead = np.flatnonzero(sd < restart_dead * np.median(sd))
+            if dead.size:
+                g = np.linalg.norm(V.reshape(K, -1), axis=1)
+                gmed = float(np.median(g))
+                for k in dead:
+                    Xr = cochs[int(rng.integers(len(cochs)))]
+                    Pr = (_past_windows(Xr, L) - mu) / input_scale
+                    u = to_span(Pr[int(rng.integers(len(Pr)))].reshape(1, C, L))[0]
+                    V[k] = gmed * u / max(float(np.linalg.norm(u)), 1e-12)
+                    b[k] = 0.0
+                    lam[k] = 0.0
+                    if D is not None:
+                        dk = rng.standard_normal(D.shape[1])
+                        D[k] = dk / np.linalg.norm(dk)
+                log(f"  restarted {dead.size} dead units (activity std < {restart_dead:g} x "
+                    f"median)")
         outer_done = False
         if al_exact and auglag and al_on[0]:
             assert act_target is not None

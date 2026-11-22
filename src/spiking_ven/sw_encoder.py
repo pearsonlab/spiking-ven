@@ -252,9 +252,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     each epoch; once it reaches ``softplus_beta_max`` the exact ReLU is used. Early stopping
     waits for the ReLU (and, with an activity target, for the constraint).
     ``softplus_hold``: three phases instead -- ramp beta up to ``softplus_hold``, hold it
-    there until the held-out error plateaus (no improvement by ``min_delta`` for
-    ``softplus_hold_patience`` epochs), then anneal slowly (x ``softplus_anneal`` per epoch)
-    to the ReLU."""
+    there until the activity constraint is met AND the held-out error has plateaued (no
+    improvement by ``min_delta`` for ``softplus_hold_patience`` epochs), then anneal slowly
+    (x ``softplus_anneal`` per epoch) to the ReLU."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -556,6 +556,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 sp[0] = min(sp[0] * softplus_growth, softplus_hold)
                 if sp[0] >= softplus_hold:
                     sp[1] = "hold"
+            elif sp[1] == "hold" and not act_ok:
+                sp[2], sp[3] = np.inf, 0                 # constraint unmet: keep holding
             elif sp[1] == "hold":
                 if ve < sp[2] - min_delta:
                     sp[2], sp[3] = ve, 0

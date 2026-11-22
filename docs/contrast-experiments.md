@@ -1380,3 +1380,16 @@ Each step fixed a failure seen on synthetic data before any real run:
    on). The unconstrained real-data code has median rate 0.19 with modulation std 0.093
    (all units always active), so the constraint only bites below ~0.09: real runs at mean
    rate 0.05 and 0.02 (`--act-mode rate --unit-norm-strf --softplus-beta0 20`).
+
+| mean-rate target | best epoch | held-out | units active | unit rate 10/50/90% | look |
+|---|---|---|---|---|---|
+| 0.05 | 35 | 0.102 | 64% | 0.050/0.050/0.051 | dense low-contrast striations: fine alternating bands across frequency over the whole window, speckle at the newest lags |
+| 0.02 | 27 | 0.196 | 29% | 0.019/0.020/0.020 | same |
+
+The constraint now holds exactly and stably, but the STRFs are worse-looking than the
+unconstrained run: the striations across frequency look like the random unit-norm
+initial shapes surviving (smooth in time via the basis, random across channels; with no
+penalty, directions the data never drives keep their initial noise -- the same problem as
+the random-init prediction runs). Input-window statistics (training bouts): per-element
+std 0.053, channel variance range 68x, top PC 44% of variance (top 10: 79%). Figure:
+outputs/strfs_tm8_win_rate.png.

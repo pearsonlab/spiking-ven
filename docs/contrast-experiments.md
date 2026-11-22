@@ -1451,3 +1451,20 @@ output noise at SNR 10 is too weak to stop it; (2) a trap in the gain/shape para
 the shape update is scaled by the gain (dL/du = g dL/dV), so once a gain hits the clamp the
 shape freezes and the unit cannot recover. Next: scale-free shape update, plus a stronger
 gain floor (output noise SNR ~3 or an explicit minimum gain).
+
+### Scale-free shape update + output noise SNR 3 (stopped at epoch 47)
+
+`--scale-free-shape` (shape step uses the median gain), output noise sqrt(1/3) x target,
+otherwise as above. Collapse fixed: no dead units (10th-percentile rate 0.12-0.39 through
+epoch 41 vs 0.003-0.02 before). But reconstruction pays: held-out 0.13 at epoch 6-11, then
+rising as the multipliers grow (0.25: 0.144 / 0.189 / 0.220 / 0.276 / 0.243 at epochs
+16-41, then 0.407 at 46; 0.1: 0.209 / 0.291 / 0.403 / 0.419 / 0.472 / 0.393, then 0.560).
+0.25 met its constraint at epoch ~41 (unit rate 10/50/90% 0.16/0.26/0.31, lambda ~4.8);
+best checkpointed held-out 0.281 (epoch 35). 0.1 never met it (median 0.14-0.15, lambda
+~12). On the absolute scale, 0.25 has two very sharp narrowband blobs at short latency
+(0-10 ms, high channels) -- the most S&W-like units yet -- but several near-flat low-gain
+units that meet the target through the bias, and weak bands elsewhere; 0.1 is mostly
+striated textures. The 0.5 run (no noise) remains the best overall. With window
+reconstruction, pushing the mean rate below ~0.5 trades reconstruction for a few sharper
+units; temporal placement unchanged (mean lag 26-28 ms). Figure:
+outputs/strfs_tm8_win_sf_latest.png.

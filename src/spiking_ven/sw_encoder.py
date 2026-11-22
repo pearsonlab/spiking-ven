@@ -147,7 +147,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                output_noise: float = 0.0, al_exact: bool = False, al_inner_min: int = 2,
                al_inner_max: int = 8, al_inner_tol: float = 0.01,
                al_mu_growth: float = 4.0, scale_free_shape: bool = False,
-               al_plain: bool = False, restart_dead: float = 0.0):
+               al_plain: bool = False, restart_dead: float = 0.0,
+               decorr: float = 0.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -300,7 +301,12 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``restart_dead`` = f > 0 (with ``unit_norm_strf``): after every epoch, units whose
     activity std over the epoch is below f x the median unit's are re-seeded: shape from a
     random training window (projected onto the basis, unit norm), gain = median gain, bias 0,
-    lambda 0, fresh random unit-norm decoder row."""
+    lambda 0, fresh random unit-norm decoder row.
+
+    ``decorr`` = w > 0: decorrelation penalty on the code within each bout,
+    w/2 * sum_{j != k} C_jk^2 / vbar^2 with C the covariance of the rates over the bout's
+    frames and vbar its mean diagonal (scale-free); its gradient -2w (S - mean) C_off /
+    (T vbar^2) dr/dz flows into the STRFs and biases."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -478,6 +484,16 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         sg = 0.5 * (1.0 + np.tanh(0.5 * Z / h))
         return sg, sg * (1.0 - sg) * h          # gradient preconditioned by h^2 (scale-free)
 
+    def decorr_grad(S, dS):
+        """-d/dZ of the decorrelation penalty (0 if decorr == 0)."""
+        if decorr <= 0:
+            return 0.0
+        Sc = S - S.mean(axis=0)
+        Cv = Sc.T @ Sc / max(len(S), 1)
+        vbar = max(float(np.mean(np.diag(Cv))), 1e-12)
+        Coff = Cv - np.diag(np.diag(Cv))
+        return -2.0 * decorr * (Sc @ Coff) / (max(len(S), 1) * vbar ** 2) * dS
+
     def cost_grad(Z, dS, on):
         """-d/dZ of the activity cost (penalty / augmented-Lagrangian modes; else 0)."""
         if penalty:
@@ -552,7 +568,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
                 Ew = np.stack([Ep[M - m:M - m + T] for m in range(1, M + 1)], axis=1)
                 _, dS, on = nl(Z)
-                gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * dS + cost_grad(Z, dS, on)
+                gZ = ((Ew.reshape(T, M * C) @ D.T - code_l1) * dS + cost_grad(Z, dS, on)
+                      + decorr_grad(S, dS))
                 soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
                               if auglag else on.mean(axis=0))
                 if al_exact and auglag and al_on[0]:
@@ -605,7 +622,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             if use_d0:
                 dec0[0] = dec0[0] + lr * R.mean(axis=0)
             Rw = R if predict_frames else R * wcol             # lag-weighted residual
-            gZ = (Rw @ Dk.T) * dS + cost_grad(Z, dS, on)      # -dLoss/dZ
+            gZ = (Rw @ Dk.T) * dS + cost_grad(Z, dS, on) + decorr_grad(S, dS)
             G = gZ.T @ P                                       # -dLoss/dW (encoder)
             if D is None:
                 G = G + S.T @ Rw                               # tied: decoder role too

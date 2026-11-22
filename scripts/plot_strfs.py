@@ -37,6 +37,9 @@ def main() -> None:
     p.add_argument("files", nargs="+")
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=16, help="STRFs per row")
+    p.add_argument("--abs-scale", action="store_true",
+                   help="one colour scale per row (the row's largest |weight|) instead of one "
+                        "per panel, so weak / dead units fade out")
     p.add_argument("--labels", nargs="+", default=None,
                    help="readable row titles (one per file; default: file names); use '\\n' "
                         "for a line break")
@@ -66,6 +69,7 @@ def main() -> None:
         live = np.flatnonzero(np.abs(V).reshape(K, -1).max(axis=1) > 0)
         order = live[np.argsort(pref[live])]
         pick = order[np.linspace(0, len(order) - 1, min(a.n, len(order))).astype(int)]
+        row_v = float(np.abs(V).max()) or 1.0
         ax0 = axes[r, 0]
         ax0.axis("off")
         title = a.labels[r].replace("\\n", "\n") if a.labels else Path(path).stem
@@ -79,7 +83,7 @@ def main() -> None:
                 ax.axis("off")
                 continue
             w = V[pick[j]]
-            v = float(np.abs(w).max()) or 1.0
+            v = row_v if a.abs_scale else (float(np.abs(w).max()) or 1.0)
             ax.imshow(w, aspect="auto", origin="lower", cmap="RdBu_r", vmin=-v, vmax=v,
                       extent=(-L * fm, 0, 0, C))
     fig.suptitle("STRFs (x: lag -64..0 ms; y: 40 ERB channels; red excitatory, blue "

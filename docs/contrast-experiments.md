@@ -1351,3 +1351,32 @@ The cost does reshape the STRFs (more localized in frequency, sweep-like structu
 and reconstructs far better than threshold-only at 0.2, but under window reconstruction the
 features still sit anywhere in the 64 ms window rather than at short latency. Figure:
 outputs/strfs_tm8_win_penalty.png.
+
+Sparser penalty-mode runs (10%, 5% active) did not converge: plain dual ascent oscillated
+(median units near target, the most active units escaping upward, train and held-out error
+rising for 30+ epochs; an earlier attempt also early-stopped before the constraint was met,
+fixed by gating early stopping on the constraint). Stopped; moved to an augmented Lagrangian.
+
+### Augmented Lagrangian activity constraints (2026-11-21, development on synthetic data)
+
+Each step fixed a failure seen on synthetic data before any real run:
+
+1. Fraction-active constraint, softplus annealed to ReLU, gradient through the rate: once
+   ReLU, silent units get no constraint gradient; multipliers ran away, units flipped
+   silent / always on.
+2. Smooth indicator sigmoid(z / h_k), h_k tied to each unit's input spread: with zero-init
+   STRFs h is tiny, the 1/h gradient made the bias jump and silence units. Preconditioning by
+   h^2 and warm-up epochs helped, but the smooth fraction overestimated the true fraction
+   (units settled at ~5% for a 20% target).
+3. User redirected: constrain each unit's MEAN NONLINEAR OUTPUT (rate), target ~1, reduce as
+   needed. A shared decoder gain let filters shrink (bias carries the mean, decoder grows)
+   -> unit-norm STRF shape x learned per-unit gain, unit-norm decoder rows, no L1/L2/MP.
+4. Positive mean rates fought the mean-subtracted reconstruction target (units silenced)
+   -> learned decoder offset.
+5. mu doubling on the residual oscillation drove mu to its cap and diverged -> grow mu only
+   while the rms violation exceeds 10% of the target; cap 2. Then every unit converges
+   exactly to its target (1 or 0.1).
+6. But a target of 1 is met trivially: bias = target, lambda ~ 0, units stay linear (always
+   on). The unconstrained real-data code has median rate 0.19 with modulation std 0.093
+   (all units always active), so the constraint only bites below ~0.09: real runs at mean
+   rate 0.05 and 0.02 (`--act-mode rate --unit-norm-strf --softplus-beta0 20`).

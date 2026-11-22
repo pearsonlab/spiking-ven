@@ -126,6 +126,14 @@ def main() -> None:
     p.add_argument("--input-noise", type=float, default=0.0,
                    help="std of Gaussian noise added to each unit's input before the "
                         "nonlinearity during training (sqrt(0.1) on normalised input = SNR 10)")
+    p.add_argument("--output-noise", type=float, default=0.0,
+                   help="std of Gaussian noise on each unit's rate before the decoder during "
+                        "training (a gain floor; e.g. sqrt(0.1) * target for SNR 10)")
+    p.add_argument("--al-exact", action="store_true",
+                   help="faithful augmented Lagrangian: inner loop to plateau with lambda, mu "
+                        "fixed, then lambda += mu * c, mu grown if the violation fell < 75%%")
+    p.add_argument("--al-inner-max", type=int, default=8)
+    p.add_argument("--al-mu-growth", type=float, default=4.0)
     p.add_argument("--act-update-every", type=int, default=0,
                    help="update the activity multipliers every N bouts (0 = once per epoch)")
     p.add_argument("--softplus-anneal", type=float, default=1.15,
@@ -216,7 +224,9 @@ def main() -> None:
                               softplus_hold=a.softplus_hold,
                               softplus_hold_patience=a.softplus_hold_patience,
                               softplus_anneal=a.softplus_anneal, input_noise=a.input_noise,
-                              act_update_every=a.act_update_every)
+                              act_update_every=a.act_update_every,
+                              output_noise=a.output_noise, al_exact=a.al_exact,
+                              al_inner_max=a.al_inner_max, al_mu_growth=a.al_mu_growth)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

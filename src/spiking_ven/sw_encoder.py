@@ -143,7 +143,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                act_warmup: int = 3, unit_norm_strf: bool = False,
                input_scale: float = 1.0, softplus_hold: float | None = None,
                softplus_hold_patience: int = 5, softplus_anneal: float = 1.15,
-               input_noise: float = 0.0, act_update_every: int = 0):
+               input_noise: float = 0.0, act_update_every: int = 0,
+               output_noise: float = 0.0, al_exact: bool = False, al_inner_min: int = 2,
+               al_inner_max: int = 8, al_inner_tol: float = 0.01,
+               al_mu_growth: float = 4.0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -265,7 +268,23 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
 
     ``act_update_every`` = N > 0: in the augmented-Lagrangian modes, update the multipliers
     every N bouts (lambda += mu * sum of the per-bout violations / bouts per epoch, so the
-    per-epoch change is unchanged) instead of once per epoch."""
+    per-epoch change is unchanged) instead of once per epoch.
+
+    ``output_noise``: std of Gaussian noise added to each unit's rate before the decoder,
+    during training. Every unit then adds noise to the reconstruction, so a silent or flat
+    unit is pure cost and units must carry signal well above the noise (a gain floor).
+
+    ``al_exact`` (rate mode): a faithful augmented Lagrangian (method of multipliers).
+    lambda and mu are held fixed for an inner loop of epochs; the constraint gradient on
+    each frame is -(lambda_k + mu c_hat_k) dr/dz with c_hat a running (EMA over bouts)
+    estimate of the full-data violation. The inner loop ends when the training augmented
+    objective (reconstruction + mean_k[lambda_k c_k + mu/2 c_k^2]) stops improving by
+    ``al_inner_tol`` (relative), after at least ``al_inner_min`` and at most
+    ``al_inner_max`` epochs. Then lambda <- lambda + mu c_bar (full-data violation of the
+    last inner epoch), and mu <- min(mu * ``al_mu_growth``, ``act_mu_max``) if |c_bar| fell
+    by less than 75%. Early stopping is counted per outer iteration. ``softplus_anneal``
+    <= 1 with ``softplus_hold`` keeps the softplus indefinitely (no ReLU), and early
+    stopping is then allowed on the softplus."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -351,7 +370,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         if noise and input_noise > 0:
             Z = Z + rng.normal(0.0, input_noise, Z.shape)
         S = nl(Z)[0]
-        Sp = np.concatenate([S, np.zeros((M, K))], axis=0)
+        Sf = S + rng.normal(0.0, output_noise, S.shape) if noise and output_noise > 0 else S
+        Sp = np.concatenate([Sf, np.zeros((M, K))], axis=0)
         F = np.stack([Sp[m:m + T] for m in range(1, M + 1)], axis=2).reshape(T, K * M)
         D3 = D.reshape(K, M, C)
         Y = (X - mu_y[:, None]).T / input_scale
@@ -427,6 +447,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         return g_new * u
     lam = np.zeros(K)
     mu_al = [float(act_mu), np.inf]                      # [mu, previous violation norm]
+    # exact augmented Lagrangian state: running violation estimate and inner-loop progress
+    al_st: dict[str, Any] = {"c_est": np.zeros(K), "inner": 0, "best": np.inf, "stale": 0,
+                             "outer": 0}
+    no_anneal = softplus_hold is not None and softplus_anneal <= 1.0
 
     al_on = [False]                                      # constraint active (after warm-up)
 
@@ -443,6 +467,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             return -lam * (Z > 0)
         if auglag and al_on[0]:
             assert act_target is not None
+            if rate_mode and al_exact:                   # running full-data violation
+                return -(lam + mu_al[0] * al_st["c_est"]) * dS
             if rate_mode:                                # mean rate per unit = target
                 c = nl(Z)[0].mean(axis=0) - act_target
                 return -(lam + mu_al[0] * c) * dS
@@ -478,6 +504,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             lam = np.array(resume["lam"], dtype=np.float64)
         if "mu_al" in resume:
             mu_al = [float(resume["mu_al"]), float(resume["viol_prev"])]
+        if "al_state" in resume:
+            al_st.update(json.loads(str(resume["al_state"])))
+            al_st["c_est"] = np.array(resume["al_c_est"], dtype=np.float64)
         if "sp_beta" in resume:
             sp[:] = [float(resume["sp_beta"]), str(resume["sp_phase"]),
                      float(resume["sp_best"]), int(resume["sp_stale"])]
@@ -506,6 +535,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * dS + cost_grad(Z, dS, on)
                 soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
                               if auglag else on.mean(axis=0))
+                if al_exact and auglag and al_on[0]:
+                    assert act_target is not None
+                    al_st["c_est"] = 0.95 * al_st["c_est"] + 0.05 * (S.mean(axis=0) - act_target)
                 if auglag and al_on[0] and act_update_every > 0:
                     assert act_target is not None
                     c_acc[0] = c_acc[0] + ((S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0))
@@ -532,6 +564,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             S, dS, on = nl(Z)                                  # (T, K)
             soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
                           if auglag else on.mean(axis=0))
+            if al_exact and auglag and al_on[0]:
+                assert act_target is not None
+                al_st["c_est"] = 0.95 * al_st["c_est"] + 0.05 * (S.mean(axis=0) - act_target)
             if auglag and al_on[0] and act_update_every > 0:
                 assert act_target is not None
                 c_acc[0] = c_acc[0] + ((S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0))
@@ -542,7 +577,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                     c_acc[0], c_acc[1] = np.zeros(K), 0
             Dk = W if D is None else D
             Y = target(X, P)
-            R = Y - S @ Dk - dec0[0]                           # residual
+            Sn = S + rng.normal(0.0, output_noise, S.shape) if output_noise > 0 else S
+            R = Y - Sn @ Dk - dec0[0]                          # residual
             if use_d0:
                 dec0[0] = dec0[0] + lr * R.mean(axis=0)
             Rw = R if predict_frames else R * wcol             # lag-weighted residual
@@ -551,7 +587,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             if D is None:
                 G = G + S.T @ Rw                               # tied: decoder role too
             else:
-                D = norm_rows(D + lr * (S.T @ Rw) / n)
+                D = norm_rows(D + lr * (Sn.T @ Rw) / n)
             V = strf_step(V, step(G.reshape(K, C, L)), n)
             b = bias_step(b, gZ, S, n)
             w = 1.0 if predict_frames else wcol
@@ -559,7 +595,31 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
             act += float(np.mean(Z > 0))
             alive |= (Z > 0).any(axis=0)
             act_unit += (Z > 0).mean(axis=0)
-        if auglag and al_on[0]:
+        outer_done = False
+        if al_exact and auglag and al_on[0]:
+            assert act_target is not None
+            cbar = soft_unit / len(cochs) - act_target   # full-data violation, this epoch
+            obj = err / len(cochs) + float(np.mean(lam * cbar + 0.5 * mu_al[0] * cbar ** 2))
+            al_st["inner"] += 1
+            if obj < al_st["best"] * (1.0 - al_inner_tol):
+                al_st["best"], al_st["stale"] = obj, 0
+            else:
+                al_st["stale"] += 1
+            if ((al_st["inner"] >= al_inner_min and al_st["stale"] >= 1)
+                    or al_st["inner"] >= al_inner_max):
+                lam = lam + mu_al[0] * cbar
+                viol = float(np.linalg.norm(cbar))
+                grew = viol > 0.25 * mu_al[1]
+                if grew:
+                    mu_al[0] = min(mu_al[0] * al_mu_growth, act_mu_max)
+                mu_al[1] = viol
+                al_st["outer"] += 1
+                log(f"  AL outer {al_st['outer']} after {al_st['inner']} inner epochs: "
+                    f"rms violation {viol / np.sqrt(K):.3g}, lambda median "
+                    f"{np.median(lam):.3g}, mu {mu_al[0]:.3g}{' (grown)' if grew else ''}")
+                al_st.update(inner=0, best=np.inf, stale=0)
+                outer_done = True
+        elif auglag and al_on[0]:
             assert act_target is not None
             cbar = soft_unit / len(cochs) - act_target   # epoch-mean violation per unit
             if act_update_every > 0:                     # flush the remaining bouts
@@ -578,7 +638,9 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         f_unit = soft_unit / len(cochs) if rate_mode else act_unit / len(cochs)
         act_ok = (act_target is None
                   or float(np.mean(np.abs(f_unit - act_target) <= 0.5 * act_target)) >= 0.9)
-        if val_cochs is not None and act_ok and beta_now[0] is None:
+        es_epoch = (not al_exact) or outer_done          # exact AL: per outer iteration
+        if (val_cochs is not None and act_ok and es_epoch
+                and (beta_now[0] is None or no_anneal)):
             if ve < best[0] - min_delta:
                 best, stale = (ve, V.copy(), b.copy(), None if D is None else D.copy(), ep), 0
             else:
@@ -591,6 +653,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 sp[0] = min(sp[0] * softplus_growth, softplus_hold)
                 if sp[0] >= softplus_hold:
                     sp[1] = "hold"
+            elif sp[1] == "hold" and no_anneal:
+                pass                                     # keep the softplus indefinitely
             elif sp[1] == "hold" and not act_ok:
                 sp[2], sp[3] = np.inf, 0                 # constraint unmet: keep holding
             elif sp[1] == "hold":
@@ -610,7 +674,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                      "best_V": best[1], "best_b": best[2], "best_epoch": best[4],
                      "rng_state": json.dumps(rng.bit_generator.state), "lam": lam,
                      "mu_al": mu_al[0], "viol_prev": mu_al[1], "sp_beta": sp[0],
-                     "sp_phase": sp[1], "sp_best": sp[2], "sp_stale": sp[3]}
+                     "sp_phase": sp[1], "sp_best": sp[2], "sp_stale": sp[3],
+                     "al_c_est": al_st["c_est"],
+                     "al_state": json.dumps({k: (float(v) if k == "best" else int(v))
+                                             for k, v in al_st.items() if k != "c_est"})}
             if D is not None:
                 state |= {"D": D, "best_D": best[3]}
             checkpoint(state)

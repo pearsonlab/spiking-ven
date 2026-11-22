@@ -123,6 +123,11 @@ def main() -> None:
                    help="ramp beta up to this value, hold until held-out error plateaus, then "
                         "anneal slowly to the ReLU")
     p.add_argument("--softplus-hold-patience", type=int, default=5)
+    p.add_argument("--input-noise", type=float, default=0.0,
+                   help="std of Gaussian noise added to each unit's input before the "
+                        "nonlinearity during training (sqrt(0.1) on normalised input = SNR 10)")
+    p.add_argument("--act-update-every", type=int, default=0,
+                   help="update the activity multipliers every N bouts (0 = once per epoch)")
     p.add_argument("--softplus-anneal", type=float, default=1.15,
                    help="per-epoch beta growth after the plateau")
     p.add_argument("--act-dual-lr", type=float, default=1e-3,
@@ -210,7 +215,8 @@ def main() -> None:
                               unit_norm_strf=a.unit_norm_strf, input_scale=in_scale,
                               softplus_hold=a.softplus_hold,
                               softplus_hold_patience=a.softplus_hold_patience,
-                              softplus_anneal=a.softplus_anneal)
+                              softplus_anneal=a.softplus_anneal, input_noise=a.input_noise,
+                              act_update_every=a.act_update_every)
     W = V.reshape(a.k, -1)
     b = b.reshape(-1, 1)
     mu = mu.reshape(-1, 1)

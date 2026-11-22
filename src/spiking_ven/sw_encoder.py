@@ -142,7 +142,8 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                softplus_growth: float = 1.25, softplus_beta_max: float = 3000.0,
                act_warmup: int = 3, unit_norm_strf: bool = False,
                input_scale: float = 1.0, softplus_hold: float | None = None,
-               softplus_hold_patience: int = 5, softplus_anneal: float = 1.15):
+               softplus_hold_patience: int = 5, softplus_anneal: float = 1.15,
+               input_noise: float = 0.0, act_update_every: int = 0):
     """The causal encoder's learning rule (``causal_filters.learn``) with ISTA replaced by a
     ReLU: a rectified autoencoder whose encoder kernels ``V`` are the STRFs.
 
@@ -254,7 +255,17 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
     ``softplus_hold``: three phases instead -- ramp beta up to ``softplus_hold``, hold it
     there until the activity constraint is met AND the held-out error has plateaued (no
     improvement by ``min_delta`` for ``softplus_hold_patience`` epochs), then anneal slowly
-    (x ``softplus_anneal`` per epoch) to the ReLU."""
+    (x ``softplus_anneal`` per epoch) to the ReLU.
+
+    ``input_noise``: std of Gaussian noise added to each unit's input before the
+    nonlinearity, fresh every frame, during training only (held-out error is noise-free).
+    Fixed in absolute terms (e.g. sqrt(0.1) on normalised input = SNR 10 for a unit-norm
+    STRF at gain 1), so shrinking a unit's gain lowers its SNR and costs reconstruction --
+    the collapse to a flat, low-rate output no longer pays (Karklin & Simoncelli).
+
+    ``act_update_every`` = N > 0: in the augmented-Lagrangian modes, update the multipliers
+    every N bouts (lambda += mu * sum of the per-bout violations / bouts per epoch, so the
+    per-epoch change is unchanged) instead of once per epoch."""
     from .causal_filters import _past_windows, _roughness_grad, min_phase
 
     if basis is not None:
@@ -332,11 +343,13 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         sg = 0.5 * (1.0 + np.tanh(0.5 * u))                # sigmoid(beta z), overflow-safe
         return np.logaddexp(0.0, u) / bta, sg, sg
 
-    def conv_pass(X, P, V, b, D):
+    def conv_pass(X, P, V, b, D, noise=False):
         """Convolutional reconstruction of bout X: (Z, S, F, Y, E) with F the future-code
         windows (T, K*M), Y the centred frames (T, C) and E = Y - F @ D (T, C)."""
         T = X.shape[1]
         Z = P @ V.reshape(K, C * L).T + b
+        if noise and input_noise > 0:
+            Z = Z + rng.normal(0.0, input_noise, Z.shape)
         S = nl(Z)[0]
         Sp = np.concatenate([S, np.zeros((M, K))], axis=0)
         F = np.stack([Sp[m:m + T] for m in range(1, M + 1)], axis=2).reshape(T, K * M)
@@ -477,13 +490,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         err, act, alive = 0.0, 0.0, np.zeros(K, dtype=bool)
         act_unit = np.zeros(K)
         soft_unit = np.zeros(K)
+        c_acc: list[Any] = [np.zeros(K), 0]              # violations since last lambda update
         for X in [cochs[i] for i in rng.permutation(len(cochs))]:
             T = X.shape[1]
             P = (_past_windows(X, L) - mu) / input_scale       # (T, C*L)
             n = max(T, 1)
             if M:
                 assert D is not None                   # conv decoder is always untied
-                Z, S, F, Y, E = conv_pass(X, P, V, b, D)
+                Z, S, F, Y, E = conv_pass(X, P, V, b, D, noise=True)
                 gZ_input[0] = Z - b
                 # -dLoss/dr_k(t) = sum_m D_k(m) . e_{t-m} - code_l1 (residual over the past)
                 Ep = np.concatenate([np.zeros((M, C)), E], axis=0)
@@ -492,6 +506,14 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 gZ = (Ew.reshape(T, M * C) @ D.T - code_l1) * dS + cost_grad(Z, dS, on)
                 soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
                               if auglag else on.mean(axis=0))
+                if auglag and al_on[0] and act_update_every > 0:
+                    assert act_target is not None
+                    c_acc[0] = c_acc[0] + ((S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0))
+                                           - act_target)
+                    c_acc[1] += 1
+                    if c_acc[1] >= act_update_every:
+                        lam = lam + mu_al[0] * c_acc[0] / len(cochs)
+                        c_acc[0], c_acc[1] = np.zeros(K), 0
                 D = norm_rows(D + lr * (F.T @ E).reshape(K, M * C) / n)
                 if use_d0:
                     dec0[0] = dec0[0] + lr * E.mean(axis=0)
@@ -504,10 +526,20 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
                 continue
             W = V.reshape(K, C * L)
             Z = P @ W.T + b
+            if input_noise > 0:
+                Z = Z + rng.normal(0.0, input_noise, Z.shape)
             gZ_input[0] = Z - b
             S, dS, on = nl(Z)                                  # (T, K)
             soft_unit += (S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0)
                           if auglag else on.mean(axis=0))
+            if auglag and al_on[0] and act_update_every > 0:
+                assert act_target is not None
+                c_acc[0] = c_acc[0] + ((S.mean(axis=0) if rate_mode else (Z > 0).mean(axis=0))
+                                       - act_target)
+                c_acc[1] += 1
+                if c_acc[1] >= act_update_every:
+                    lam = lam + mu_al[0] * c_acc[0] / len(cochs)
+                    c_acc[0], c_acc[1] = np.zeros(K), 0
             Dk = W if D is None else D
             Y = target(X, P)
             R = Y - S @ Dk - dec0[0]                           # residual
@@ -530,7 +562,10 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         if auglag and al_on[0]:
             assert act_target is not None
             cbar = soft_unit / len(cochs) - act_target   # epoch-mean violation per unit
-            lam = lam + mu_al[0] * cbar
+            if act_update_every > 0:                     # flush the remaining bouts
+                lam = lam + mu_al[0] * c_acc[0] / len(cochs)
+            else:
+                lam = lam + mu_al[0] * cbar
             viol = float(np.linalg.norm(cbar))
             # grow mu only while the violation is still large (rms > 10% of the target);
             # growing it on the residual oscillation amplifies the oscillation

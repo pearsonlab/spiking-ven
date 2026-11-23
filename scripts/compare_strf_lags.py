@@ -42,6 +42,8 @@ def main() -> None:
     p.add_argument("--labels", nargs="+", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--basis", default=None, metavar="LO,HI,N",
+                   help="the --tm-basis used; draws a random STRF's profile as reference")
     a = p.parse_args()
     if len(a.labels) != len(a.files):
         raise SystemExit("one label per file")
@@ -59,12 +61,22 @@ def main() -> None:
         name = f"{lab} ({note}, {E.shape[0]} units)"
         ax1.fill_between(lag, q25, q75, color=c, alpha=0.18, lw=0)
         ax1.plot(lag, q50, color=c, lw=2, label=name)
-        ax1.annotate(lab, (lag[0], q50[0]), xytext=(4, 0), textcoords="offset points",
-                     color="0.25", fontsize=9, va="center")
         x = np.sort(mean_lag)
         ax2.step(x, np.arange(1, x.size + 1) / x.size, where="post", color=c, lw=2,
                  label=f"{lab}: median {np.median(mean_lag):.1f} ms, "
                        f"<=20 ms {np.median(early):.0%}")
+    if a.basis:
+        # A random STRF in the basis span: expected energy per lag is the projector's
+        # diagonal. This is what the basis alone favours, before any learning.
+        from spiking_ven.sw_encoder import tm_basis
+
+        lo, hi, nb = a.basis.split(",")
+        B = tm_basis(np.geomspace(float(lo), float(hi), int(nb)), L, frame_ms)
+        d = np.diag(B.T @ np.linalg.solve(B @ B.T, B))[::-1]
+        d = d / d.sum()
+        ax1.plot(lag, d, color="0.45", lw=1.5, ls="--", label="random STRF in basis")
+        ax2.axvline(d @ lag, color="0.45", lw=1.5, ls="--",
+                    label=f"random STRF in basis: {d @ lag:.1f} ms")
     ax1.set(xlabel="lag (ms, 0 = newest frame)", ylabel="share of STRF energy per frame",
             title="temporal energy profile (median, IQR)")
     ax2.set(xlabel="energy-weighted mean lag (ms)", ylabel="fraction of units",

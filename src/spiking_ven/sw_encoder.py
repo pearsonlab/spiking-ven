@@ -90,13 +90,35 @@ def train_autoencoder(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 1500,
     return W, b, D, d0, mu, scale
 
 
+def _window_mean_var(cochs, L: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per-element mean and variance, ``(C*L,)`` each, of the strictly-past windows of every
+    cochleagram in ``cochs``.
+
+    Two passes over the segments, one at a time, so memory stays at one segment's windows
+    rather than the whole corpus's (``T x C*L`` float64: ~12 GB for 38 min at 500 Hz, 40 x
+    32). Equal to ``np.concatenate(windows).mean(0)`` / ``.var(0)`` up to rounding.
+    """
+    from .causal_filters import _past_windows
+
+    n = 0
+    s = None
+    for X in cochs:
+        P = _past_windows(X, L)
+        s = P.sum(axis=0) if s is None else s + P.sum(axis=0)
+        n += P.shape[0]
+    if s is None or n == 0:
+        raise ValueError("no frames in cochs")
+    mu = s / n
+    ss = np.zeros_like(mu)
+    for X in cochs:
+        ss += ((_past_windows(X, L) - mu) ** 2).sum(axis=0)
+    return mu, ss / n
+
+
 def window_scale(cochs, L: int) -> float:
     """RMS per-element std of the centred strictly-past windows of a corpus (a global input
     normalisation: dividing by it gives a random unit-norm STRF output variance ~1)."""
-    from .causal_filters import _past_windows
-
-    P = np.concatenate([_past_windows(X, L) for X in cochs], axis=0)
-    return float(np.sqrt(np.mean(P.var(axis=0))))
+    return float(np.sqrt(np.mean(_window_mean_var(cochs, L)[1])))
 
 
 def tm_basis(taus_ms, L: int, frame_ms: float = 2.0) -> np.ndarray:
@@ -329,7 +351,7 @@ def learn_relu(cochs, *, K: int = 128, L: int = 32, n_epochs: int = 80, lr: floa
         reg_lr = lr
     C = cochs[0].shape[0]
     rng = np.random.default_rng(seed)
-    mu = np.concatenate([_past_windows(X, L) for X in cochs], axis=0).mean(axis=0)
+    mu = _window_mean_var(cochs, L)[0]
     V = rng.standard_normal((K, C, L))
     V /= np.linalg.norm(V.reshape(K, -1), axis=1)[:, None, None]
     V *= init_scale

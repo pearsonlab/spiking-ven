@@ -179,10 +179,22 @@ def main() -> None:
         d = np.load(a.train_corpus, allow_pickle=False)
         if int(d["sr"]) != sr:
             raise ValueError(f"{a.train_corpus}: sr {int(d['sr'])} != motifs' {sr}")
+        # A prescaled corpus (build_colony_corpus.py) carries one calibrated gain for all of
+        # its audio; normalising each segment to CAUSAL_RMS_REF would raise quiet room noise
+        # to song level, so its level is used as is.
+        prescaled = "prescaled" in d.files and bool(d["prescaled"])
+        if prescaled and not np.isclose(float(d["rms_ref"]), CAUSAL_RMS_REF):
+            raise ValueError(f"{a.train_corpus} was scaled for rms_ref {float(d['rms_ref'])}, "
+                             f"not CAUSAL_RMS_REF {CAUSAL_RMS_REF}")
+        if prescaled:
+            print(f"prescaled corpus: {float(d['ref_spl_db']):.0f} dB SPL -> RMS "
+                  f"{CAUSAL_RMS_REF}; no per-segment normalisation")
         train, val = [], []
+        # Each segment gets its own cochleagram: segments are never joined.
         for s0, n0, held in zip(d["starts"], d["lengths"], d["val"]):
             x = d["audio"][s0:s0 + n0].astype(np.float64)
-            x = x / max(float(np.sqrt(np.mean(x ** 2))), 1e-12) * CAUSAL_RMS_REF
+            if not prescaled:
+                x = x / max(float(np.sqrt(np.mean(x ** 2))), 1e-12) * CAUSAL_RMS_REF
             c = cochleagram(x, sr, n_channels=cp["n_channels"], frame_rate=cp["frame_rate"],
                             lo_hz=cp["lo_hz"], hi_hz=cp["hi_hz"]).astype(np.float64)
             if c.shape[1] > a.l_frames:

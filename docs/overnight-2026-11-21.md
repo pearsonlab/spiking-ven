@@ -178,3 +178,41 @@ Same 11 encoders, same network settings, linear instead of squared normalisation
   window, but weakly (+6-10 Hz vs ~20 Hz).
 - Baseline config now points at the linear-normalisation baseline network; its cancellation
   results have not been re-measured.
+
+## 2026-11-23: where each STRF model succeeds / fails downstream (linear normalisation)
+
+Cancellation: `cancellation_check.py`, single template, 20 trials (figures
+`outputs/canc_lin_<NAME>.png`, grid `outputs/canc_lin_grid.png`). Baseline pooled over 38
+renditions: flatness 55% (10-90% 50-60%), cancelled vs not singing 105% (squared network
+was 53% / 107%), so linear normalisation does not cost cancellation.
+
+Marks: DAF size ✓ >=15 Hz, ~ 10-15, ✗ <10 (fixed-onset max). Latency ✓ first peak in
+35-75 ms. Tail ✓ <=0.15 of max, ~ <=0.25, ✗ >0.25 (worse of fixed/random). Cancelled ✓
+>=55%, ~ 50-55, ✗ <50. Time-locked ✓ >=45%, ~ 40-45, ✗ <40.
+
+| model | STRF (≤20 ms / dup / dead) | DAF size | DAF latency | DAF tail | cancelled | time-locked | flatness | cancellation figure |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 51% / 111 / 7 ✗ | ✓ +30 | ✗ 24 ms (random 74) | ✓ .06 | ✓ 55% | ✓ 47% | 51% | big sparse song peaks; aligned keeps residual peaks (e.g. 530 ms) |
+| A conv32 | 66% / 12 / 1 | ✓ +22 | ✗ 24 | ✗ .28 | ✗ 49% | ~ 40% | 49% | like baseline; residual aligned peaks |
+| B conv16 L2 | 96% / 13 / 0 ✓ | ✓ +25 | ✗ 24 | ✗ .26 | ~ 51% | ~ 43% | 47% | like baseline |
+| C TM8 conv16 L2 | 96% / 13 / 0 ✓ | ✓ +23 | ✗ 24 | ~ .23 | ✗ 48% | ✗ 39% | 45% | like baseline |
+| D TM8 win r0.5 | 42% / 8 / 0 | ~ +13 | ✓ 45 | ~ .22 | ~ 53% | ✗ 38% | 52% | dense comb of small peaks; aligned flat-ish |
+| E TM16 win r0.5 | 31% / 11 / 9 | ~ +10 | ✓ 56 | ✗ .30 | ~ 50% | ✗ 32% | 49% | dense comb; shifted ≈ aligned |
+| F TM16 win r0.25 | 26% / 36 / 8 | ~ +10 | ✓ 52 | ✗ .41 | ✓ 59% | ~ 41% | 53% | dense comb; aligned low |
+| G TM16 win r0.1 | 23% / 74 / 4 | ~ +10 | ✗ 34 (max 59) | ✗ .31 | ✓ 60% | ✓ 45% | 51% | dense comb; aligned low |
+| H restart+decorr | 40% / 19 / 0 | ~ +10 | ✓ 36 | ~ .25 | ~ 53% | ✗ 34% | 50% | dense comb |
+| I data init | 34% / 13 / 3 | ~ +12 | ✓ 42 | ✗ .28 | ~ 52% | ✗ 32% | 49% | dense comb |
+| J conv16 data init | 49% / 85 / 35 ✗ | ✓ +16 | ✗ 30 | ~ .16 | ✓ 60% | ~ 42% | 54% | dense comb; aligned lowest |
+
+- No model beats the baseline on everything. Baseline: strongest, cleanest single-hump DAF
+  and best time-locking, but the fixed-onset peak is early (24 ms) and its STRFs are long
+  and redundant.
+- Conv-reconstruction encoders (A-C) have the best STRFs but are worse downstream than the
+  baseline: same early peak, slow DAF tail, slightly less cancellation.
+- Rate-constrained window encoders (D-I) put the DAF peak in the 35-75 ms window but at a
+  third to half of the size, with long tails; cancellation similar, time-locking worse
+  (shifted HVC cancels nearly as well as aligned). Their song response is a dense comb of
+  small peaks rather than a few big ones, so there is less timing structure to learn.
+- J (worst STRFs: 35 dead units, 85 duplicates) has the best cancellation; cancellation
+  does not track STRF quality.
+- Single-template, 20-trial numbers; differences of a few % are probably within noise.

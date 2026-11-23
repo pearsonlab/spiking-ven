@@ -57,9 +57,9 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-from scipy.signal import bilinear_zpk, resample_poly, sosfilt, zpk2sos
+from scipy.signal import bilinear_zpk, butter, resample_poly, sosfilt, zpk2sos
 
-from spiking_ven.constants import CAUSAL_RMS_REF
+from spiking_ven.constants import CAUSAL_HI_HZ, CAUSAL_LO_HZ, CAUSAL_RMS_REF
 
 SETUPS = {
     # setup: (file stem, amplitude CSV, bird label, condition)
@@ -103,6 +103,36 @@ def fade(x: np.ndarray, sr: int, fade_ms: float) -> np.ndarray:
         y[:n] *= ramp
         y[-n:] *= ramp[::-1]
     return y
+
+
+def active_intervals(y: np.ndarray, sr: int, min_level_db: float, gap_ms: float,
+                     pad_ms: float, min_ms: float) -> list[tuple[int, int]]:
+    """Sample intervals of ``y`` whose 10 ms frame level (dB re full scale, in the
+    cochleagram band) is at least ``min_level_db``, built like the song corpus's bouts:
+    active frames less than ``gap_ms`` apart are merged, each run is padded by ``pad_ms``,
+    and runs shorter than ``min_ms`` (after padding) are dropped."""
+    sos = butter(4, [CAUSAL_LO_HZ, min(CAUSAL_HI_HZ, 0.95 * sr / 2)], "bandpass", fs=sr,
+                 output="sos")
+    z = sosfilt(sos, y)
+    n, hop = int(0.010 * sr), int(0.005 * sr)
+    if len(z) < n:
+        return []
+    f = np.lib.stride_tricks.sliding_window_view(z, n)[::hop]
+    on = np.flatnonzero(10 * np.log10(np.mean(f ** 2, axis=1) + 1e-20) >= min_level_db)
+    if on.size == 0:
+        return []
+    gap = int(round(gap_ms / 1000 * sr / hop))
+    breaks = np.flatnonzero(np.diff(on) > gap)
+    first = np.concatenate([[on[0]], on[breaks + 1]])
+    last = np.concatenate([on[breaks], [on[-1]]])
+    pad = int(round(pad_ms / 1000 * sr))
+    out = []
+    for a0, a1 in zip(first, last):
+        s0 = max(int(a0) * hop - pad, 0)
+        s1 = min(int(a1) * hop + n + pad, len(y))
+        if s1 - s0 >= min_ms / 1000 * sr:
+            out.append((s0, s1))
+    return out
 
 
 def timestamp(path: Path) -> dt.datetime:
@@ -160,6 +190,17 @@ def main(argv: list[str] | None = None) -> None:
                         "300 s segment took the trainer to 11 GB peak RSS vs 2.9 GB")
     p.add_argument("--fade-ms", type=float, default=10.0,
                    help="raised-cosine fade at each segment's start and end")
+    p.add_argument("--min-level-db", type=float, default=None,
+                   help="keep only active stretches: 10 ms frames (200-8000 Hz) at least this "
+                        "loud (dB re full scale, after the gain; the reference RMS is -20), "
+                        "merged and padded like the song corpus's bouts (default: keep all)")
+    p.add_argument("--gap-ms", type=float, default=200.0,
+                   help="with --min-level-db: merge active frames closer than this "
+                        "(build_song_corpus.py's bout gap)")
+    p.add_argument("--pad-ms", type=float, default=20.0,
+                   help="with --min-level-db: pad each active stretch by this much")
+    p.add_argument("--min-ms", type=float, default=100.0,
+                   help="with --min-level-db: drop stretches shorter than this")
     p.add_argument("--no-example", action="store_true",
                    help="leave out the long example_ excerpt")
     p.add_argument("--val-frac", type=float, default=0.1,
@@ -205,21 +246,31 @@ def main(argv: list[str] | None = None) -> None:
 
     g = gcd(a.sr, sr_in)
     min_n = a.sr  # drop split tails shorter than 1 s
-    audio, starts, lengths, val, source = [], [], [], [], []
+    audio, starts, lengths, val, source, seg_t0 = [], [], [], [], [], []
     pos = 0
+    total_n = 0
     for fi, (f, x) in enumerate(zip(files, sigs)):
         y = resample_poly(x, a.sr // g, sr_in // g) * gain
-        seg_n = len(y) if not a.max_segment_sec else int(round(a.max_segment_sec * a.sr))
-        for s0 in range(0, len(y), seg_n):
-            seg = fade(y[s0:s0 + seg_n], a.sr, a.fade_ms).astype(np.float32)
-            if len(seg) < min_n and s0 > 0:
-                continue
-            audio.append(seg)
-            starts.append(pos)
-            lengths.append(len(seg))
-            val.append(fi in val_files)
-            source.append(f.name)
-            pos += len(seg)
+        total_n += len(y)
+        spans = ([(0, len(y))] if a.min_level_db is None else
+                 active_intervals(y, a.sr, a.min_level_db, a.gap_ms, a.pad_ms, a.min_ms))
+        for b0, b1 in spans:
+            seg_n = b1 - b0 if not a.max_segment_sec else int(round(a.max_segment_sec * a.sr))
+            for s0 in range(b0, b1, seg_n):
+                seg = fade(y[s0:min(s0 + seg_n, b1)], a.sr, a.fade_ms).astype(np.float32)
+                if len(seg) < min_n and s0 > b0:
+                    continue
+                audio.append(seg)
+                starts.append(pos)
+                lengths.append(len(seg))
+                val.append(fi in val_files)
+                source.append(f.name)
+                seg_t0.append(s0 / a.sr)
+                pos += len(seg)
+    if a.min_level_db is not None:
+        print(f"active stretches (>= {a.min_level_db:g} dB, gap {a.gap_ms:g} ms, pad "
+              f"{a.pad_ms:g} ms): {len(audio)} segments, {pos / a.sr / 60:.1f} of "
+              f"{total_n / a.sr / 60:.1f} min kept ({pos / total_n:.0%})")
 
     out_audio = np.concatenate(audio)  # storage only: segments are read back separately
     lv = np.concatenate([frame_levels_db(s.astype(np.float64), a.sr) for s in audio])
@@ -236,7 +287,9 @@ def main(argv: list[str] | None = None) -> None:
              conditions=np.array([condition]), val=np.array(val), sr=a.sr,
              prescaled=True, gain_db=gain_db, dbfs_to_spl_db=offset,
              ref_spl_db=a.ref_spl_db, rms_ref=a.rms_ref, source=np.array(source),
-             setup=a.setup)
+             seg_t0=np.array(seg_t0), setup=a.setup,
+             min_level_db=np.nan if a.min_level_db is None else a.min_level_db,
+             gap_ms=a.gap_ms, pad_ms=a.pad_ms)
     print(f"{len(lengths)} segments ({sum(val)} held out, from {n_val} files), "
           f"{pos / a.sr / 60:.1f} min -> {out}")
 

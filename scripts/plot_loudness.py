@@ -59,13 +59,18 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--colony", required=True)
     p.add_argument("--song", required=True)
+    p.add_argument("--extra", nargs="*", default=[], metavar="LABEL=PATH",
+                   help="more corpora to overlay, e.g. 'colony >=-40 dB=outputs/x.npz'")
     p.add_argument("--out", required=True)
     p.add_argument("--events", default=None, help="also draw the loudest colony events here")
     p.add_argument("--n-events", type=int, default=12)
     a = p.parse_args()
 
     levels, meta = {}, {}
-    for name, path in (("colony", a.colony), ("song", a.song)):
+    corpora = [("colony", a.colony), ("song", a.song)] + [tuple(e.rsplit("=", 1)) for e in a.extra]
+    for k, (name, _) in enumerate(corpora[2:]):
+        COLORS[name] = ["#1baf7a", "#eda100", "#e87ba4"][k]   # categorical slots 3-5
+    for name, path in corpora:
         d, sr, pre, segs = segments(path)
         sos = butter(4, [CAUSAL_LO_HZ, min(CAUSAL_HI_HZ, 0.95 * sr / 2)], "bandpass", fs=sr,
                      output="sos")
@@ -121,6 +126,8 @@ def main() -> None:
         k = str(src[i])
         seg_t0.append(seen.get(k, 0.0))
         seen[k] = seen.get(k, 0.0) + n0 / sr
+    if "seg_t0" in d.files:                 # recorded by the builder (exact, with gating)
+        seg_t0 = [float(t) for t in d["seg_t0"]]
     hop = 0.005
     cand = sorted(((lv, i, j) for i, f in enumerate(per) for j, lv in enumerate(f)), reverse=True)
     picks: list[tuple[float, int, float]] = []

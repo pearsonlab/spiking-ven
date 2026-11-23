@@ -4,9 +4,10 @@
 
 Accepts what ``plot_strfs.py`` accepts. Picks ``--n`` live units spread evenly across
 preferred frequency (as ``plot_strfs.py`` does) and draws them in a grid with real axes:
-lag in ms (0 = newest frame, at the right) and channel centre frequency in kHz. Each panel
-has its own symmetric colour scale (red excitatory, blue suppressive) and is titled with
-the unit's energy-weighted mean lag.
+lag in ms (0 = newest frame, at the right) and channel centre frequency in kHz. All panels
+share one symmetric colour scale (red excitatory, blue suppressive): the largest |weight|
+among the plotted units, or ``--vmax`` (pass the same value to several figures to compare
+them). Each panel is titled with the unit's energy-weighted mean lag.
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ def main() -> None:
     p.add_argument("--n", type=int, default=32)
     p.add_argument("--cols", type=int, default=8)
     p.add_argument("--sr", type=int, default=16000)
+    p.add_argument("--vmax", type=float, default=None,
+                   help="shared colour limit (default: largest |weight| among plotted units)")
     a = p.parse_args()
 
     V, fm, note = load_strfs(a.file)
@@ -55,15 +58,15 @@ def main() -> None:
     fig, axes = plt.subplots(rows, a.cols, figsize=(a.cols * 1.6, rows * 1.75 + 0.6),
                              sharex=True, sharey=True, squeeze=False)
     yt = [i for i in range(C) if i % 10 == 0] + [C - 1]
+    v = a.vmax if a.vmax else (float(np.abs(V[pick]).max()) or 1.0)
+    im = None
     for j, ax in enumerate(axes.flat):
         if j >= len(pick):
             ax.axis("off")
             continue
         k = pick[j]
-        w = V[k]
-        v = float(np.abs(w).max()) or 1.0
-        ax.imshow(w, aspect="auto", origin="lower", cmap="RdBu_r", vmin=-v, vmax=v,
-                  extent=(-L * fm, 0, -0.5, C - 0.5), interpolation="nearest")
+        im = ax.imshow(V[k], aspect="auto", origin="lower", cmap="RdBu_r", vmin=-v, vmax=v,
+                       extent=(-L * fm, 0, -0.5, C - 0.5), interpolation="nearest")
         ax.set_title(f"unit {k}: {mlag[k]:.0f} ms", fontsize=7, pad=2)
         ax.tick_params(labelsize=6, length=2)
         ax.set_yticks(yt)
@@ -76,9 +79,12 @@ def main() -> None:
     med = float(np.median(mlag[live]))
     fig.suptitle(f"{title} ({note}): {len(pick)} of {len(live)} units, spread over "
                  f"preferred frequency; median mean lag {med:.1f} ms. "
-                 "Red excitatory, blue suppressive; own scale per panel",
+                 f"Red excitatory, blue suppressive; one scale, |w| <= {v:.3g}",
                  x=0.01, ha="left", fontsize=9)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.tight_layout(rect=(0, 0, 0.94, 0.97))
+    if im is not None:
+        cax = fig.add_axes((0.955, 0.25, 0.01, 0.5))
+        fig.colorbar(im, cax=cax).ax.tick_params(labelsize=6)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150)
     print("wrote", a.out)

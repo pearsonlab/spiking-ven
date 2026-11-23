@@ -216,3 +216,7 @@ Marks: DAF size ✓ >=15 Hz, ~ 10-15, ✗ <10 (fixed-onset max). Latency ✓ fir
 - J (worst STRFs: 35 dead units, 85 duplicates) has the best cancellation; cancellation
   does not track STRF quality.
 - Single-template, 20-trial numbers; differences of a few % are probably within noise.
+- Caveat: the network (aud gain, normalisation sigma, I_HVC plasticity, etc.) was tuned on
+  the baseline encoder, so the comparison is biased toward it. A fair comparison needs at
+  least the auditory drive matched per encoder (e.g. aud gain / norm sigma set so the
+  no-HVC song response and DAF responder count match the baseline) before scoring.
